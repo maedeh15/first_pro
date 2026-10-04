@@ -123,6 +123,13 @@ _arg_parser.add_argument("--workers", type=int, default=None,
                                "re-run, to avoid the concurrent-memory-pressure OOM seen with "
                                "N_WORKERS=6 on the full 26-subject run). Omit to use the default "
                                "N_WORKERS defined below (unchanged behavior).")
+_arg_parser.add_argument("--fnirs-grid-bbox", type=str, default="own", choices=["own", "eeg"],
+                          help="priority-GRIDALIGN: bounding box of the fNIRS 16x16 grid. 'own' "
+                               "(default, prior behavior bit-for-bit) = min/max of the fNIRS "
+                               "channels' own projected coordinates. 'eeg' = the EEG grid's box, "
+                               "so the same scalp point lands in the same (h,w) cell in both "
+                               "modalities. 'eeg' writes to a SEPARATE output folder "
+                               "(<OUTPUT_PATH>_fnirsbboxEEG) and never touches the baseline data.")
 _cli_args, _ = _arg_parser.parse_known_args()
 
 # ============================================================================
@@ -172,6 +179,15 @@ if _cli_args.workers is not None:
 # ============================================================================
 BASE_DATASET_PATH = r"E:\kntu\Thesis\codes\DATA"            # folder holding VPxxx-EEG / VPxxx-NIRS
 OUTPUT_PATH = r"E:\kntu\Thesis\codes\Results\TSFNET_PAPER_EXACT_nback"
+# priority-GRIDALIGN: inputs that the pipeline READS BACK (currently only the
+# subject-specific EOG-threshold JSON) always come from the baseline folder.
+# Otherwise an alternative output folder would silently fall back to the
+# default EOG threshold, change which ICA components are removed, and change
+# the EEG -- turning a fNIRS-only ablation into a two-variable one.
+BASELINE_OUTPUT_PATH = OUTPUT_PATH
+FNIRS_GRID_BBOX = _cli_args.fnirs_grid_bbox
+if FNIRS_GRID_BBOX != "own":
+    OUTPUT_PATH = OUTPUT_PATH + "_fnirsbbox" + FNIRS_GRID_BBOX.upper()
 
 # NOTE (confirmed from Dataset_description_MATLAB.pdf / Shin et al. 2018, Sci Data): 26 subjects,
 # 3 sessions/subject, 9 trials/session (3 repeats x 0-/2-/3-back, counterbalanced order) -> 27
@@ -628,12 +644,8 @@ def fnirs_bandpass(data, fs, low=FNIRS_BP_LOW, high=FNIRS_BP_HIGH, order=FNIRS_B
 # SPATIAL MAPPING: azimuthal equidistant projection + cubic interpolation
 # (paper Sec. 2.3) — shared by EEG and fNIRS
 # ============================================================================
-def spatial_mapping(data, pos_3d, grid_size=GRID_SIZE):
-    """
-    data:    (n_samples, n_channels)
-    pos_3d:  (3, n_channels) real 3D sensor positions
-    returns: (n_samples, grid_size, grid_size) float32
-    """
+def _azimuthal_projection(pos_3d):
+    """Azimuthal-equidistant projection of (3, n_channels) positions -> (x, y)."""
     x3d, y3d, z3d = pos_3d[0], pos_3d[1], pos_3d[2]
     r = np.sqrt(x3d ** 2 + y3d ** 2 + z3d ** 2)
     r_safe = np.where(r > 0, r, 1.0)
@@ -641,10 +653,34 @@ def spatial_mapping(data, pos_3d, grid_size=GRID_SIZE):
     phi = np.arctan2(y3d, x3d)                            # azimuthal angle
     x_coords = theta * np.cos(phi)                        # azimuthal-equidistant projection
     y_coords = theta * np.sin(phi)
+    return x_coords, y_coords
+
+
+def projected_bbox(pos_3d):
+    """(xmin, xmax, ymin, ymax) of the projected positions -- exactly the box
+    spatial_mapping() uses by default for these positions."""
+    x_coords, y_coords = _azimuthal_projection(pos_3d)
+    return (min(x_coords), max(x_coords), min(y_coords), max(y_coords))
+
+
+def spatial_mapping(data, pos_3d, grid_size=GRID_SIZE, bbox=None):
+    """
+    data:    (n_samples, n_channels)
+    pos_3d:  (3, n_channels) real 3D sensor positions
+    bbox:    priority-GRIDALIGN. None (default) = the box of THIS modality's own
+             projected positions (prior behavior, bit-for-bit). Otherwise an
+             (xmin, xmax, ymin, ymax) tuple -- e.g. projected_bbox(eeg_pos_3d)
+             to put the fNIRS grid in the EEG grid's coordinate frame.
+    returns: (n_samples, grid_size, grid_size) float32
+    """
+    x_coords, y_coords = _azimuthal_projection(pos_3d)
+    if bbox is None:
+        bbox = (min(x_coords), max(x_coords), min(y_coords), max(y_coords))
+    xmin, xmax, ymin, ymax = bbox
 
     grid_x, grid_y = np.mgrid[
-        min(x_coords):max(x_coords):complex(0, grid_size),
-        min(y_coords):max(y_coords):complex(0, grid_size),
+        xmin:xmax:complex(0, grid_size),
+        ymin:ymax:complex(0, grid_size),
     ]
     points = np.column_stack((x_coords, y_coords))
 
@@ -736,7 +772,7 @@ def get_fnirs_positions(ch_names, mnt_struct):
 # EOG THRESHOLD OVERRIDE (optional, produced by qc_eog_threshold_validation.py)
 # ============================================================================
 DEFAULT_EOG_THRESHOLD = 2.0
-_EOG_THRESHOLD_CONFIG_PATH = os.path.join(OUTPUT_PATH, "subject_specific_eog_thresholds.json")
+_EOG_THRESHOLD_CONFIG_PATH = os.path.join(BASELINE_OUTPUT_PATH, "subject_specific_eog_thresholds.json")  # priority-GRIDALIGN: never the alternative folder
 _EOG_THRESHOLD_CONFIG = None   # lazy-loaded once per process
 
 
@@ -1223,7 +1259,7 @@ def preprocess_eeg(raw, subject_id, qc_dir):
 # ============================================================================
 # fNIRS PREPROCESSING (paper Sec. 2.2)
 # ============================================================================
-def preprocess_fnirs(subject_id, qc_dir):
+def preprocess_fnirs(subject_id, qc_dir, grid_bbox=None):
     oxy_raw, deoxy_raw, sfreq_raw, mnt_struct, ch_names, ev_time, ev_code = load_fnirs_data(subject_id)
 
     if DATASET_ALREADY_BEER_LAMBERT:
@@ -1310,8 +1346,8 @@ def preprocess_fnirs(subject_id, qc_dir):
                 f"HbO={float(np.mean(hbo_rs_norm.std(axis=0))):.6g}, "
                 f"HbR={float(np.mean(hbr_rs_norm.std(axis=0))):.6g})")
 
-    hbo_mapped = spatial_mapping(hbo_rs_norm, pos_3d)   # (n_samples, 16, 16), normalized
-    hbr_mapped = spatial_mapping(hbr_rs_norm, pos_3d)
+    hbo_mapped = spatial_mapping(hbo_rs_norm, pos_3d, bbox=grid_bbox)   # (n_samples, 16, 16), normalized
+    hbr_mapped = spatial_mapping(hbr_rs_norm, pos_3d, bbox=grid_bbox)
 
     # priority-G2a: optional third chromophore channel, total haemoglobin
     # HbT = HbO + HbR (MSTFDN feeds all three; this project has only fed two).
@@ -1333,7 +1369,7 @@ def preprocess_fnirs(subject_id, qc_dir):
         hbt_mean = hbt_rs.mean(axis=0, keepdims=True)
         hbt_std = hbt_rs.std(axis=0, keepdims=True) + 1e-8
         hbt_rs_norm = (hbt_rs - hbt_mean) / hbt_std
-        hbt_mapped = spatial_mapping(hbt_rs_norm, pos_3d)
+        hbt_mapped = spatial_mapping(hbt_rs_norm, pos_3d, bbox=grid_bbox)
         log_message(f"  {subject_id}: added HbT channel (priority-G2a) "
                     f"(sanity check, mean per-channel std AFTER norm, should be ~1.0: "
                     f"HbT={float(np.mean(hbt_rs_norm.std(axis=0))):.6g})")
@@ -1970,7 +2006,15 @@ def process_subject(subject_id):
         eeg_pos_3d = get_eeg_positions(filtered, eeg_mnt_struct)
         n_eeg_channels_used = eeg_pos_3d.shape[1]   # real record of how many channels actually went into spatial_mapping()
 
-        fnirs_grid, fnirs_ev_time, fnirs_ev_code = preprocess_fnirs(subject_id, sub_out_dir)
+        # priority-GRIDALIGN: 'eeg' maps fNIRS into the box of the EXACT EEG
+        # positions that go into this subject's EEG grid (eeg_pos_3d above).
+        _fnirs_bbox = projected_bbox(eeg_pos_3d) if FNIRS_GRID_BBOX == "eeg" else None
+        if _fnirs_bbox is not None:
+            log_message(f"  {subject_id}: fNIRS grid uses the EEG bounding box "
+                        f"x=[{_fnirs_bbox[0]:.4f},{_fnirs_bbox[1]:.4f}] "
+                        f"y=[{_fnirs_bbox[2]:.4f},{_fnirs_bbox[3]:.4f}] (priority-GRIDALIGN)")
+        fnirs_grid, fnirs_ev_time, fnirs_ev_code = preprocess_fnirs(subject_id, sub_out_dir,
+                                                                    grid_bbox=_fnirs_bbox)
         log_message(f"  {subject_id}: fNIRS preprocessed, shape {fnirs_grid.shape}")
 
         eeg_windows, fnirs_windows, labels, session_ids, trial_ids, eeg_channel_space_final = extract_windows(
@@ -2033,6 +2077,7 @@ def process_subject(subject_id):
             "fnirs_shape": list(fnirs_windows.shape),
             "labels_distribution": np.bincount(labels).tolist(),
             "window_len_eeg_s": WINDOW_LEN_EEG,
+            "fnirs_grid_bbox": FNIRS_GRID_BBOX,                   # priority-GRIDALIGN
             "window_len_fnirs_segment_s": WINDOW_LEN_FNIRS_SEGMENT,
             "autoreject_windows_enabled": ENABLE_AUTOREJECT_WINDOWS,
             "autoreject_min_windows_threshold": AUTOREJECT_MIN_WINDOWS,

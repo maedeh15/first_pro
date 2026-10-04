@@ -309,6 +309,12 @@ _arg_parser.add_argument("--mhs-lambda", type=float, default=0.0,
                                "treat as a starting point, not a transferred optimum). Default "
                                "0.0 disables it and reproduces prior behavior bit-for-bit "
                                "(see tsfnet_loss's mhs_lambda docstring for why).")
+_arg_parser.add_argument("--data-root", type=str, default=None,
+                          help="priority-GRIDALIGN: folder holding the preprocessed VP001..VP026 "
+                               "data (results_* folders are written inside it). Default None = "
+                               "the baseline DATA_ROOT below, prior behavior. For the shared-"
+                               "grid ablation pass the '..._fnirsbboxEEG' folder produced by "
+                               "Preproc_tsfnet_nback_badch.py --fnirs-grid-bbox eeg.")
 _arg_parser.add_argument("--efgf-lambda", type=float, default=1.0,
                           help="priority-PCCLAMBDA isolated variable: weight of the EFGF PCC "
                                "regularizer (Eq. 12, L_efgf = 1 - PCC(F_eeg, Phi)) in the total "
@@ -785,7 +791,10 @@ except NameError:
               f"{_notebook_path} instead.")
         exec(open(_notebook_path, encoding="utf-8").read(), globals())
 
-DATA_ROOT = r"E:\kntu\Thesis\codes\Results\TSFNET_PAPER_EXACT_nback"
+_DEFAULT_DATA_ROOT = r"E:\kntu\Thesis\codes\Results\TSFNET_PAPER_EXACT_nback"
+DATA_ROOT = SEED_ARGS.data_root or _DEFAULT_DATA_ROOT
+if not os.path.isdir(DATA_ROOT):
+    raise FileNotFoundError(f"--data-root does not exist: {DATA_ROOT}")
 SUBJECTS = [f"VP{i:03d}" for i in range(1, 27)]     # VP001..VP026
 RUN_DIAGNOSTICS = SEED_ARGS.run_diagnostics          # True = also make PCA/t-SNE/saliency plots per subject (SLOW: 26 subjects x 3 sessions = 78 diagnostic runs). Off by default; pass --diagnostics to enable.
 # Variant tag distinguishes this isolated ablation (fusion combination formula,
@@ -878,6 +887,8 @@ for _nm, _v, _dflt in (("lr", LR, 1e-3), ("wd", WEIGHT_DECAY, 1e-4),
     if _v != _dflt:
         _G1_PARTS.append(f"{_nm}{_v}")
 _G1_SUBTAG = ("_" + "_".join(_G1_PARTS)) if _G1_PARTS else ""
+_DATAROOT_SUBTAG = ("_data-" + os.path.basename(os.path.normpath(DATA_ROOT))
+                    if os.path.normpath(DATA_ROOT) != os.path.normpath(_DEFAULT_DATA_ROOT) else "")
 _CONVDROP_SUBTAG = ((f"_convdo{CONV_DROPOUT:g}" if CONV_DROPOUT is not None else "")
                     + ("_convdoElem" if CONV_DROPOUT_TYPE != "channel" else ""))
 # priority-noiseaware: MUST be in the tag. This is the project's recurring
@@ -904,7 +915,7 @@ else:
     _SWA_SUBTAG = ""
 import hashlib
 _VARIANT_TAG_FULL = (f"{FUSION_COMBINATION}_{_CLIP_SUBTAG}_{_CW_SUBTAG}_{_OS_SUBTAG}"
-                     f"_{_EEG_SUBTAG}_{_CAFE_SUBTAG}_{_ASYM_SUBTAG}{_LAMBDA_SUBTAG}{_CHROMA_SUBTAG}{_MHS_SUBTAG}{_LS_SUBTAG}{_DA_SUBTAG}{_FC_SUBTAG}{_ADABN_SUBTAG}{_TENT_SUBTAG}{_EGTA_SUBTAG}{_G1_SUBTAG}{_CHROMO_SUBTAG}{_ESP_SUBTAG}{_LABRAM_SUBTAG}{_BAND_SUBTAG}{_NORM_SUBTAG}{_EFGF_SUBTAG}{_YPREDNORM_SUBTAG}{_VALMODE_SUBTAG}{_NODECAY_SUBTAG}{_STAGE2_SUBTAG}{_EFGFINIT_SUBTAG}{_NOISEAWARE_SUBTAG}{_SWA_SUBTAG}{_PCCLAMBDA_SUBTAG}{_CONVDROP_SUBTAG}")
+                     f"_{_EEG_SUBTAG}_{_CAFE_SUBTAG}_{_ASYM_SUBTAG}{_LAMBDA_SUBTAG}{_CHROMA_SUBTAG}{_MHS_SUBTAG}{_LS_SUBTAG}{_DA_SUBTAG}{_FC_SUBTAG}{_ADABN_SUBTAG}{_TENT_SUBTAG}{_EGTA_SUBTAG}{_G1_SUBTAG}{_CHROMO_SUBTAG}{_ESP_SUBTAG}{_LABRAM_SUBTAG}{_BAND_SUBTAG}{_NORM_SUBTAG}{_EFGF_SUBTAG}{_YPREDNORM_SUBTAG}{_VALMODE_SUBTAG}{_NODECAY_SUBTAG}{_STAGE2_SUBTAG}{_EFGFINIT_SUBTAG}{_NOISEAWARE_SUBTAG}{_SWA_SUBTAG}{_PCCLAMBDA_SUBTAG}{_CONVDROP_SUBTAG}{_DATAROOT_SUBTAG}")
 _VARIANT_HASH = hashlib.md5(_VARIANT_TAG_FULL.encode()).hexdigest()[:10]
 _VARIANT_TAG = _VARIANT_HASH
 RUN_TAG = datetime.datetime.now().strftime("%Y%m%d_%H%M%S") + f"_seed{SEED}_{_VARIANT_TAG}"   # unique per run+seed+variant, so a later comparison run never overwrites this baseline
