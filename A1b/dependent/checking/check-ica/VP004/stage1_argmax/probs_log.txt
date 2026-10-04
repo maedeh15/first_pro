@@ -1,0 +1,33 @@
+Subject: VP004   Stage: stage1_argmax
+Total excluded so far: [0, 1, 8]
+Newly excluded this stage: [0, 1, 8]
+
+IC0 (VP004, stage1_argmax):
+  argmax label: 'eye blink'
+    brain             : 0.046
+    muscle artifact   : 0.018
+    eye blink         : 0.507  <-- argmax
+    heart beat        : 0.010
+    line noise        : 0.001
+    channel noise     : 0.071
+    other             : 0.348
+
+IC1 (VP004, stage1_argmax):
+  argmax label: 'eye blink'
+    brain             : 0.007
+    muscle artifact   : 0.002
+    eye blink         : 0.959  <-- argmax
+    heart beat        : 0.002
+    line noise        : 0.000
+    channel noise     : 0.005
+    other             : 0.025
+
+IC8 (VP004, stage1_argmax):
+  argmax label: 'eye blink'
+    brain             : 0.056
+    muscle artifact   : 0.003
+    eye blink         : 0.716  <-- argmax
+    heart beat        : 0.015
+    line noise        : 0.003
+    channel noise     : 0.018
+    other             : 0.190

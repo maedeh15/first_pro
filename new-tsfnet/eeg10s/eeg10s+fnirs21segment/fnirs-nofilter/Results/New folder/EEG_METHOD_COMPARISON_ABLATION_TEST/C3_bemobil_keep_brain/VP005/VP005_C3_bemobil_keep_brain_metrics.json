@@ -1,0 +1,36 @@
+{
+  "subject": "VP005",
+  "variant": "C3_bemobil_keep_brain",
+  "runtime_s": 252.7,
+  "n_channels_used": 28,
+  "bad_channels_detected": [
+    "Fp1",
+    "Fp2",
+    "P4"
+  ],
+  "n_bad_channels_detected": 3,
+  "n_ica_components_excluded": 5,
+  "ica_excluded_ids": [
+    0,
+    1,
+    2,
+    3,
+    4
+  ],
+  "still_bad_after_cleaning": [],
+  "known_persistent_noise_channels": [],
+  "known_persistent_still_present": [],
+  "target_channel_emg_band_power": {},
+  "median_variance_before": 1.1380520559401151e-09,
+  "median_variance_after": 2.7129374030789735e-11,
+  "max_variance_ratio_after": 2.744342757648697,
+  "median_emg_band_power_after_30_49hz": 5.615116152102768e-15,
+  "median_eeg_band_power_retention_ratio_4_30hz": 0.13918012531160015,
+  "filter_band_hz": [
+    0.1,
+    30.0
+  ],
+  "autoreject_epochs_rejected": 77,
+  "autoreject_epochs_total": 648,
+  "autoreject_reject_fraction": 0.119
+}

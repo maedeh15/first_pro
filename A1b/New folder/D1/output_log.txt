@@ -1,0 +1,1690 @@
+[2026-08-09 11:08:05] START processing VP001
+Processing VP001
+
+ Loading EEG...
+Loading EEG from: E:\kntu\Thesis\codes\DATA\VP001-EEG\cnt_nback.mat
+EEG loaded: 394930 samples, 200.0 Hz, 567 markers
+unique markers: [ 16  48  64  80  96 112 128 144]
+EEG mnt_nback.mat loaded: pos_3d shape (3, 30)
+
+ Loading and preprocessing fNIRS...
+Loading raw fNIRS from: E:\kntu\Thesis\codes\DATA\VP001-NIRS\cnt_nback.mat
+raw fNIRS sampling rate: 10.0 Hz
+Raw fNIRS: oxy (21178, 36), deoxy (21178, 36)
+Using oxy/deoxy fields directly as HbO/HbR (Beer-Lambert already applied by dataset authors; see Shin et al. 2018 Data Descriptor)...
+Skipping wavelet/MARA/lowpass filtering (MSTFDN-style: relying on the model's own large-kernel convolutions for implicit smoothing)...
+Resampling from 10.0 Hz to 10.0 Hz...
+Spatial mapping to 16x16...
+fNIRS preprocessed: (21178, 16, 16, 2)
+Saved fNIRS before/after QC plot for VP001
+
+ Normalizing fNIRS (subject-level, before windowing)...
+
+ Preprocessing EEG...
+Preprocessing EEG...
+Bad channels: ['Fp1', 'T7', 'Fp2']
+ICA: using variance-based component selection (99% explained variance), picks=28, interpolated=3
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+[2026-08-09 11:08:05] START processing VP004
+Processing VP004
+[2026-08-09 11:08:05] SKIPPED VP004: excluded via REMOVE_SUBJECTS (D1)
+VP004 is in REMOVE_SUBJECTS -- skipping (D1 exclusion)
+[2026-08-09 11:08:05] START processing VP006
+Processing VP006
+
+ Loading EEG...
+Loading EEG from: E:\kntu\Thesis\codes\DATA\VP006-EEG\cnt_nback.mat
+EEG loaded: 388467 samples, 200.0 Hz, 567 markers
+unique markers: [ 16  48  64  80  96 112 128 144]
+EEG mnt_nback.mat loaded: pos_3d shape (3, 30)
+
+ Loading and preprocessing fNIRS...
+Loading raw fNIRS from: E:\kntu\Thesis\codes\DATA\VP006-NIRS\cnt_nback.mat
+raw fNIRS sampling rate: 10.0 Hz
+Raw fNIRS: oxy (20813, 36), deoxy (20813, 36)
+Using oxy/deoxy fields directly as HbO/HbR (Beer-Lambert already applied by dataset authors; see Shin et al. 2018 Data Descriptor)...
+Skipping wavelet/MARA/lowpass filtering (MSTFDN-style: relying on the model's own large-kernel convolutions for implicit smoothing)...
+Resampling from 10.0 Hz to 10.0 Hz...
+Spatial mapping to 16x16...
+fNIRS preprocessed: (20813, 16, 16, 2)
+Saved fNIRS before/after QC plot for VP006
+
+ Normalizing fNIRS (subject-level, before windowing)...
+
+ Preprocessing EEG...
+Preprocessing EEG...
+Bad channels: ['Fp1', 'AFF5h', 'T7', 'Fp2', 'AFF6h']
+ICA: using variance-based component selection (99% explained variance), picks=28, interpolated=5
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+[2026-08-09 11:08:05] START processing VP005
+Processing VP005
+
+ Loading EEG...
+Loading EEG from: E:\kntu\Thesis\codes\DATA\VP005-EEG\cnt_nback.mat
+EEG loaded: 389105 samples, 200.0 Hz, 567 markers
+unique markers: [ 16  48  64  80  96 112 128 144]
+EEG mnt_nback.mat loaded: pos_3d shape (3, 30)
+
+ Loading and preprocessing fNIRS...
+Loading raw fNIRS from: E:\kntu\Thesis\codes\DATA\VP005-NIRS\cnt_nback.mat
+raw fNIRS sampling rate: 10.0 Hz
+Raw fNIRS: oxy (20825, 36), deoxy (20825, 36)
+Using oxy/deoxy fields directly as HbO/HbR (Beer-Lambert already applied by dataset authors; see Shin et al. 2018 Data Descriptor)...
+Skipping wavelet/MARA/lowpass filtering (MSTFDN-style: relying on the model's own large-kernel convolutions for implicit smoothing)...
+Resampling from 10.0 Hz to 10.0 Hz...
+Spatial mapping to 16x16...
+fNIRS preprocessed: (20825, 16, 16, 2)
+Saved fNIRS before/after QC plot for VP005
+
+ Normalizing fNIRS (subject-level, before windowing)...
+
+ Preprocessing EEG...
+Preprocessing EEG...
+Bad channels: ['Fp1', 'Fp2']
+ICA: using variance-based component selection (99% explained variance), picks=28, interpolated=2
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+[2026-08-09 11:08:05] START processing VP003
+Processing VP003
+
+ Loading EEG...
+Loading EEG from: E:\kntu\Thesis\codes\DATA\VP003-EEG\cnt_nback.mat
+EEG loaded: 389241 samples, 200.0 Hz, 567 markers
+unique markers: [ 16  48  64  80  96 112 128 144]
+EEG mnt_nback.mat loaded: pos_3d shape (3, 30)
+
+ Loading and preprocessing fNIRS...
+Loading raw fNIRS from: E:\kntu\Thesis\codes\DATA\VP003-NIRS\cnt_nback.mat
+raw fNIRS sampling rate: 10.0 Hz
+Raw fNIRS: oxy (20929, 36), deoxy (20929, 36)
+Using oxy/deoxy fields directly as HbO/HbR (Beer-Lambert already applied by dataset authors; see Shin et al. 2018 Data Descriptor)...
+Skipping wavelet/MARA/lowpass filtering (MSTFDN-style: relying on the model's own large-kernel convolutions for implicit smoothing)...
+Resampling from 10.0 Hz to 10.0 Hz...
+Spatial mapping to 16x16...
+fNIRS preprocessed: (20929, 16, 16, 2)
+Saved fNIRS before/after QC plot for VP003
+
+ Normalizing fNIRS (subject-level, before windowing)...
+
+ Preprocessing EEG...
+Preprocessing EEG...
+Bad channels: ['Fp1', 'T7', 'CP5', 'P7', 'Fp2', 'AFF6h']
+ICA: using variance-based component selection (99% explained variance), picks=28, interpolated=6
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+[2026-08-09 11:08:05] START processing VP002
+Processing VP002
+
+ Loading EEG...
+Loading EEG from: E:\kntu\Thesis\codes\DATA\VP002-EEG\cnt_nback.mat
+EEG loaded: 395238 samples, 200.0 Hz, 567 markers
+unique markers: [ 16  48  64  80  96 112 128 144]
+EEG mnt_nback.mat loaded: pos_3d shape (3, 30)
+
+ Loading and preprocessing fNIRS...
+Loading raw fNIRS from: E:\kntu\Thesis\codes\DATA\VP002-NIRS\cnt_nback.mat
+raw fNIRS sampling rate: 10.0 Hz
+Raw fNIRS: oxy (21218, 36), deoxy (21218, 36)
+Using oxy/deoxy fields directly as HbO/HbR (Beer-Lambert already applied by dataset authors; see Shin et al. 2018 Data Descriptor)...
+Skipping wavelet/MARA/lowpass filtering (MSTFDN-style: relying on the model's own large-kernel convolutions for implicit smoothing)...
+Resampling from 10.0 Hz to 10.0 Hz...
+Spatial mapping to 16x16...
+fNIRS preprocessed: (21218, 16, 16, 2)
+Saved fNIRS before/after QC plot for VP002
+
+ Normalizing fNIRS (subject-level, before windowing)...
+
+ Preprocessing EEG...
+Preprocessing EEG...
+Bad channels: ['P7']
+ICA: using variance-based component selection (99% explained variance), picks=28, interpolated=1
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 8 components
+Selecting by explained variance: 9 components
+Selecting by explained variance: 9 components
+Selecting by explained variance: 12 components
+Selecting by explained variance: 11 components
+Fitting ICA took 12.1s.
+Fitting ICA took 14.1s.
+Fitting ICA took 17.6s.
+  find_bads_eog(VEOG) flagged components: []
+  find_bads_eog(HEOG) flagged components: [np.int64(2)]
+  IC0 flagged [argmax='eye blink', prob>=0.3]: brain=0.00, muscle artifact=0.00, eye blink=1.00, heart beat=0.00, line noise=0.00, channel noise=0.00, other=0.00
+  IC2 flagged [argmax='eye blink', prob>=0.3, HEOG-correlation]: brain=0.02, muscle artifact=0.00, eye blink=0.76, heart beat=0.00, line noise=0.00, channel noise=0.00, other=0.21
+  IC7 flagged [argmax='muscle artifact', prob>=0.3]: brain=0.13, muscle artifact=0.73, eye blink=0.01, heart beat=0.00, line noise=0.00, channel noise=0.01, other=0.12
+Removed 3 ICA components
+Dropped channels: ['HEOG', 'VEOG']
+Writing F:\preprocessing-history-thesis\D1\VP001\VP001_eeg_clean_raw.fif
+  find_bads_eog(VEOG) flagged components: []
+  find_bads_eog(HEOG) flagged components: [np.int64(1)]
+  IC0 flagged [argmax='eye blink', prob>=0.3]: brain=0.01, muscle artifact=0.00, eye blink=0.98, heart beat=0.00, line noise=0.00, channel noise=0.00, other=0.01
+  IC1 flagged [argmax='eye blink', prob>=0.3, HEOG-correlation]: brain=0.00, muscle artifact=0.00, eye blink=0.99, heart beat=0.00, line noise=0.00, channel noise=0.00, other=0.00
+  IC7 flagged [argmax='muscle artifact', prob>=0.3]: brain=0.06, muscle artifact=0.61, eye blink=0.03, heart beat=0.01, line noise=0.00, channel noise=0.02, other=0.27
+Removed 3 ICA components
+Dropped channels: ['HEOG', 'VEOG']
+Writing F:\preprocessing-history-thesis\D1\VP006\VP006_eeg_clean_raw.fif
+Fitting ICA took 30.2s.
+Closing F:\preprocessing-history-thesis\D1\VP001\VP001_eeg_clean_raw.fif
+[done]
+Closing F:\preprocessing-history-thesis\D1\VP006\VP006_eeg_clean_raw.fif
+[done]
+  find_bads_eog(VEOG) flagged components: []
+  find_bads_eog(HEOG) flagged components: [np.int64(1)]
+  IC0 flagged [argmax='eye blink', prob>=0.3]: brain=0.00, muscle artifact=0.00, eye blink=0.99, heart beat=0.00, line noise=0.00, channel noise=0.00, other=0.01
+  IC1 flagged [argmax='eye blink', prob>=0.3, HEOG-correlation]: brain=0.00, muscle artifact=0.00, eye blink=1.00, heart beat=0.00, line noise=0.00, channel noise=0.00, other=0.00
+  IC6 flagged [argmax='muscle artifact', prob>=0.3]: brain=0.04, muscle artifact=0.90, eye blink=0.01, heart beat=0.00, line noise=0.00, channel noise=0.00, other=0.04
+Removed 3 ICA components
+Dropped channels: ['HEOG', 'VEOG']
+Writing F:\preprocessing-history-thesis\D1\VP003\VP003_eeg_clean_raw.fif
+Closing F:\preprocessing-history-thesis\D1\VP003\VP003_eeg_clean_raw.fif
+[done]
+  find_bads_eog(VEOG) flagged components: [np.int64(0)]
+  find_bads_eog(HEOG) flagged components: [np.int64(2), np.int64(0)]
+  IC0 flagged [argmax='eye blink', prob>=0.3, VEOG-correlation, HEOG-correlation]: brain=0.00, muscle artifact=0.00, eye blink=1.00, heart beat=0.00, line noise=0.00, channel noise=0.00, other=0.00
+  IC2 flagged [argmax='eye blink', prob>=0.3, HEOG-correlation]: brain=0.00, muscle artifact=0.00, eye blink=0.99, heart beat=0.00, line noise=0.00, channel noise=0.00, other=0.01
+  IC6 flagged [argmax='muscle artifact', prob>=0.3]: brain=0.07, muscle artifact=0.67, eye blink=0.08, heart beat=0.00, line noise=0.00, channel noise=0.00, other=0.17
+  IC7 flagged [argmax='muscle artifact', prob>=0.3]: brain=0.30, muscle artifact=0.57, eye blink=0.01, heart beat=0.00, line noise=0.01, channel noise=0.07, other=0.03
+  IC8 flagged [argmax='muscle artifact', prob>=0.3]: brain=0.01, muscle artifact=0.96, eye blink=0.02, heart beat=0.00, line noise=0.00, channel noise=0.00, other=0.00
+  IC9 flagged [argmax='muscle artifact', prob>=0.3]: brain=0.06, muscle artifact=0.88, eye blink=0.01, heart beat=0.00, line noise=0.00, channel noise=0.00, other=0.04
+  IC10 flagged [argmax='muscle artifact', prob>=0.3]: brain=0.01, muscle artifact=0.47, eye blink=0.43, heart beat=0.00, line noise=0.00, channel noise=0.00, other=0.08
+Removed 7 ICA components
+Dropped channels: ['HEOG', 'VEOG']
+Writing F:\preprocessing-history-thesis\D1\VP002\VP002_eeg_clean_raw.fif
+Closing F:\preprocessing-history-thesis\D1\VP002\VP002_eeg_clean_raw.fif
+[done]
+
+ EEG per-subject normalization stats computed: mean range [-2.24e-09, 3.01e-09], std range [1.99e-06, 5.68e-06]
+
+ Spatial mapping EEG to 16x16...
+EEG spatially mapped: (388467, 16, 16)
+Saved EEG before/after (all-channels) QC plots for VP006
+
+ Extracting synchronized asymmetric windows...
+Extracting synchronized asymmetric sliding windows...
+EEG window: 10.0s, step: 1.0s
+fNIRS window: 3.0s, step: 1.0s
+D2 epoch-level filter disabled (isolation test) -- skipping ML-anomaly computation
+found 27 trial markers
+fNIRS-own-marker sync check: OK (27 trials, class order matches EEG)
+Extracted 837 synchronized windows
+Label distribution: [279 279 279]
+
+ Normalizing...
+
+ Saving...
+
+ VP006 completed!
+EEG windows: (837, 16, 16, 2000)
+fNIRS windows: (837, 21, 16, 16, 30, 2)
+Labels: [279 279 279]
+[2026-08-09 11:08:57] DONE VP006 in 0.9 min | EEG: (837, 16, 16, 2000) | fNIRS: (837, 21, 16, 16, 30, 2) | Labels: [279 279 279]
+[2026-08-09 11:08:57] START processing VP007
+Processing VP007
+
+ Loading EEG...
+Loading EEG from: E:\kntu\Thesis\codes\DATA\VP007-EEG\cnt_nback.mat
+EEG loaded: 388727 samples, 200.0 Hz, 567 markers
+unique markers: [ 16  48  64  80  96 112 128 144]
+EEG mnt_nback.mat loaded: pos_3d shape (3, 30)
+
+ Loading and preprocessing fNIRS...
+Loading raw fNIRS from: E:\kntu\Thesis\codes\DATA\VP007-NIRS\cnt_nback.mat
+raw fNIRS sampling rate: 10.0 Hz
+Raw fNIRS: oxy (20867, 36), deoxy (20867, 36)
+Using oxy/deoxy fields directly as HbO/HbR (Beer-Lambert already applied by dataset authors; see Shin et al. 2018 Data Descriptor)...
+Skipping wavelet/MARA/lowpass filtering (MSTFDN-style: relying on the model's own large-kernel convolutions for implicit smoothing)...
+Resampling from 10.0 Hz to 10.0 Hz...
+Spatial mapping to 16x16...
+fNIRS preprocessed: (20867, 16, 16, 2)
+Saved fNIRS before/after QC plot for VP007
+
+ Normalizing fNIRS (subject-level, before windowing)...
+
+ Preprocessing EEG...
+Preprocessing EEG...
+Bad channels: ['T7', 'P7']
+ICA: using variance-based component selection (99% explained variance), picks=28, interpolated=2
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+
+ EEG per-subject normalization stats computed: mean range [-3.19e-09, 1.59e-09], std range [2.53e-06, 1.07e-05]
+
+ Spatial mapping EEG to 16x16...
+EEG spatially mapped: (394930, 16, 16)
+
+ Extracting synchronized asymmetric windows...
+Extracting synchronized asymmetric sliding windows...
+EEG window: 10.0s, step: 1.0s
+fNIRS window: 3.0s, step: 1.0s
+D2 epoch-level filter disabled (isolation test) -- skipping ML-anomaly computation
+found 27 trial markers
+fNIRS-own-marker sync check: OK (27 trials, class order matches EEG)
+Extracted 827 synchronized windows
+Label distribution: [269 279 279]
+
+ Normalizing...
+
+ Saving...
+
+ VP001 completed!
+EEG windows: (827, 16, 16, 2000)
+fNIRS windows: (827, 21, 16, 16, 30, 2)
+Labels: [269 279 279]
+[2026-08-09 11:08:57] DONE VP001 in 0.9 min | EEG: (827, 16, 16, 2000) | fNIRS: (827, 21, 16, 16, 30, 2) | Labels: [269 279 279]
+[2026-08-09 11:08:57] START processing VP008
+Processing VP008
+
+ Loading EEG...
+Loading EEG from: E:\kntu\Thesis\codes\DATA\VP008-EEG\cnt_nback.mat
+EEG loaded: 388781 samples, 200.0 Hz, 567 markers
+unique markers: [ 16  48  64  80  96 112 128 144]
+EEG mnt_nback.mat loaded: pos_3d shape (3, 30)
+
+ Loading and preprocessing fNIRS...
+Loading raw fNIRS from: E:\kntu\Thesis\codes\DATA\VP008-NIRS\cnt_nback.mat
+raw fNIRS sampling rate: 10.0 Hz
+Raw fNIRS: oxy (20832, 36), deoxy (20832, 36)
+Using oxy/deoxy fields directly as HbO/HbR (Beer-Lambert already applied by dataset authors; see Shin et al. 2018 Data Descriptor)...
+Skipping wavelet/MARA/lowpass filtering (MSTFDN-style: relying on the model's own large-kernel convolutions for implicit smoothing)...
+Resampling from 10.0 Hz to 10.0 Hz...
+Spatial mapping to 16x16...
+fNIRS preprocessed: (20832, 16, 16, 2)
+Saved fNIRS before/after QC plot for VP008
+
+ Normalizing fNIRS (subject-level, before windowing)...
+
+ Preprocessing EEG...
+Preprocessing EEG...
+Bad channels: ['P7']
+ICA: using variance-based component selection (99% explained variance), picks=28, interpolated=1
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 11 components
+Selecting by explained variance: 5 components
+
+ EEG per-subject normalization stats computed: mean range [-8.10e-09, 4.22e-09], std range [3.38e-06, 6.87e-06]
+
+ Spatial mapping EEG to 16x16...
+EEG spatially mapped: (389241, 16, 16)
+
+ Extracting synchronized asymmetric windows...
+Extracting synchronized asymmetric sliding windows...
+EEG window: 10.0s, step: 1.0s
+fNIRS window: 3.0s, step: 1.0s
+D2 epoch-level filter disabled (isolation test) -- skipping ML-anomaly computation
+found 27 trial markers
+fNIRS-own-marker sync check: OK (27 trials, class order matches EEG)
+Extracted 837 synchronized windows
+Label distribution: [279 279 279]
+
+ Normalizing...
+
+ Saving...
+
+ VP003 completed!
+EEG windows: (837, 16, 16, 2000)
+fNIRS windows: (837, 21, 16, 16, 30, 2)
+Labels: [279 279 279]
+[2026-08-09 11:08:58] DONE VP003 in 0.9 min | EEG: (837, 16, 16, 2000) | fNIRS: (837, 21, 16, 16, 30, 2) | Labels: [279 279 279]
+[2026-08-09 11:08:58] START processing VP009
+Processing VP009
+
+ Loading EEG...
+Loading EEG from: E:\kntu\Thesis\codes\DATA\VP009-EEG\cnt_nback.mat
+EEG loaded: 388611 samples, 200.0 Hz, 567 markers
+unique markers: [ 16  48  64  80  96 112 128 144]
+EEG mnt_nback.mat loaded: pos_3d shape (3, 30)
+
+ Loading and preprocessing fNIRS...
+Loading raw fNIRS from: E:\kntu\Thesis\codes\DATA\VP009-NIRS\cnt_nback.mat
+raw fNIRS sampling rate: 10.0 Hz
+Raw fNIRS: oxy (20821, 36), deoxy (20821, 36)
+Using oxy/deoxy fields directly as HbO/HbR (Beer-Lambert already applied by dataset authors; see Shin et al. 2018 Data Descriptor)...
+Skipping wavelet/MARA/lowpass filtering (MSTFDN-style: relying on the model's own large-kernel convolutions for implicit smoothing)...
+Resampling from 10.0 Hz to 10.0 Hz...
+Spatial mapping to 16x16...
+fNIRS preprocessed: (20821, 16, 16, 2)
+Saved fNIRS before/after QC plot for VP009
+
+ Normalizing fNIRS (subject-level, before windowing)...
+
+ Preprocessing EEG...
+Preprocessing EEG...
+Bad channels: ['Fp1', 'O1', 'Fp2', 'FC2', 'T8']
+ICA: using variance-based component selection (99% explained variance), picks=28, interpolated=5
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 4 components
+Fitting ICA took 11.4s.
+
+ EEG per-subject normalization stats computed: mean range [-2.89e-09, 6.02e-09], std range [2.82e-06, 9.50e-06]
+
+ Spatial mapping EEG to 16x16...
+EEG spatially mapped: (395238, 16, 16)
+
+ Extracting synchronized asymmetric windows...
+Extracting synchronized asymmetric sliding windows...
+EEG window: 10.0s, step: 1.0s
+fNIRS window: 3.0s, step: 1.0s
+D2 epoch-level filter disabled (isolation test) -- skipping ML-anomaly computation
+found 27 trial markers
+fNIRS-own-marker sync check: OK (27 trials, class order matches EEG)
+Extracted 837 synchronized windows
+Label distribution: [279 279 279]
+
+ Normalizing...
+
+ Saving...
+
+ VP002 completed!
+EEG windows: (837, 16, 16, 2000)
+fNIRS windows: (837, 21, 16, 16, 30, 2)
+Labels: [279 279 279]
+[2026-08-09 11:09:11] DONE VP002 in 1.1 min | EEG: (837, 16, 16, 2000) | fNIRS: (837, 21, 16, 16, 30, 2) | Labels: [279 279 279]
+[2026-08-09 11:09:11] START processing VP010
+Processing VP010
+
+ Loading EEG...
+Loading EEG from: E:\kntu\Thesis\codes\DATA\VP010-EEG\cnt_nback.mat
+EEG loaded: 388340 samples, 200.0 Hz, 567 markers
+unique markers: [ 16  48  64  80  96 112 128 144]
+EEG mnt_nback.mat loaded: pos_3d shape (3, 30)
+
+ Loading and preprocessing fNIRS...
+Loading raw fNIRS from: E:\kntu\Thesis\codes\DATA\VP010-NIRS\cnt_nback.mat
+raw fNIRS sampling rate: 10.0 Hz
+Raw fNIRS: oxy (20798, 36), deoxy (20798, 36)
+Using oxy/deoxy fields directly as HbO/HbR (Beer-Lambert already applied by dataset authors; see Shin et al. 2018 Data Descriptor)...
+Skipping wavelet/MARA/lowpass filtering (MSTFDN-style: relying on the model's own large-kernel convolutions for implicit smoothing)...
+Resampling from 10.0 Hz to 10.0 Hz...
+Spatial mapping to 16x16...
+fNIRS preprocessed: (20798, 16, 16, 2)
+Saved fNIRS before/after QC plot for VP010
+
+ Normalizing fNIRS (subject-level, before windowing)...
+
+ Preprocessing EEG...
+Preprocessing EEG...
+Bad channels: ['FC5', 'T7', 'P7', 'Pz', 'POz']
+ICA: using variance-based component selection (99% explained variance), picks=28, interpolated=5
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 13 components
+Fitting ICA took 67.8s.
+  find_bads_eog(VEOG) flagged components: []
+  find_bads_eog(HEOG) flagged components: []
+  IC0 flagged [argmax='eye blink', prob>=0.3]: brain=0.00, muscle artifact=0.00, eye blink=0.97, heart beat=0.00, line noise=0.00, channel noise=0.01, other=0.02
+  IC1 flagged [argmax='eye blink', prob>=0.3]: brain=0.00, muscle artifact=0.00, eye blink=0.99, heart beat=0.00, line noise=0.00, channel noise=0.00, other=0.01
+Removed 2 ICA components
+Dropped channels: ['HEOG', 'VEOG']
+Writing F:\preprocessing-history-thesis\D1\VP008\VP008_eeg_clean_raw.fif
+Closing F:\preprocessing-history-thesis\D1\VP008\VP008_eeg_clean_raw.fif
+[done]
+Fitting ICA took 23.2s.
+  find_bads_eog(VEOG) flagged components: []
+  find_bads_eog(HEOG) flagged components: [np.int64(1)]
+  IC0 flagged [argmax='eye blink', prob>=0.3]: brain=0.00, muscle artifact=0.00, eye blink=0.99, heart beat=0.00, line noise=0.00, channel noise=0.00, other=0.01
+  IC1 flagged [argmax='eye blink', prob>=0.3, HEOG-correlation]: brain=0.00, muscle artifact=0.00, eye blink=1.00, heart beat=0.00, line noise=0.00, channel noise=0.00, other=0.00
+  IC3 flagged [argmax='eye blink', prob>=0.3]: brain=0.02, muscle artifact=0.02, eye blink=0.78, heart beat=0.00, line noise=0.00, channel noise=0.01, other=0.16
+  IC4 flagged [argmax='eye blink', prob>=0.3]: brain=0.06, muscle artifact=0.10, eye blink=0.45, heart beat=0.01, line noise=0.00, channel noise=0.03, other=0.34
+  IC8 flagged [argmax='muscle artifact', prob>=0.3]: brain=0.34, muscle artifact=0.39, eye blink=0.18, heart beat=0.00, line noise=0.01, channel noise=0.02, other=0.05
+  IC10 flagged [argmax='muscle artifact', prob>=0.3]: brain=0.07, muscle artifact=0.79, eye blink=0.01, heart beat=0.01, line noise=0.00, channel noise=0.00, other=0.11
+  IC11 flagged [argmax='muscle artifact', prob>=0.3]: brain=0.42, muscle artifact=0.44, eye blink=0.00, heart beat=0.00, line noise=0.00, channel noise=0.01, other=0.13
+Removed 7 ICA components
+Dropped channels: ['HEOG', 'VEOG']
+Writing F:\preprocessing-history-thesis\D1\VP005\VP005_eeg_clean_raw.fif
+Closing F:\preprocessing-history-thesis\D1\VP005\VP005_eeg_clean_raw.fif
+[done]
+Fitting ICA took 29.1s.
+  find_bads_eog(VEOG) flagged components: []
+  find_bads_eog(HEOG) flagged components: []
+  IC0 flagged [argmax='eye blink', prob>=0.3]: brain=0.00, muscle artifact=0.00, eye blink=0.95, heart beat=0.00, line noise=0.00, channel noise=0.00, other=0.05
+  IC1 flagged [argmax='eye blink', prob>=0.3]: brain=0.00, muscle artifact=0.00, eye blink=1.00, heart beat=0.00, line noise=0.00, channel noise=0.00, other=0.00
+Removed 2 ICA components
+Dropped channels: ['HEOG', 'VEOG']
+Writing F:\preprocessing-history-thesis\D1\VP009\VP009_eeg_clean_raw.fif
+Closing F:\preprocessing-history-thesis\D1\VP009\VP009_eeg_clean_raw.fif
+[done]
+  find_bads_eog(VEOG) flagged components: [np.int64(0)]
+  find_bads_eog(HEOG) flagged components: [np.int64(3)]
+  IC0 flagged [argmax='eye blink', prob>=0.3, VEOG-correlation]: brain=0.00, muscle artifact=0.00, eye blink=0.96, heart beat=0.00, line noise=0.00, channel noise=0.01, other=0.03
+  IC3 flagged [argmax='eye blink', prob>=0.3, HEOG-correlation]: brain=0.00, muscle artifact=0.00, eye blink=1.00, heart beat=0.00, line noise=0.00, channel noise=0.00, other=0.00
+  IC7 flagged [argmax='muscle artifact', prob>=0.3]: brain=0.01, muscle artifact=0.96, eye blink=0.01, heart beat=0.00, line noise=0.00, channel noise=0.01, other=0.01
+  IC8 flagged [argmax='muscle artifact', prob>=0.3]: brain=0.00, muscle artifact=0.87, eye blink=0.12, heart beat=0.00, line noise=0.00, channel noise=0.00, other=0.00
+  IC10 flagged [argmax='eye blink', prob>=0.3]: brain=0.11, muscle artifact=0.07, eye blink=0.58, heart beat=0.00, line noise=0.00, channel noise=0.01, other=0.22
+Removed 5 ICA components
+Dropped channels: ['HEOG', 'VEOG']
+Writing F:\preprocessing-history-thesis\D1\VP007\VP007_eeg_clean_raw.fif
+Closing F:\preprocessing-history-thesis\D1\VP007\VP007_eeg_clean_raw.fif
+[done]
+
+ EEG per-subject normalization stats computed: mean range [-1.38e-08, 1.76e-08], std range [2.24e-06, 6.93e-06]
+
+ Spatial mapping EEG to 16x16...
+EEG spatially mapped: (388781, 16, 16)
+Saved EEG before/after (all-channels) QC plots for VP008
+
+ Extracting synchronized asymmetric windows...
+Extracting synchronized asymmetric sliding windows...
+EEG window: 10.0s, step: 1.0s
+fNIRS window: 3.0s, step: 1.0s
+D2 epoch-level filter disabled (isolation test) -- skipping ML-anomaly computation
+found 27 trial markers
+fNIRS-own-marker sync check: OK (27 trials, class order matches EEG)
+Extracted 834 synchronized windows
+Label distribution: [276 279 279]
+
+ Normalizing...
+
+ Saving...
+
+ VP008 completed!
+EEG windows: (834, 16, 16, 2000)
+fNIRS windows: (834, 21, 16, 16, 30, 2)
+Labels: [276 279 279]
+[2026-08-09 11:09:37] DONE VP008 in 0.7 min | EEG: (834, 16, 16, 2000) | fNIRS: (834, 21, 16, 16, 30, 2) | Labels: [276 279 279]
+[2026-08-09 11:09:38] START processing VP011
+Processing VP011
+
+ Loading EEG...
+Loading EEG from: E:\kntu\Thesis\codes\DATA\VP011-EEG\cnt_nback.mat
+EEG loaded: 388728 samples, 200.0 Hz, 567 markers
+unique markers: [ 16  48  64  80  96 112 128 144]
+EEG mnt_nback.mat loaded: pos_3d shape (3, 30)
+
+ Loading and preprocessing fNIRS...
+Loading raw fNIRS from: E:\kntu\Thesis\codes\DATA\VP011-NIRS\cnt_nback.mat
+raw fNIRS sampling rate: 10.0 Hz
+Raw fNIRS: oxy (20840, 36), deoxy (20840, 36)
+Using oxy/deoxy fields directly as HbO/HbR (Beer-Lambert already applied by dataset authors; see Shin et al. 2018 Data Descriptor)...
+Skipping wavelet/MARA/lowpass filtering (MSTFDN-style: relying on the model's own large-kernel convolutions for implicit smoothing)...
+Resampling from 10.0 Hz to 10.0 Hz...
+Spatial mapping to 16x16...
+fNIRS preprocessed: (20840, 16, 16, 2)
+Saved fNIRS before/after QC plot for VP011
+
+ Normalizing fNIRS (subject-level, before windowing)...
+
+ Preprocessing EEG...
+Preprocessing EEG...
+Bad channels: ['POz', 'FC6', 'O2']
+ICA: using variance-based component selection (99% explained variance), picks=28, interpolated=3
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Fitting ICA took 32.2s.
+Selecting by explained variance: 13 components
+
+ EEG per-subject normalization stats computed: mean range [-7.32e-09, 6.07e-09], std range [2.85e-06, 1.13e-05]
+
+ Spatial mapping EEG to 16x16...
+EEG spatially mapped: (389105, 16, 16)
+Saved EEG before/after (all-channels) QC plots for VP005
+
+ Extracting synchronized asymmetric windows...
+Extracting synchronized asymmetric sliding windows...
+EEG window: 10.0s, step: 1.0s
+fNIRS window: 3.0s, step: 1.0s
+D2 epoch-level filter disabled (isolation test) -- skipping ML-anomaly computation
+found 27 trial markers
+fNIRS-own-marker sync check: OK (27 trials, class order matches EEG)
+Extracted 816 synchronized windows
+Label distribution: [279 269 268]
+
+ Normalizing...
+
+ Saving...
+
+ VP005 completed!
+EEG windows: (816, 16, 16, 2000)
+fNIRS windows: (816, 21, 16, 16, 30, 2)
+Labels: [279 269 268]
+[2026-08-09 11:09:49] DONE VP005 in 1.7 min | EEG: (816, 16, 16, 2000) | fNIRS: (816, 21, 16, 16, 30, 2) | Labels: [279 269 268]
+[2026-08-09 11:09:49] START processing VP012
+Processing VP012
+
+ Loading EEG...
+Loading EEG from: E:\kntu\Thesis\codes\DATA\VP012-EEG\cnt_nback.mat
+EEG loaded: 388844 samples, 200.0 Hz, 567 markers
+unique markers: [ 16  48  64  80  96 112 128 144]
+EEG mnt_nback.mat loaded: pos_3d shape (3, 30)
+
+ Loading and preprocessing fNIRS...
+Loading raw fNIRS from: E:\kntu\Thesis\codes\DATA\VP012-NIRS\cnt_nback.mat
+raw fNIRS sampling rate: 10.0 Hz
+Raw fNIRS: oxy (20821, 36), deoxy (20821, 36)
+Using oxy/deoxy fields directly as HbO/HbR (Beer-Lambert already applied by dataset authors; see Shin et al. 2018 Data Descriptor)...
+Skipping wavelet/MARA/lowpass filtering (MSTFDN-style: relying on the model's own large-kernel convolutions for implicit smoothing)...
+Resampling from 10.0 Hz to 10.0 Hz...
+Spatial mapping to 16x16...
+fNIRS preprocessed: (20821, 16, 16, 2)
+Saved fNIRS before/after QC plot for VP012
+
+ Normalizing fNIRS (subject-level, before windowing)...
+
+ Preprocessing EEG...
+Preprocessing EEG...
+Bad channels: ['T7', 'Fp2', 'AFF6h']
+ICA: using variance-based component selection (99% explained variance), picks=28, interpolated=3
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 10 components
+  find_bads_eog(VEOG) flagged components: [np.int64(0), np.int64(11)]
+  find_bads_eog(HEOG) flagged components: [np.int64(2), np.int64(4)]
+  IC0 flagged [argmax='eye blink', prob>=0.3, VEOG-correlation]: brain=0.00, muscle artifact=0.00, eye blink=0.95, heart beat=0.00, line noise=0.00, channel noise=0.01, other=0.03
+  IC2 flagged [argmax='eye blink', prob>=0.3, HEOG-correlation]: brain=0.02, muscle artifact=0.00, eye blink=0.96, heart beat=0.00, line noise=0.00, channel noise=0.00, other=0.02
+  IC4 flagged [HEOG-correlation]: brain=0.09, muscle artifact=0.09, eye blink=0.14, heart beat=0.01, line noise=0.00, channel noise=0.07, other=0.60
+  IC11 flagged [argmax='muscle artifact', prob>=0.3, VEOG-correlation]: brain=0.16, muscle artifact=0.40, eye blink=0.00, heart beat=0.13, line noise=0.01, channel noise=0.02, other=0.27
+  IC12 flagged [argmax='eye blink', prob>=0.3]: brain=0.15, muscle artifact=0.16, eye blink=0.53, heart beat=0.00, line noise=0.02, channel noise=0.02, other=0.12
+Removed 5 ICA components
+Dropped channels: ['HEOG', 'VEOG']
+Writing F:\preprocessing-history-thesis\D1\VP010\VP010_eeg_clean_raw.fif
+Closing F:\preprocessing-history-thesis\D1\VP010\VP010_eeg_clean_raw.fif
+[done]
+
+ EEG per-subject normalization stats computed: mean range [-2.18e-09, 1.72e-09], std range [1.65e-06, 7.22e-06]
+
+ Spatial mapping EEG to 16x16...
+EEG spatially mapped: (388611, 16, 16)
+Saved EEG before/after (all-channels) QC plots for VP009
+
+ Extracting synchronized asymmetric windows...
+Extracting synchronized asymmetric sliding windows...
+EEG window: 10.0s, step: 1.0s
+fNIRS window: 3.0s, step: 1.0s
+D2 epoch-level filter disabled (isolation test) -- skipping ML-anomaly computation
+found 27 trial markers
+fNIRS-own-marker sync check: OK (27 trials, class order matches EEG)
+Extracted 835 synchronized windows
+Label distribution: [279 279 277]
+
+ Normalizing...
+
+ Saving...
+
+ VP009 completed!
+EEG windows: (835, 16, 16, 2000)
+fNIRS windows: (835, 21, 16, 16, 30, 2)
+Labels: [279 279 277]
+[2026-08-09 11:10:10] DONE VP009 in 1.2 min | EEG: (835, 16, 16, 2000) | fNIRS: (835, 21, 16, 16, 30, 2) | Labels: [279 279 277]
+[2026-08-09 11:10:11] START processing VP013
+Processing VP013
+
+ Loading EEG...
+Loading EEG from: E:\kntu\Thesis\codes\DATA\VP013-EEG\cnt_nback.mat
+EEG loaded: 388433 samples, 200.0 Hz, 567 markers
+unique markers: [ 16  48  64  80  96 112 128 144]
+EEG mnt_nback.mat loaded: pos_3d shape (3, 30)
+
+ Loading and preprocessing fNIRS...
+Loading raw fNIRS from: E:\kntu\Thesis\codes\DATA\VP013-NIRS\cnt_nback.mat
+raw fNIRS sampling rate: 10.0 Hz
+Raw fNIRS: oxy (20733, 36), deoxy (20733, 36)
+Using oxy/deoxy fields directly as HbO/HbR (Beer-Lambert already applied by dataset authors; see Shin et al. 2018 Data Descriptor)...
+Skipping wavelet/MARA/lowpass filtering (MSTFDN-style: relying on the model's own large-kernel convolutions for implicit smoothing)...
+Resampling from 10.0 Hz to 10.0 Hz...
+Spatial mapping to 16x16...
+fNIRS preprocessed: (20733, 16, 16, 2)
+Saved fNIRS before/after QC plot for VP013
+
+ Normalizing fNIRS (subject-level, before windowing)...
+
+ Preprocessing EEG...
+Preprocessing EEG...
+Bad channels: ['T7', 'Cz', 'P7']
+ICA: using variance-based component selection (99% explained variance), picks=28, interpolated=3
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 6 components
+Fitting ICA took 27.5s.
+
+ EEG per-subject normalization stats computed: mean range [-1.54e-09, 4.47e-09], std range [3.87e-06, 1.02e-05]
+
+ Spatial mapping EEG to 16x16...
+EEG spatially mapped: (388727, 16, 16)
+
+ Extracting synchronized asymmetric windows...
+Extracting synchronized asymmetric sliding windows...
+EEG window: 10.0s, step: 1.0s
+fNIRS window: 3.0s, step: 1.0s
+D2 epoch-level filter disabled (isolation test) -- skipping ML-anomaly computation
+found 27 trial markers
+fNIRS-own-marker sync check: OK (27 trials, class order matches EEG)
+Extracted 837 synchronized windows
+Label distribution: [279 279 279]
+
+ Normalizing...
+
+ Saving...
+
+ VP007 completed!
+EEG windows: (837, 16, 16, 2000)
+fNIRS windows: (837, 21, 16, 16, 30, 2)
+Labels: [279 279 279]
+[2026-08-09 11:10:25] DONE VP007 in 1.5 min | EEG: (837, 16, 16, 2000) | fNIRS: (837, 21, 16, 16, 30, 2) | Labels: [279 279 279]
+[2026-08-09 11:10:25] START processing VP014
+Processing VP014
+
+ Loading EEG...
+Loading EEG from: E:\kntu\Thesis\codes\DATA\VP014-EEG\cnt_nback.mat
+EEG loaded: 386876 samples, 200.0 Hz, 567 markers
+unique markers: [ 16  48  64  80  96 112 128 144]
+EEG mnt_nback.mat loaded: pos_3d shape (3, 30)
+
+ Loading and preprocessing fNIRS...
+Loading raw fNIRS from: E:\kntu\Thesis\codes\DATA\VP014-NIRS\cnt_nback.mat
+raw fNIRS sampling rate: 10.0 Hz
+Raw fNIRS: oxy (20706, 36), deoxy (20706, 36)
+Using oxy/deoxy fields directly as HbO/HbR (Beer-Lambert already applied by dataset authors; see Shin et al. 2018 Data Descriptor)...
+Skipping wavelet/MARA/lowpass filtering (MSTFDN-style: relying on the model's own large-kernel convolutions for implicit smoothing)...
+Resampling from 10.0 Hz to 10.0 Hz...
+Spatial mapping to 16x16...
+fNIRS preprocessed: (20706, 16, 16, 2)
+Saved fNIRS before/after QC plot for VP014
+
+ Normalizing fNIRS (subject-level, before windowing)...
+
+ Preprocessing EEG...
+Preprocessing EEG...
+Bad channels: ['T7', 'P7']
+ICA: using variance-based component selection (99% explained variance), picks=28, interpolated=2
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 5 components
+Fitting ICA took 18.6s.
+  find_bads_eog(VEOG) flagged components: []
+  find_bads_eog(HEOG) flagged components: [np.int64(2), np.int64(0)]
+  Rescued from EOG-only rejection (ICLabel brain-prob >= 0.5): [np.int64(2)]
+  IC0 flagged [argmax='eye blink', prob>=0.3, HEOG-correlation]: brain=0.00, muscle artifact=0.00, eye blink=1.00, heart beat=0.00, line noise=0.00, channel noise=0.00, other=0.00
+  IC4 flagged [argmax='muscle artifact', prob>=0.3]: brain=0.36, muscle artifact=0.57, eye blink=0.01, heart beat=0.00, line noise=0.00, channel noise=0.01, other=0.05
+  IC6 flagged [argmax='muscle artifact', prob>=0.3]: brain=0.21, muscle artifact=0.79, eye blink=0.00, heart beat=0.00, line noise=0.00, channel noise=0.00, other=0.00
+  IC8 flagged [argmax='muscle artifact', prob>=0.3]: brain=0.01, muscle artifact=0.63, eye blink=0.34, heart beat=0.00, line noise=0.00, channel noise=0.00, other=0.02
+  IC9 flagged [argmax='muscle artifact', prob>=0.3]: brain=0.10, muscle artifact=0.54, eye blink=0.01, heart beat=0.00, line noise=0.00, channel noise=0.01, other=0.34
+Removed 5 ICA components
+Dropped channels: ['HEOG', 'VEOG']
+Writing F:\preprocessing-history-thesis\D1\VP012\VP012_eeg_clean_raw.fif
+Closing F:\preprocessing-history-thesis\D1\VP012\VP012_eeg_clean_raw.fif
+[done]
+Fitting ICA took 10.2s.
+  find_bads_eog(VEOG) flagged components: []
+  find_bads_eog(HEOG) flagged components: [np.int64(1)]
+  IC0 flagged [argmax='eye blink', prob>=0.3]: brain=0.00, muscle artifact=0.00, eye blink=0.95, heart beat=0.00, line noise=0.00, channel noise=0.01, other=0.03
+  IC1 flagged [argmax='eye blink', prob>=0.3, HEOG-correlation]: brain=0.00, muscle artifact=0.00, eye blink=1.00, heart beat=0.00, line noise=0.00, channel noise=0.00, other=0.00
+Removed 2 ICA components
+Dropped channels: ['HEOG', 'VEOG']
+Writing F:\preprocessing-history-thesis\D1\VP013\VP013_eeg_clean_raw.fif
+Fitting ICA took 67.8s.
+Closing F:\preprocessing-history-thesis\D1\VP013\VP013_eeg_clean_raw.fif
+[done]
+
+ EEG per-subject normalization stats computed: mean range [-1.19e-08, 9.87e-09], std range [1.91e-06, 6.11e-06]
+
+ Spatial mapping EEG to 16x16...
+EEG spatially mapped: (388340, 16, 16)
+Could not finalize EEG QC plot for VP010: [WinError 32] The process cannot access the file because it is being used by another process: 'F:\\preprocessing-history-thesis\\D1\\_tmp_eeg_qc\\last_eeg_before_allchannels.png' -> 'F:\\preprocessing-history-thesis\\D1\\VP010\\VP010_eeg_before_allchannels.png'
+
+ Extracting synchronized asymmetric windows...
+Extracting synchronized asymmetric sliding windows...
+EEG window: 10.0s, step: 1.0s
+fNIRS window: 3.0s, step: 1.0s
+D2 epoch-level filter disabled (isolation test) -- skipping ML-anomaly computation
+found 27 trial markers
+fNIRS-own-marker sync check: OK (27 trials, class order matches EEG)
+Extracted 833 synchronized windows
+Label distribution: [275 279 279]
+
+ Normalizing...
+
+ Saving...
+
+ VP010 completed!
+EEG windows: (833, 16, 16, 2000)
+fNIRS windows: (833, 21, 16, 16, 30, 2)
+Labels: [275 279 279]
+[2026-08-09 11:10:48] DONE VP010 in 1.6 min | EEG: (833, 16, 16, 2000) | fNIRS: (833, 21, 16, 16, 30, 2) | Labels: [275 279 279]
+[2026-08-09 11:10:49] START processing VP015
+Processing VP015
+
+ Loading EEG...
+Loading EEG from: E:\kntu\Thesis\codes\DATA\VP015-EEG\cnt_nback.mat
+EEG loaded: 388022 samples, 200.0 Hz, 567 markers
+unique markers: [ 16  48  64  80  96 112 128 144]
+EEG mnt_nback.mat loaded: pos_3d shape (3, 30)
+
+ Loading and preprocessing fNIRS...
+Loading raw fNIRS from: E:\kntu\Thesis\codes\DATA\VP015-NIRS\cnt_nback.mat
+raw fNIRS sampling rate: 10.0 Hz
+Raw fNIRS: oxy (20937, 36), deoxy (20937, 36)
+Using oxy/deoxy fields directly as HbO/HbR (Beer-Lambert already applied by dataset authors; see Shin et al. 2018 Data Descriptor)...
+Skipping wavelet/MARA/lowpass filtering (MSTFDN-style: relying on the model's own large-kernel convolutions for implicit smoothing)...
+Resampling from 10.0 Hz to 10.0 Hz...
+Spatial mapping to 16x16...
+fNIRS preprocessed: (20937, 16, 16, 2)
+Saved fNIRS before/after QC plot for VP015
+
+ Normalizing fNIRS (subject-level, before windowing)...
+
+ Preprocessing EEG...
+Preprocessing EEG...
+Bad channels: ['Cz', 'CP1', 'P7']
+ICA: using variance-based component selection (99% explained variance), picks=28, interpolated=3
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 5 components
+  find_bads_eog(VEOG) flagged components: []
+  find_bads_eog(HEOG) flagged components: []
+  IC0 flagged [argmax='eye blink', prob>=0.3]: brain=0.00, muscle artifact=0.00, eye blink=0.95, heart beat=0.00, line noise=0.00, channel noise=0.01, other=0.03
+  IC1 flagged [argmax='eye blink', prob>=0.3]: brain=0.00, muscle artifact=0.00, eye blink=1.00, heart beat=0.00, line noise=0.00, channel noise=0.00, other=0.00
+Removed 2 ICA components
+Dropped channels: ['HEOG', 'VEOG']
+Writing F:\preprocessing-history-thesis\D1\VP014\VP014_eeg_clean_raw.fif
+Closing F:\preprocessing-history-thesis\D1\VP014\VP014_eeg_clean_raw.fif
+[done]
+Fitting ICA took 8.1s.
+  find_bads_eog(VEOG) flagged components: [np.int64(0), np.int64(2)]
+  find_bads_eog(HEOG) flagged components: [np.int64(4), np.int64(6)]
+  Rescued from EOG-only rejection (ICLabel brain-prob >= 0.5): [np.int64(6)]
+  IC0 flagged [argmax='eye blink', prob>=0.3, VEOG-correlation]: brain=0.00, muscle artifact=0.00, eye blink=0.98, heart beat=0.00, line noise=0.00, channel noise=0.00, other=0.01
+  IC2 flagged [prob>=0.3, VEOG-correlation]: brain=0.02, muscle artifact=0.03, eye blink=0.38, heart beat=0.01, line noise=0.00, channel noise=0.14, other=0.42
+  IC4 flagged [argmax='eye blink', prob>=0.3, HEOG-correlation]: brain=0.01, muscle artifact=0.00, eye blink=0.99, heart beat=0.00, line noise=0.00, channel noise=0.00, other=0.00
+  IC8 flagged [argmax='muscle artifact', prob>=0.3]: brain=0.07, muscle artifact=0.87, eye blink=0.00, heart beat=0.00, line noise=0.00, channel noise=0.01, other=0.04
+  IC11 flagged [argmax='eye blink', prob>=0.3]: brain=0.02, muscle artifact=0.01, eye blink=0.93, heart beat=0.00, line noise=0.00, channel noise=0.01, other=0.03
+Removed 5 ICA components
+Dropped channels: ['HEOG', 'VEOG']
+Writing F:\preprocessing-history-thesis\D1\VP011\VP011_eeg_clean_raw.fif
+Closing F:\preprocessing-history-thesis\D1\VP011\VP011_eeg_clean_raw.fif
+[done]
+  find_bads_eog(VEOG) flagged components: []
+  find_bads_eog(HEOG) flagged components: []
+  IC0 flagged [argmax='eye blink', prob>=0.3]: brain=0.00, muscle artifact=0.00, eye blink=0.98, heart beat=0.00, line noise=0.00, channel noise=0.00, other=0.01
+  IC2 flagged [argmax='eye blink', prob>=0.3]: brain=0.01, muscle artifact=0.00, eye blink=0.99, heart beat=0.00, line noise=0.00, channel noise=0.00, other=0.00
+Removed 2 ICA components
+Dropped channels: ['HEOG', 'VEOG']
+Writing F:\preprocessing-history-thesis\D1\VP015\VP015_eeg_clean_raw.fif
+Closing F:\preprocessing-history-thesis\D1\VP015\VP015_eeg_clean_raw.fif
+[done]
+
+ EEG per-subject normalization stats computed: mean range [-1.82e-08, 1.81e-08], std range [2.61e-06, 6.65e-06]
+
+ Spatial mapping EEG to 16x16...
+EEG spatially mapped: (388844, 16, 16)
+Saved EEG before/after (all-channels) QC plots for VP012
+
+ Extracting synchronized asymmetric windows...
+Extracting synchronized asymmetric sliding windows...
+EEG window: 10.0s, step: 1.0s
+fNIRS window: 3.0s, step: 1.0s
+D2 epoch-level filter disabled (isolation test) -- skipping ML-anomaly computation
+found 27 trial markers
+fNIRS-own-marker sync check: OK (27 trials, class order matches EEG)
+Extracted 837 synchronized windows
+Label distribution: [279 279 279]
+
+ Normalizing...
+
+ Saving...
+
+ VP012 completed!
+EEG windows: (837, 16, 16, 2000)
+fNIRS windows: (837, 21, 16, 16, 30, 2)
+Labels: [279 279 279]
+[2026-08-09 11:11:27] DONE VP012 in 1.6 min | EEG: (837, 16, 16, 2000) | fNIRS: (837, 21, 16, 16, 30, 2) | Labels: [279 279 279]
+[2026-08-09 11:11:28] START processing VP016
+Processing VP016
+
+ Loading EEG...
+Loading EEG from: E:\kntu\Thesis\codes\DATA\VP016-EEG\cnt_nback.mat
+EEG loaded: 387560 samples, 200.0 Hz, 567 markers
+unique markers: [ 16  48  64  80  96 112 128 144]
+EEG mnt_nback.mat loaded: pos_3d shape (3, 30)
+
+ Loading and preprocessing fNIRS...
+Loading raw fNIRS from: E:\kntu\Thesis\codes\DATA\VP016-NIRS\cnt_nback.mat
+raw fNIRS sampling rate: 10.0 Hz
+Raw fNIRS: oxy (20722, 36), deoxy (20722, 36)
+Using oxy/deoxy fields directly as HbO/HbR (Beer-Lambert already applied by dataset authors; see Shin et al. 2018 Data Descriptor)...
+Skipping wavelet/MARA/lowpass filtering (MSTFDN-style: relying on the model's own large-kernel convolutions for implicit smoothing)...
+Resampling from 10.0 Hz to 10.0 Hz...
+Spatial mapping to 16x16...
+fNIRS preprocessed: (20722, 16, 16, 2)
+Saved fNIRS before/after QC plot for VP016
+
+ Normalizing fNIRS (subject-level, before windowing)...
+
+ Preprocessing EEG...
+Preprocessing EEG...
+Bad channels: ['Fp1', 'Fp2']
+ICA: using variance-based component selection (99% explained variance), picks=28, interpolated=2
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 4 components
+Fitting ICA took 6.7s.
+
+ EEG per-subject normalization stats computed: mean range [-1.59e-08, 8.13e-09], std range [2.93e-06, 8.20e-06]
+
+ Spatial mapping EEG to 16x16...
+EEG spatially mapped: (388433, 16, 16)
+
+ Extracting synchronized asymmetric windows...
+Extracting synchronized asymmetric sliding windows...
+EEG window: 10.0s, step: 1.0s
+fNIRS window: 3.0s, step: 1.0s
+D2 epoch-level filter disabled (isolation test) -- skipping ML-anomaly computation
+found 27 trial markers
+fNIRS-own-marker sync check: OK (27 trials, class order matches EEG)
+Extracted 827 synchronized windows
+Label distribution: [279 279 269]
+
+ Normalizing...
+
+ Saving...
+
+ VP013 completed!
+EEG windows: (827, 16, 16, 2000)
+fNIRS windows: (827, 21, 16, 16, 30, 2)
+Labels: [279 279 269]
+[2026-08-09 11:11:37] DONE VP013 in 1.4 min | EEG: (827, 16, 16, 2000) | fNIRS: (827, 21, 16, 16, 30, 2) | Labels: [279 279 269]
+[2026-08-09 11:11:38] START processing VP017
+Processing VP017
+
+ Loading EEG...
+Loading EEG from: E:\kntu\Thesis\codes\DATA\VP017-EEG\cnt_nback.mat
+EEG loaded: 387709 samples, 200.0 Hz, 567 markers
+unique markers: [ 16  48  64  80  96 112 128 144]
+EEG mnt_nback.mat loaded: pos_3d shape (3, 30)
+
+ Loading and preprocessing fNIRS...
+Loading raw fNIRS from: E:\kntu\Thesis\codes\DATA\VP017-NIRS\cnt_nback.mat
+raw fNIRS sampling rate: 10.0 Hz
+Raw fNIRS: oxy (20722, 36), deoxy (20722, 36)
+Using oxy/deoxy fields directly as HbO/HbR (Beer-Lambert already applied by dataset authors; see Shin et al. 2018 Data Descriptor)...
+Skipping wavelet/MARA/lowpass filtering (MSTFDN-style: relying on the model's own large-kernel convolutions for implicit smoothing)...
+Resampling from 10.0 Hz to 10.0 Hz...
+Spatial mapping to 16x16...
+fNIRS preprocessed: (20722, 16, 16, 2)
+Saved fNIRS before/after QC plot for VP017
+
+ Normalizing fNIRS (subject-level, before windowing)...
+
+ Preprocessing EEG...
+Preprocessing EEG...
+Bad channels: ['P7', 'Fp2', 'AFF6h']
+ICA: using variance-based component selection (99% explained variance), picks=28, interpolated=3
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 11 components
+
+ EEG per-subject normalization stats computed: mean range [-2.28e-09, 8.08e-09], std range [1.90e-06, 9.64e-06]
+
+ Spatial mapping EEG to 16x16...
+EEG spatially mapped: (386876, 16, 16)
+
+ Extracting synchronized asymmetric windows...
+Extracting synchronized asymmetric sliding windows...
+EEG window: 10.0s, step: 1.0s
+fNIRS window: 3.0s, step: 1.0s
+D2 epoch-level filter disabled (isolation test) -- skipping ML-anomaly computation
+found 27 trial markers
+fNIRS-own-marker sync check: OK (27 trials, class order matches EEG)
+Extracted 811 synchronized windows
+Label distribution: [279 279 253]
+
+ Normalizing...
+
+ Saving...
+
+ VP014 completed!
+EEG windows: (811, 16, 16, 2000)
+fNIRS windows: (811, 21, 16, 16, 30, 2)
+Labels: [279 279 253]
+[2026-08-09 11:11:42] DONE VP014 in 1.3 min | EEG: (811, 16, 16, 2000) | fNIRS: (811, 21, 16, 16, 30, 2) | Labels: [279 279 253]
+[2026-08-09 11:11:42] START processing VP018
+Processing VP018
+
+ Loading EEG...
+Loading EEG from: E:\kntu\Thesis\codes\DATA\VP018-EEG\cnt_nback.mat
+EEG loaded: 388265 samples, 200.0 Hz, 567 markers
+unique markers: [ 16  48  64  80  96 112 128 144]
+EEG mnt_nback.mat loaded: pos_3d shape (3, 30)
+
+ Loading and preprocessing fNIRS...
+Loading raw fNIRS from: E:\kntu\Thesis\codes\DATA\VP018-NIRS\cnt_nback.mat
+raw fNIRS sampling rate: 10.0 Hz
+Raw fNIRS: oxy (20752, 36), deoxy (20752, 36)
+Using oxy/deoxy fields directly as HbO/HbR (Beer-Lambert already applied by dataset authors; see Shin et al. 2018 Data Descriptor)...
+Skipping wavelet/MARA/lowpass filtering (MSTFDN-style: relying on the model's own large-kernel convolutions for implicit smoothing)...
+Resampling from 10.0 Hz to 10.0 Hz...
+Spatial mapping to 16x16...
+fNIRS preprocessed: (20752, 16, 16, 2)
+Saved fNIRS before/after QC plot for VP018
+
+ Normalizing fNIRS (subject-level, before windowing)...
+
+ Preprocessing EEG...
+Preprocessing EEG...
+Bad channels: ['T7', 'P7']
+ICA: using variance-based component selection (99% explained variance), picks=28, interpolated=2
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 10 components
+  find_bads_eog(VEOG) flagged components: []
+  find_bads_eog(HEOG) flagged components: []
+  IC0 flagged [argmax='eye blink', prob>=0.3]: brain=0.00, muscle artifact=0.00, eye blink=0.99, heart beat=0.00, line noise=0.00, channel noise=0.00, other=0.00
+  IC1 flagged [argmax='eye blink', prob>=0.3]: brain=0.04, muscle artifact=0.00, eye blink=0.75, heart beat=0.01, line noise=0.00, channel noise=0.01, other=0.18
+Removed 2 ICA components
+Dropped channels: ['HEOG', 'VEOG']
+Writing F:\preprocessing-history-thesis\D1\VP016\VP016_eeg_clean_raw.fif
+Closing F:\preprocessing-history-thesis\D1\VP016\VP016_eeg_clean_raw.fif
+[done]
+
+ EEG per-subject normalization stats computed: mean range [-4.96e-09, 3.19e-09], std range [4.91e-06, 1.31e-05]
+
+ Spatial mapping EEG to 16x16...
+EEG spatially mapped: (388728, 16, 16)
+
+ Extracting synchronized asymmetric windows...
+Extracting synchronized asymmetric sliding windows...
+EEG window: 10.0s, step: 1.0s
+fNIRS window: 3.0s, step: 1.0s
+D2 epoch-level filter disabled (isolation test) -- skipping ML-anomaly computation
+found 27 trial markers
+fNIRS-own-marker sync check: OK (27 trials, class order matches EEG)
+Extracted 827 synchronized windows
+Label distribution: [269 279 279]
+
+ Normalizing...
+
+ Saving...
+
+ VP011 completed!
+EEG windows: (827, 16, 16, 2000)
+fNIRS windows: (827, 21, 16, 16, 30, 2)
+Labels: [269 279 279]
+[2026-08-09 11:11:57] DONE VP011 in 2.3 min | EEG: (827, 16, 16, 2000) | fNIRS: (827, 21, 16, 16, 30, 2) | Labels: [269 279 279]
+[2026-08-09 11:11:58] START processing VP019
+Processing VP019
+
+ Loading EEG...
+Loading EEG from: E:\kntu\Thesis\codes\DATA\VP019-EEG\cnt_nback.mat
+EEG loaded: 388698 samples, 200.0 Hz, 567 markers
+unique markers: [ 16  48  64  80  96 112 128 144]
+EEG mnt_nback.mat loaded: pos_3d shape (3, 30)
+
+ Loading and preprocessing fNIRS...
+Loading raw fNIRS from: E:\kntu\Thesis\codes\DATA\VP019-NIRS\cnt_nback.mat
+raw fNIRS sampling rate: 10.0 Hz
+Raw fNIRS: oxy (20852, 36), deoxy (20852, 36)
+Using oxy/deoxy fields directly as HbO/HbR (Beer-Lambert already applied by dataset authors; see Shin et al. 2018 Data Descriptor)...
+Skipping wavelet/MARA/lowpass filtering (MSTFDN-style: relying on the model's own large-kernel convolutions for implicit smoothing)...
+Resampling from 10.0 Hz to 10.0 Hz...
+Spatial mapping to 16x16...
+fNIRS preprocessed: (20852, 16, 16, 2)
+Saved fNIRS before/after QC plot for VP019
+
+ Normalizing fNIRS (subject-level, before windowing)...
+
+ Preprocessing EEG...
+Preprocessing EEG...
+Bad channels: ['Fp1', 'FC5', 'P7', 'Fp2', 'AFF6h', 'T8']
+ICA: using variance-based component selection (99% explained variance), picks=28, interpolated=6
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 7 components
+
+ EEG per-subject normalization stats computed: mean range [-2.02e-09, 1.41e-09], std range [2.79e-06, 1.63e-05]
+
+ Spatial mapping EEG to 16x16...
+EEG spatially mapped: (388022, 16, 16)
+Saved EEG before/after (all-channels) QC plots for VP015
+
+ Extracting synchronized asymmetric windows...
+Extracting synchronized asymmetric sliding windows...
+EEG window: 10.0s, step: 1.0s
+fNIRS window: 3.0s, step: 1.0s
+D2 epoch-level filter disabled (isolation test) -- skipping ML-anomaly computation
+found 27 trial markers
+fNIRS-own-marker sync check: OK (27 trials, class order matches EEG)
+Extracted 801 synchronized windows
+Label distribution: [269 267 265]
+
+ Normalizing...
+
+ Saving...
+
+ VP015 completed!
+EEG windows: (801, 16, 16, 2000)
+fNIRS windows: (801, 21, 16, 16, 30, 2)
+Labels: [269 267 265]
+[2026-08-09 11:12:05] DONE VP015 in 1.3 min | EEG: (801, 16, 16, 2000) | fNIRS: (801, 21, 16, 16, 30, 2) | Labels: [269 267 265]
+[2026-08-09 11:12:05] START processing VP020
+Processing VP020
+
+ Loading EEG...
+Loading EEG from: E:\kntu\Thesis\codes\DATA\VP020-EEG\cnt_nback.mat
+EEG loaded: 388501 samples, 200.0 Hz, 567 markers
+unique markers: [ 16  48  64  80  96 112 128 144]
+EEG mnt_nback.mat loaded: pos_3d shape (3, 30)
+
+ Loading and preprocessing fNIRS...
+Loading raw fNIRS from: E:\kntu\Thesis\codes\DATA\VP020-NIRS\cnt_nback.mat
+raw fNIRS sampling rate: 10.0 Hz
+Raw fNIRS: oxy (20729, 36), deoxy (20729, 36)
+Using oxy/deoxy fields directly as HbO/HbR (Beer-Lambert already applied by dataset authors; see Shin et al. 2018 Data Descriptor)...
+Skipping wavelet/MARA/lowpass filtering (MSTFDN-style: relying on the model's own large-kernel convolutions for implicit smoothing)...
+Resampling from 10.0 Hz to 10.0 Hz...
+Spatial mapping to 16x16...
+fNIRS preprocessed: (20729, 16, 16, 2)
+Saved fNIRS before/after QC plot for VP020
+
+ Normalizing fNIRS (subject-level, before windowing)...
+
+ Preprocessing EEG...
+Preprocessing EEG...
+Bad channels: ['FC5', 'P7', 'FC6']
+ICA: using variance-based component selection (99% explained variance), picks=28, interpolated=3
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 6 components
+Fitting ICA took 37.8s.
+Fitting ICA took 12.3s.
+Fitting ICA took 29.9s.
+  find_bads_eog(VEOG) flagged components: [np.int64(0), np.int64(1)]
+  find_bads_eog(HEOG) flagged components: [np.int64(3), np.int64(8)]
+  IC0 flagged [argmax='eye blink', prob>=0.3, VEOG-correlation]: brain=0.00, muscle artifact=0.00, eye blink=0.99, heart beat=0.00, line noise=0.00, channel noise=0.00, other=0.01
+  IC1 flagged [argmax='eye blink', prob>=0.3, VEOG-correlation]: brain=0.01, muscle artifact=0.02, eye blink=0.58, heart beat=0.00, line noise=0.00, channel noise=0.10, other=0.29
+  IC3 flagged [prob>=0.3, HEOG-correlation]: brain=0.11, muscle artifact=0.00, eye blink=0.36, heart beat=0.00, line noise=0.00, channel noise=0.01, other=0.50
+  IC7 flagged [argmax='eye blink', prob>=0.3]: brain=0.01, muscle artifact=0.01, eye blink=0.94, heart beat=0.00, line noise=0.00, channel noise=0.01, other=0.03
+  IC8 flagged [HEOG-correlation]: brain=0.33, muscle artifact=0.05, eye blink=0.01, heart beat=0.00, line noise=0.00, channel noise=0.01, other=0.60
+  IC10 flagged [prob>=0.3]: brain=0.22, muscle artifact=0.38, eye blink=0.00, heart beat=0.00, line noise=0.00, channel noise=0.00, other=0.39
+Removed 6 ICA components
+Dropped channels: ['HEOG', 'VEOG']
+Writing F:\preprocessing-history-thesis\D1\VP017\VP017_eeg_clean_raw.fif
+Closing F:\preprocessing-history-thesis\D1\VP017\VP017_eeg_clean_raw.fif
+[done]
+  find_bads_eog(VEOG) flagged components: [np.int64(0)]
+  find_bads_eog(HEOG) flagged components: [np.int64(1)]
+  IC0 flagged [argmax='eye blink', prob>=0.3, VEOG-correlation]: brain=0.00, muscle artifact=0.00, eye blink=0.98, heart beat=0.00, line noise=0.00, channel noise=0.00, other=0.01
+  IC1 flagged [argmax='eye blink', prob>=0.3, HEOG-correlation]: brain=0.00, muscle artifact=0.00, eye blink=0.98, heart beat=0.00, line noise=0.00, channel noise=0.00, other=0.01
+  IC2 flagged [argmax='eye blink', prob>=0.3]: brain=0.04, muscle artifact=0.08, eye blink=0.41, heart beat=0.01, line noise=0.00, channel noise=0.13, other=0.34
+Removed 3 ICA components
+Dropped channels: ['HEOG', 'VEOG']
+Writing F:\preprocessing-history-thesis\D1\VP020\VP020_eeg_clean_raw.fif
+Closing F:\preprocessing-history-thesis\D1\VP020\VP020_eeg_clean_raw.fif
+[done]
+Fitting ICA took 53.1s.
+
+ EEG per-subject normalization stats computed: mean range [-6.36e-09, 7.32e-09], std range [1.40e-06, 4.42e-06]
+
+ Spatial mapping EEG to 16x16...
+EEG spatially mapped: (387560, 16, 16)
+
+ Extracting synchronized asymmetric windows...
+Extracting synchronized asymmetric sliding windows...
+EEG window: 10.0s, step: 1.0s
+fNIRS window: 3.0s, step: 1.0s
+D2 epoch-level filter disabled (isolation test) -- skipping ML-anomaly computation
+found 27 trial markers
+fNIRS-own-marker sync check: OK (27 trials, class order matches EEG)
+Extracted 837 synchronized windows
+Label distribution: [279 279 279]
+
+ Normalizing...
+
+ Saving...
+
+ VP016 completed!
+EEG windows: (837, 16, 16, 2000)
+fNIRS windows: (837, 21, 16, 16, 30, 2)
+Labels: [279 279 279]
+[2026-08-09 11:12:43] DONE VP016 in 1.3 min | EEG: (837, 16, 16, 2000) | fNIRS: (837, 21, 16, 16, 30, 2) | Labels: [279 279 279]
+[2026-08-09 11:12:44] START processing VP021
+Processing VP021
+
+ Loading EEG...
+Loading EEG from: E:\kntu\Thesis\codes\DATA\VP021-EEG\cnt_nback.mat
+EEG loaded: 388607 samples, 200.0 Hz, 567 markers
+unique markers: [ 16  48  64  80  96 112 128 144]
+EEG mnt_nback.mat loaded: pos_3d shape (3, 30)
+
+ Loading and preprocessing fNIRS...
+Loading raw fNIRS from: E:\kntu\Thesis\codes\DATA\VP021-NIRS\cnt_nback.mat
+raw fNIRS sampling rate: 10.0 Hz
+Raw fNIRS: oxy (20783, 36), deoxy (20783, 36)
+Using oxy/deoxy fields directly as HbO/HbR (Beer-Lambert already applied by dataset authors; see Shin et al. 2018 Data Descriptor)...
+Skipping wavelet/MARA/lowpass filtering (MSTFDN-style: relying on the model's own large-kernel convolutions for implicit smoothing)...
+Resampling from 10.0 Hz to 10.0 Hz...
+Spatial mapping to 16x16...
+fNIRS preprocessed: (20783, 16, 16, 2)
+Saved fNIRS before/after QC plot for VP021
+
+ Normalizing fNIRS (subject-level, before windowing)...
+
+ Preprocessing EEG...
+Preprocessing EEG...
+Bad channels: ['CP1', 'P7', 'CP2']
+ICA: using variance-based component selection (99% explained variance), picks=28, interpolated=3
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+  find_bads_eog(VEOG) flagged components: []
+  find_bads_eog(HEOG) flagged components: [np.int64(1)]
+  IC0 flagged [argmax='eye blink', prob>=0.3]: brain=0.00, muscle artifact=0.00, eye blink=0.98, heart beat=0.00, line noise=0.00, channel noise=0.00, other=0.01
+  IC1 flagged [argmax='eye blink', prob>=0.3, HEOG-correlation]: brain=0.00, muscle artifact=0.00, eye blink=1.00, heart beat=0.00, line noise=0.00, channel noise=0.00, other=0.00
+  IC2 flagged [argmax='muscle artifact', prob>=0.3]: brain=0.26, muscle artifact=0.48, eye blink=0.01, heart beat=0.01, line noise=0.00, channel noise=0.01, other=0.23
+Removed 3 ICA components
+Dropped channels: ['HEOG', 'VEOG']
+Writing F:\preprocessing-history-thesis\D1\VP019\VP019_eeg_clean_raw.fif
+Selecting by explained variance: 9 components
+Closing F:\preprocessing-history-thesis\D1\VP019\VP019_eeg_clean_raw.fif
+[done]
+  find_bads_eog(VEOG) flagged components: [np.int64(0)]
+  find_bads_eog(HEOG) flagged components: [np.int64(4)]
+  IC0 flagged [argmax='eye blink', prob>=0.3, VEOG-correlation]: brain=0.01, muscle artifact=0.01, eye blink=0.89, heart beat=0.00, line noise=0.00, channel noise=0.02, other=0.07
+  IC4 flagged [argmax='eye blink', prob>=0.3, HEOG-correlation]: brain=0.00, muscle artifact=0.00, eye blink=1.00, heart beat=0.00, line noise=0.00, channel noise=0.00, other=0.00
+  IC6 flagged [prob>=0.3]: brain=0.07, muscle artifact=0.04, eye blink=0.30, heart beat=0.00, line noise=0.00, channel noise=0.02, other=0.56
+  IC9 flagged [argmax='muscle artifact', prob>=0.3]: brain=0.03, muscle artifact=0.95, eye blink=0.00, heart beat=0.00, line noise=0.01, channel noise=0.00, other=0.00
+Removed 4 ICA components
+Dropped channels: ['HEOG', 'VEOG']
+Writing F:\preprocessing-history-thesis\D1\VP018\VP018_eeg_clean_raw.fif
+Closing F:\preprocessing-history-thesis\D1\VP018\VP018_eeg_clean_raw.fif
+[done]
+Fitting ICA took 20.0s.
+  find_bads_eog(VEOG) flagged components: [np.int64(0)]
+  find_bads_eog(HEOG) flagged components: [np.int64(2)]
+  IC0 flagged [argmax='eye blink', prob>=0.3, VEOG-correlation]: brain=0.00, muscle artifact=0.00, eye blink=0.99, heart beat=0.00, line noise=0.00, channel noise=0.00, other=0.01
+  IC1 flagged [argmax='eye blink', prob>=0.3]: brain=0.02, muscle artifact=0.05, eye blink=0.57, heart beat=0.00, line noise=0.00, channel noise=0.12, other=0.23
+  IC2 flagged [argmax='eye blink', prob>=0.3, HEOG-correlation]: brain=0.02, muscle artifact=0.01, eye blink=0.86, heart beat=0.01, line noise=0.00, channel noise=0.01, other=0.09
+  IC7 flagged [argmax='muscle artifact', prob>=0.3]: brain=0.16, muscle artifact=0.71, eye blink=0.01, heart beat=0.00, line noise=0.09, channel noise=0.03, other=0.00
+Removed 4 ICA components
+Dropped channels: ['HEOG', 'VEOG']
+Writing F:\preprocessing-history-thesis\D1\VP021\VP021_eeg_clean_raw.fif
+Closing F:\preprocessing-history-thesis\D1\VP021\VP021_eeg_clean_raw.fif
+[done]
+
+ EEG per-subject normalization stats computed: mean range [-1.91e-08, 6.93e-09], std range [2.40e-06, 7.35e-06]
+
+ Spatial mapping EEG to 16x16...
+EEG spatially mapped: (387709, 16, 16)
+Saved EEG before/after (all-channels) QC plots for VP017
+
+ Extracting synchronized asymmetric windows...
+Extracting synchronized asymmetric sliding windows...
+EEG window: 10.0s, step: 1.0s
+fNIRS window: 3.0s, step: 1.0s
+D2 epoch-level filter disabled (isolation test) -- skipping ML-anomaly computation
+found 27 trial markers
+fNIRS-own-marker sync check: OK (27 trials, class order matches EEG)
+Extracted 837 synchronized windows
+Label distribution: [279 279 279]
+
+ Normalizing...
+
+ Saving...
+
+ VP017 completed!
+EEG windows: (837, 16, 16, 2000)
+fNIRS windows: (837, 21, 16, 16, 30, 2)
+Labels: [279 279 279]
+[2026-08-09 11:13:26] DONE VP017 in 1.8 min | EEG: (837, 16, 16, 2000) | fNIRS: (837, 21, 16, 16, 30, 2) | Labels: [279 279 279]
+[2026-08-09 11:13:26] START processing VP022
+Processing VP022
+
+ Loading EEG...
+Loading EEG from: E:\kntu\Thesis\codes\DATA\VP022-EEG\cnt_nback.mat
+EEG loaded: 388120 samples, 200.0 Hz, 567 markers
+unique markers: [ 16  48  64  80  96 112 128 144]
+EEG mnt_nback.mat loaded: pos_3d shape (3, 30)
+
+ Loading and preprocessing fNIRS...
+Loading raw fNIRS from: E:\kntu\Thesis\codes\DATA\VP022-NIRS\cnt_nback.mat
+raw fNIRS sampling rate: 10.0 Hz
+Raw fNIRS: oxy (20771, 36), deoxy (20771, 36)
+Using oxy/deoxy fields directly as HbO/HbR (Beer-Lambert already applied by dataset authors; see Shin et al. 2018 Data Descriptor)...
+Skipping wavelet/MARA/lowpass filtering (MSTFDN-style: relying on the model's own large-kernel convolutions for implicit smoothing)...
+Resampling from 10.0 Hz to 10.0 Hz...
+Spatial mapping to 16x16...
+fNIRS preprocessed: (20771, 16, 16, 2)
+Saved fNIRS before/after QC plot for VP022
+
+ Normalizing fNIRS (subject-level, before windowing)...
+
+ Preprocessing EEG...
+Preprocessing EEG...
+Bad channels: ['T7', 'P7']
+ICA: using variance-based component selection (99% explained variance), picks=28, interpolated=2
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 14 components
+
+ EEG per-subject normalization stats computed: mean range [-3.32e-09, 6.94e-09], std range [3.10e-06, 6.12e-06]
+
+ Spatial mapping EEG to 16x16...
+EEG spatially mapped: (388501, 16, 16)
+
+ Extracting synchronized asymmetric windows...
+Extracting synchronized asymmetric sliding windows...
+EEG window: 10.0s, step: 1.0s
+fNIRS window: 3.0s, step: 1.0s
+D2 epoch-level filter disabled (isolation test) -- skipping ML-anomaly computation
+found 27 trial markers
+fNIRS-own-marker sync check: OK (27 trials, class order matches EEG)
+Extracted 837 synchronized windows
+Label distribution: [279 279 279]
+
+ Normalizing...
+
+ Saving...
+
+ VP020 completed!
+EEG windows: (837, 16, 16, 2000)
+fNIRS windows: (837, 21, 16, 16, 30, 2)
+Labels: [279 279 279]
+[2026-08-09 11:13:27] DONE VP020 in 1.4 min | EEG: (837, 16, 16, 2000) | fNIRS: (837, 21, 16, 16, 30, 2) | Labels: [279 279 279]
+[2026-08-09 11:13:27] START processing VP023
+Processing VP023
+
+ Loading EEG...
+Loading EEG from: E:\kntu\Thesis\codes\DATA\VP023-EEG\cnt_nback.mat
+EEG loaded: 387241 samples, 200.0 Hz, 567 markers
+unique markers: [ 16  48  64  80  96 112 128 144]
+EEG mnt_nback.mat loaded: pos_3d shape (3, 30)
+
+ Loading and preprocessing fNIRS...
+Loading raw fNIRS from: E:\kntu\Thesis\codes\DATA\VP023-NIRS\cnt_nback.mat
+raw fNIRS sampling rate: 10.0 Hz
+Raw fNIRS: oxy (20682, 36), deoxy (20682, 36)
+Using oxy/deoxy fields directly as HbO/HbR (Beer-Lambert already applied by dataset authors; see Shin et al. 2018 Data Descriptor)...
+Skipping wavelet/MARA/lowpass filtering (MSTFDN-style: relying on the model's own large-kernel convolutions for implicit smoothing)...
+Resampling from 10.0 Hz to 10.0 Hz...
+Spatial mapping to 16x16...
+fNIRS preprocessed: (20682, 16, 16, 2)
+Saved fNIRS before/after QC plot for VP023
+
+ Normalizing fNIRS (subject-level, before windowing)...
+
+ Preprocessing EEG...
+Preprocessing EEG...
+Bad channels: ['Fp1', 'AFF5h', 'Fp2', 'AFF6h']
+ICA: using variance-based component selection (99% explained variance), picks=28, interpolated=4
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 11 components
+
+ EEG per-subject normalization stats computed: mean range [-1.50e-09, 2.17e-09], std range [2.40e-06, 6.43e-06]
+
+ Spatial mapping EEG to 16x16...
+EEG spatially mapped: (388698, 16, 16)
+
+ Extracting synchronized asymmetric windows...
+Extracting synchronized asymmetric sliding windows...
+EEG window: 10.0s, step: 1.0s
+fNIRS window: 3.0s, step: 1.0s
+D2 epoch-level filter disabled (isolation test) -- skipping ML-anomaly computation
+found 27 trial markers
+fNIRS-own-marker sync check: OK (27 trials, class order matches EEG)
+Extracted 837 synchronized windows
+Label distribution: [279 279 279]
+
+ Normalizing...
+
+ Saving...
+
+ VP019 completed!
+EEG windows: (837, 16, 16, 2000)
+fNIRS windows: (837, 21, 16, 16, 30, 2)
+Labels: [279 279 279]
+[2026-08-09 11:13:36] DONE VP019 in 1.6 min | EEG: (837, 16, 16, 2000) | fNIRS: (837, 21, 16, 16, 30, 2) | Labels: [279 279 279]
+[2026-08-09 11:13:36] START processing VP024
+Processing VP024
+
+ Loading EEG...
+Loading EEG from: E:\kntu\Thesis\codes\DATA\VP024-EEG\cnt_nback.mat
+EEG loaded: 387199 samples, 200.0 Hz, 567 markers
+unique markers: [ 16  48  64  80  96 112 128 144]
+EEG mnt_nback.mat loaded: pos_3d shape (3, 30)
+
+ Loading and preprocessing fNIRS...
+Loading raw fNIRS from: E:\kntu\Thesis\codes\DATA\VP024-NIRS\cnt_nback.mat
+raw fNIRS sampling rate: 10.0 Hz
+Raw fNIRS: oxy (20714, 36), deoxy (20714, 36)
+Using oxy/deoxy fields directly as HbO/HbR (Beer-Lambert already applied by dataset authors; see Shin et al. 2018 Data Descriptor)...
+Skipping wavelet/MARA/lowpass filtering (MSTFDN-style: relying on the model's own large-kernel convolutions for implicit smoothing)...
+Resampling from 10.0 Hz to 10.0 Hz...
+Spatial mapping to 16x16...
+fNIRS preprocessed: (20714, 16, 16, 2)
+Saved fNIRS before/after QC plot for VP024
+
+ Normalizing fNIRS (subject-level, before windowing)...
+
+ Preprocessing EEG...
+Preprocessing EEG...
+Bad channels: ['Fp1', 'AFF5h', 'T7', 'P7', 'Fp2', 'AFF6h', 'FC6']
+ICA: using variance-based component selection (99% explained variance), picks=28, interpolated=7
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 13 components
+
+ EEG per-subject normalization stats computed: mean range [-1.08e-08, 1.69e-08], std range [5.26e-06, 1.60e-05]
+
+ Spatial mapping EEG to 16x16...
+EEG spatially mapped: (388265, 16, 16)
+Saved EEG before/after (all-channels) QC plots for VP018
+
+ Extracting synchronized asymmetric windows...
+Extracting synchronized asymmetric sliding windows...
+EEG window: 10.0s, step: 1.0s
+fNIRS window: 3.0s, step: 1.0s
+D2 epoch-level filter disabled (isolation test) -- skipping ML-anomaly computation
+found 27 trial markers
+fNIRS-own-marker sync check: OK (27 trials, class order matches EEG)
+Extracted 837 synchronized windows
+Label distribution: [279 279 279]
+
+ Normalizing...
+
+ Saving...
+
+ VP018 completed!
+EEG windows: (837, 16, 16, 2000)
+fNIRS windows: (837, 21, 16, 16, 30, 2)
+Labels: [279 279 279]
+[2026-08-09 11:13:44] DONE VP018 in 2.0 min | EEG: (837, 16, 16, 2000) | fNIRS: (837, 21, 16, 16, 30, 2) | Labels: [279 279 279]
+[2026-08-09 11:13:45] START processing VP025
+Processing VP025
+
+ Loading EEG...
+Loading EEG from: E:\kntu\Thesis\codes\DATA\VP025-EEG\cnt_nback.mat
+EEG loaded: 387327 samples, 200.0 Hz, 567 markers
+unique markers: [ 16  48  64  80  96 112 128 144]
+EEG mnt_nback.mat loaded: pos_3d shape (3, 30)
+
+ Loading and preprocessing fNIRS...
+Loading raw fNIRS from: E:\kntu\Thesis\codes\DATA\VP025-NIRS\cnt_nback.mat
+raw fNIRS sampling rate: 10.0 Hz
+Raw fNIRS: oxy (20747, 36), deoxy (20747, 36)
+Using oxy/deoxy fields directly as HbO/HbR (Beer-Lambert already applied by dataset authors; see Shin et al. 2018 Data Descriptor)...
+Skipping wavelet/MARA/lowpass filtering (MSTFDN-style: relying on the model's own large-kernel convolutions for implicit smoothing)...
+Resampling from 10.0 Hz to 10.0 Hz...
+Spatial mapping to 16x16...
+fNIRS preprocessed: (20747, 16, 16, 2)
+Saved fNIRS before/after QC plot for VP025
+
+ Normalizing fNIRS (subject-level, before windowing)...
+
+ Preprocessing EEG...
+Preprocessing EEG...
+Bad channels: ['Fp1', 'Fp2', 'AFF6h', 'FC6', 'T8']
+ICA: using variance-based component selection (99% explained variance), picks=28, interpolated=5
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 4 components
+Fitting ICA took 9.4s.
+Fitting ICA took 38.0s.
+  find_bads_eog(VEOG) flagged components: []
+  find_bads_eog(HEOG) flagged components: []
+  IC0 flagged [argmax='eye blink', prob>=0.3]: brain=0.01, muscle artifact=0.00, eye blink=0.99, heart beat=0.00, line noise=0.00, channel noise=0.00, other=0.00
+  IC1 flagged [argmax='eye blink', prob>=0.3]: brain=0.10, muscle artifact=0.03, eye blink=0.73, heart beat=0.04, line noise=0.00, channel noise=0.02, other=0.08
+Removed 2 ICA components
+Dropped channels: ['HEOG', 'VEOG']
+Writing F:\preprocessing-history-thesis\D1\VP025\VP025_eeg_clean_raw.fif
+Closing F:\preprocessing-history-thesis\D1\VP025\VP025_eeg_clean_raw.fif
+[done]
+
+ EEG per-subject normalization stats computed: mean range [-2.67e-09, 4.04e-09], std range [2.54e-06, 7.00e-06]
+
+ Spatial mapping EEG to 16x16...
+EEG spatially mapped: (388607, 16, 16)
+
+ Extracting synchronized asymmetric windows...
+Extracting synchronized asymmetric sliding windows...
+EEG window: 10.0s, step: 1.0s
+fNIRS window: 3.0s, step: 1.0s
+D2 epoch-level filter disabled (isolation test) -- skipping ML-anomaly computation
+found 27 trial markers
+fNIRS-own-marker sync check: OK (27 trials, class order matches EEG)
+Extracted 812 synchronized windows
+Label distribution: [269 269 274]
+
+ Normalizing...
+
+ Saving...
+
+ VP021 completed!
+EEG windows: (812, 16, 16, 2000)
+fNIRS windows: (812, 21, 16, 16, 30, 2)
+Labels: [269 269 274]
+[2026-08-09 11:14:14] DONE VP021 in 1.5 min | EEG: (812, 16, 16, 2000) | fNIRS: (812, 21, 16, 16, 30, 2) | Labels: [269 269 274]
+[2026-08-09 11:14:14] START processing VP026
+Processing VP026
+
+ Loading EEG...
+Loading EEG from: E:\kntu\Thesis\codes\DATA\VP026-EEG\cnt_nback.mat
+EEG loaded: 386760 samples, 200.0 Hz, 567 markers
+unique markers: [ 16  48  64  80  96 112 128 144]
+EEG mnt_nback.mat loaded: pos_3d shape (3, 30)
+
+ Loading and preprocessing fNIRS...
+Loading raw fNIRS from: E:\kntu\Thesis\codes\DATA\VP026-NIRS\cnt_nback.mat
+raw fNIRS sampling rate: 10.0 Hz
+Raw fNIRS: oxy (20656, 36), deoxy (20656, 36)
+Using oxy/deoxy fields directly as HbO/HbR (Beer-Lambert already applied by dataset authors; see Shin et al. 2018 Data Descriptor)...
+Skipping wavelet/MARA/lowpass filtering (MSTFDN-style: relying on the model's own large-kernel convolutions for implicit smoothing)...
+Resampling from 10.0 Hz to 10.0 Hz...
+Spatial mapping to 16x16...
+fNIRS preprocessed: (20656, 16, 16, 2)
+Saved fNIRS before/after QC plot for VP026
+
+ Normalizing fNIRS (subject-level, before windowing)...
+
+ Preprocessing EEG...
+Preprocessing EEG...
+Bad channels: ['Fp1', 'AFF5h', 'Fp2', 'AFF6h']
+ICA: using variance-based component selection (99% explained variance), picks=28, interpolated=4
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 7 components
+  find_bads_eog(VEOG) flagged components: []
+  find_bads_eog(HEOG) flagged components: []
+  IC0 flagged [argmax='eye blink', prob>=0.3]: brain=0.01, muscle artifact=0.00, eye blink=0.97, heart beat=0.00, line noise=0.00, channel noise=0.00, other=0.01
+  IC2 flagged [argmax='eye blink', prob>=0.3]: brain=0.49, muscle artifact=0.00, eye blink=0.50, heart beat=0.00, line noise=0.00, channel noise=0.00, other=0.01
+  IC7 flagged [argmax='muscle artifact', prob>=0.3]: brain=0.06, muscle artifact=0.81, eye blink=0.00, heart beat=0.00, line noise=0.13, channel noise=0.00, other=0.00
+Removed 3 ICA components
+Dropped channels: ['HEOG', 'VEOG']
+Writing F:\preprocessing-history-thesis\D1\VP023\VP023_eeg_clean_raw.fif
+Closing F:\preprocessing-history-thesis\D1\VP023\VP023_eeg_clean_raw.fif
+[done]
+Fitting ICA took 59.7s.
+Fitting ICA took 58.1s.
+  find_bads_eog(VEOG) flagged components: [np.int64(0), np.int64(10), np.int64(9)]
+  find_bads_eog(HEOG) flagged components: [np.int64(4)]
+  Rescued from EOG-only rejection (ICLabel brain-prob >= 0.5): [np.int64(10)]
+  IC0 flagged [argmax='eye blink', prob>=0.3, VEOG-correlation]: brain=0.00, muscle artifact=0.00, eye blink=0.96, heart beat=0.00, line noise=0.00, channel noise=0.01, other=0.02
+  IC4 flagged [argmax='eye blink', prob>=0.3, HEOG-correlation]: brain=0.00, muscle artifact=0.00, eye blink=0.99, heart beat=0.00, line noise=0.00, channel noise=0.00, other=0.01
+  IC7 flagged [argmax='muscle artifact', prob>=0.3]: brain=0.02, muscle artifact=0.85, eye blink=0.08, heart beat=0.00, line noise=0.00, channel noise=0.00, other=0.05
+  IC8 flagged [prob>=0.3]: brain=0.49, muscle artifact=0.31, eye blink=0.03, heart beat=0.01, line noise=0.00, channel noise=0.00, other=0.16
+  IC9 flagged [argmax='eye blink', prob>=0.3, VEOG-correlation]: brain=0.01, muscle artifact=0.39, eye blink=0.59, heart beat=0.00, line noise=0.00, channel noise=0.00, other=0.02
+  IC11 flagged [argmax='muscle artifact', prob>=0.3]: brain=0.23, muscle artifact=0.47, eye blink=0.02, heart beat=0.00, line noise=0.05, channel noise=0.02, other=0.20
+  IC12 flagged [prob>=0.3]: brain=0.49, muscle artifact=0.11, eye blink=0.34, heart beat=0.01, line noise=0.01, channel noise=0.00, other=0.03
+Removed 7 ICA components
+Dropped channels: ['HEOG', 'VEOG']
+Writing F:\preprocessing-history-thesis\D1\VP022\VP022_eeg_clean_raw.fif
+Closing F:\preprocessing-history-thesis\D1\VP022\VP022_eeg_clean_raw.fif
+[done]
+  find_bads_eog(VEOG) flagged components: [np.int64(0), np.int64(1)]
+  find_bads_eog(HEOG) flagged components: [np.int64(10)]
+  IC0 flagged [argmax='eye blink', prob>=0.3, VEOG-correlation]: brain=0.01, muscle artifact=0.00, eye blink=0.98, heart beat=0.00, line noise=0.00, channel noise=0.00, other=0.01
+  IC1 flagged [argmax='eye blink', prob>=0.3, VEOG-correlation]: brain=0.01, muscle artifact=0.11, eye blink=0.86, heart beat=0.00, line noise=0.00, channel noise=0.00, other=0.02
+  IC10 flagged [argmax='muscle artifact', prob>=0.3, HEOG-correlation]: brain=0.00, muscle artifact=0.62, eye blink=0.38, heart beat=0.00, line noise=0.00, channel noise=0.00, other=0.00
+Removed 3 ICA components
+Dropped channels: ['HEOG', 'VEOG']
+Writing F:\preprocessing-history-thesis\D1\VP024\VP024_eeg_clean_raw.fif
+Closing F:\preprocessing-history-thesis\D1\VP024\VP024_eeg_clean_raw.fif
+[done]
+Fitting ICA took 39.2s.
+  find_bads_eog(VEOG) flagged components: [np.int64(0)]
+  find_bads_eog(HEOG) flagged components: []
+  IC0 flagged [argmax='eye blink', prob>=0.3, VEOG-correlation]: brain=0.02, muscle artifact=0.00, eye blink=0.93, heart beat=0.00, line noise=0.00, channel noise=0.00, other=0.04
+  IC2 flagged [argmax='eye blink', prob>=0.3]: brain=0.01, muscle artifact=0.00, eye blink=0.98, heart beat=0.00, line noise=0.00, channel noise=0.00, other=0.00
+  IC5 flagged [argmax='muscle artifact', prob>=0.3]: brain=0.01, muscle artifact=0.71, eye blink=0.06, heart beat=0.02, line noise=0.00, channel noise=0.00, other=0.19
+  IC6 flagged [argmax='muscle artifact', prob>=0.3]: brain=0.03, muscle artifact=0.96, eye blink=0.00, heart beat=0.00, line noise=0.01, channel noise=0.00, other=0.00
+Removed 4 ICA components
+Dropped channels: ['HEOG', 'VEOG']
+Writing F:\preprocessing-history-thesis\D1\VP026\VP026_eeg_clean_raw.fif
+Closing F:\preprocessing-history-thesis\D1\VP026\VP026_eeg_clean_raw.fif
+[done]
+
+ EEG per-subject normalization stats computed: mean range [-1.47e-09, 1.36e-09], std range [2.28e-06, 9.78e-06]
+
+ Spatial mapping EEG to 16x16...
+EEG spatially mapped: (387327, 16, 16)
+Saved EEG before/after (all-channels) QC plots for VP025
+
+ Extracting synchronized asymmetric windows...
+Extracting synchronized asymmetric sliding windows...
+EEG window: 10.0s, step: 1.0s
+fNIRS window: 3.0s, step: 1.0s
+D2 epoch-level filter disabled (isolation test) -- skipping ML-anomaly computation
+found 27 trial markers
+fNIRS-own-marker sync check: OK (27 trials, class order matches EEG)
+Extracted 827 synchronized windows
+Label distribution: [269 279 279]
+
+ Normalizing...
+
+ Saving...
+
+ VP025 completed!
+EEG windows: (827, 16, 16, 2000)
+fNIRS windows: (827, 21, 16, 16, 30, 2)
+Labels: [269 279 279]
+[2026-08-09 11:15:03] DONE VP025 in 1.3 min | EEG: (827, 16, 16, 2000) | fNIRS: (827, 21, 16, 16, 30, 2) | Labels: [269 279 279]
+
+ EEG per-subject normalization stats computed: mean range [-3.78e-09, 6.00e-09], std range [2.35e-06, 6.41e-06]
+
+ Spatial mapping EEG to 16x16...
+EEG spatially mapped: (387241, 16, 16)
+Saved EEG before/after (all-channels) QC plots for VP023
+
+ Extracting synchronized asymmetric windows...
+Extracting synchronized asymmetric sliding windows...
+EEG window: 10.0s, step: 1.0s
+fNIRS window: 3.0s, step: 1.0s
+D2 epoch-level filter disabled (isolation test) -- skipping ML-anomaly computation
+found 27 trial markers
+fNIRS-own-marker sync check: OK (27 trials, class order matches EEG)
+Extracted 837 synchronized windows
+Label distribution: [279 279 279]
+
+ Normalizing...
+
+ Saving...
+
+ VP023 completed!
+EEG windows: (837, 16, 16, 2000)
+fNIRS windows: (837, 21, 16, 16, 30, 2)
+Labels: [279 279 279]
+[2026-08-09 11:15:15] DONE VP023 in 1.8 min | EEG: (837, 16, 16, 2000) | fNIRS: (837, 21, 16, 16, 30, 2) | Labels: [279 279 279]
+
+ EEG per-subject normalization stats computed: mean range [-3.28e-09, 1.86e-09], std range [2.93e-06, 7.25e-06]
+
+ Spatial mapping EEG to 16x16...
+EEG spatially mapped: (387199, 16, 16)
+
+ Extracting synchronized asymmetric windows...
+Extracting synchronized asymmetric sliding windows...
+EEG window: 10.0s, step: 1.0s
+fNIRS window: 3.0s, step: 1.0s
+D2 epoch-level filter disabled (isolation test) -- skipping ML-anomaly computation
+found 27 trial markers
+fNIRS-own-marker sync check: OK (27 trials, class order matches EEG)
+Extracted 837 synchronized windows
+Label distribution: [279 279 279]
+
+ Normalizing...
+
+ Saving...
+
+ VP024 completed!
+EEG windows: (837, 16, 16, 2000)
+fNIRS windows: (837, 21, 16, 16, 30, 2)
+Labels: [279 279 279]
+[2026-08-09 11:15:45] DONE VP024 in 2.1 min | EEG: (837, 16, 16, 2000) | fNIRS: (837, 21, 16, 16, 30, 2) | Labels: [279 279 279]
+
+ EEG per-subject normalization stats computed: mean range [-7.35e-10, 1.97e-09], std range [2.81e-06, 7.88e-06]
+
+ Spatial mapping EEG to 16x16...
+EEG spatially mapped: (388120, 16, 16)
+Saved EEG before/after (all-channels) QC plots for VP022
+
+ Extracting synchronized asymmetric windows...
+Extracting synchronized asymmetric sliding windows...
+EEG window: 10.0s, step: 1.0s
+fNIRS window: 3.0s, step: 1.0s
+D2 epoch-level filter disabled (isolation test) -- skipping ML-anomaly computation
+found 27 trial markers
+fNIRS-own-marker sync check: OK (27 trials, class order matches EEG)
+Extracted 837 synchronized windows
+Label distribution: [279 279 279]
+
+ Normalizing...
+
+ Saving...
+
+ VP022 completed!
+EEG windows: (837, 16, 16, 2000)
+fNIRS windows: (837, 21, 16, 16, 30, 2)
+Labels: [279 279 279]
+[2026-08-09 11:15:36] DONE VP022 in 2.2 min | EEG: (837, 16, 16, 2000) | fNIRS: (837, 21, 16, 16, 30, 2) | Labels: [279 279 279]
+
+ EEG per-subject normalization stats computed: mean range [-2.61e-09, 1.04e-08], std range [1.72e-06, 1.08e-05]
+
+ Spatial mapping EEG to 16x16...
+EEG spatially mapped: (386760, 16, 16)
+
+ Extracting synchronized asymmetric windows...
+Extracting synchronized asymmetric sliding windows...
+EEG window: 10.0s, step: 1.0s
+fNIRS window: 3.0s, step: 1.0s
+D2 epoch-level filter disabled (isolation test) -- skipping ML-anomaly computation
+found 27 trial markers
+fNIRS-own-marker sync check: OK (27 trials, class order matches EEG)
+Extracted 833 synchronized windows
+Label distribution: [275 279 279]
+
+ Normalizing...
+
+ Saving...
+
+ VP026 completed!
+EEG windows: (833, 16, 16, 2000)
+fNIRS windows: (833, 21, 16, 16, 30, 2)
+Labels: [275 279 279]
+[2026-08-09 11:16:03] DONE VP026 in 1.8 min | EEG: (833, 16, 16, 2000) | fNIRS: (833, 21, 16, 16, 30, 2) | Labels: [275 279 279]
+[2026-08-09 11:08:03] ===== PIPELINE STARTED =====
+MULTIMODAL PREPROCESSING PIPELINE
+EEG window: 10.0s, step: 1.0s
+fNIRS window: 3.0s, step: 1.0s
+fNIRS epoch: 18.0s
+fNIRS sampling rate: 10.0 Hz
+============================================================
+  Parallel preprocessing -- worker count calculation
+============================================================
+  Physical cores available    : 14
+  RAM available right now     : 19.4 GB
+  Safety margin reserved      : 4.0 GB
+  Usable RAM for workers      : 15.4 GB
+  Estimated peak RAM/subject  : 3.0 GB
+  Memory-limited worker count : 5
+  CPU-limited worker count    : 14
+  ==> Using 5 parallel workers
+============================================================
+
+Starting parallel preprocessing of 26 subjects with 5 workers...
+
+  [OK] VP004    status=OK             time=0.0 min peak_rss=0.18 GB
+  [OK] VP006    status=OK             time=0.87 min peak_rss=0.61 GB
+  [OK] VP001    status=OK             time=0.87 min peak_rss=0.62 GB
+  [OK] VP003    status=OK             time=0.89 min peak_rss=0.38 GB
+  [OK] VP002    status=OK             time=1.11 min peak_rss=0.61 GB
+  [OK] VP008    status=OK             time=0.67 min peak_rss=0.62 GB
+  [OK] VP005    status=OK             time=1.74 min peak_rss=0.64 GB
+  [OK] VP009    status=OK             time=1.21 min peak_rss=0.42 GB
+  [OK] VP007    status=OK             time=1.47 min peak_rss=0.64 GB
+  [OK] VP010    status=OK             time=1.63 min peak_rss=0.63 GB
+  [OK] VP012    status=OK             time=1.65 min peak_rss=0.62 GB
+  [OK] VP013    status=OK             time=1.45 min peak_rss=0.41 GB
+  [OK] VP014    status=OK             time=1.29 min peak_rss=0.43 GB
+  [OK] VP011    status=OK             time=2.33 min peak_rss=0.54 GB
+  [OK] VP015    status=OK             time=1.27 min peak_rss=0.55 GB
+  [OK] VP016    status=OK             time=1.26 min peak_rss=0.6 GB
+  [OK] VP017    status=OK             time=1.81 min peak_rss=0.34 GB
+  [OK] VP020    status=OK             time=1.37 min peak_rss=0.4 GB
+  [OK] VP019    status=OK             time=1.65 min peak_rss=0.35 GB
+  [OK] VP018    status=OK             time=2.04 min peak_rss=0.33 GB
+  [OK] VP021    status=OK             time=1.51 min peak_rss=0.54 GB
+  [OK] VP025    status=OK             time=1.31 min peak_rss=0.31 GB
+  [OK] VP023    status=OK             time=1.8 min peak_rss=0.42 GB
+  [OK] VP022    status=OK             time=2.16 min peak_rss=0.35 GB
+  [OK] VP024    status=OK             time=2.16 min peak_rss=0.39 GB
+  [OK] VP026    status=OK             time=1.82 min peak_rss=0.53 GB
+
+============================================================
+  Done -- 26/26 subjects succeeded, total time: 8.0 min
+============================================================
+ALL THE SELECTED SUBJECTS PROCESSED

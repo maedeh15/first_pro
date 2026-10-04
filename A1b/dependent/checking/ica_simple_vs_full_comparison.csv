@@ -1,0 +1,6 @@
+﻿subject,n_simple_argmax_only,n_full_pipeline,n_shared,n_only_in_full,only_in_full_ics,n_only_in_simple,pct_agreement
+VP004,3,3,3,0,[],0,100.0
+VP015,2,2,2,0,[],0,100.0
+VP018,3,4,3,1,[6],0,75.0
+VP019,3,3,3,0,[],0,100.0
+VP020,3,3,3,0,[],0,100.0

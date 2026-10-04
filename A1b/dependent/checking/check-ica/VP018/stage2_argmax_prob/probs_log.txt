@@ -1,0 +1,13 @@
+Subject: VP018   Stage: stage2_argmax_prob
+Total excluded so far: [0, 4, 6, 9]
+Newly excluded this stage: [6]
+
+IC6 (VP018, stage2_argmax_prob):
+  argmax label: 'other'
+    brain             : 0.072
+    muscle artifact   : 0.038
+    eye blink         : 0.303
+    heart beat        : 0.004
+    line noise        : 0.002
+    channel noise     : 0.023
+    other             : 0.559  <-- argmax

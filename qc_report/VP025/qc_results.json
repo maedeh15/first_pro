@@ -1,0 +1,210 @@
+[
+  {
+    "metric": "RAW: flat/dead channels (std < 0.05 uV)",
+    "raw_value": 0,
+    "clean_value": null,
+    "status": "PASS",
+    "likely_artifact": "",
+    "detail": "[]"
+  },
+  {
+    "metric": "RAW: clipped/saturated channels (>1.0% samples at extremes)",
+    "raw_value": 0,
+    "clean_value": null,
+    "status": "PASS",
+    "likely_artifact": "",
+    "detail": "[]"
+  },
+  {
+    "metric": "RAW: high-kurtosis channels (excess kurtosis > 5.0)",
+    "raw_value": 0,
+    "clean_value": null,
+    "status": "PASS",
+    "likely_artifact": "",
+    "detail": "[]"
+  },
+  {
+    "metric": "RAW: fraction of gross-amplitude epochs (>150.0 uV p2p, 2s epochs)",
+    "raw_value": 0.26357733175914994,
+    "clean_value": null,
+    "status": "FAIL",
+    "likely_artifact": "Movement artifact / muscle burst / electrode pop",
+    "detail": "mean std=52.29uV, mean whole-recording ptp=456.93uV, mean skew=0.73"
+  },
+  {
+    "metric": "PREPROCESSED: flat/dead channels (std < 0.05 uV)",
+    "raw_value": 0,
+    "clean_value": null,
+    "status": "PASS",
+    "likely_artifact": "",
+    "detail": "[]"
+  },
+  {
+    "metric": "PREPROCESSED: clipped/saturated channels (>1.0% samples at extremes)",
+    "raw_value": 0,
+    "clean_value": null,
+    "status": "PASS",
+    "likely_artifact": "",
+    "detail": "[]"
+  },
+  {
+    "metric": "PREPROCESSED: high-kurtosis channels (excess kurtosis > 5.0)",
+    "raw_value": 4,
+    "clean_value": null,
+    "status": "WARN",
+    "likely_artifact": "Spiky transient artifacts (eye blinks, electrode pops, EMG bursts)",
+    "detail": "['FC5', 'T7', 'CP5', 'C4']"
+  },
+  {
+    "metric": "PREPROCESSED: fraction of gross-amplitude epochs (>150.0 uV p2p, 2s epochs)",
+    "raw_value": 0.0003320543093270366,
+    "clean_value": null,
+    "status": "PASS",
+    "likely_artifact": "",
+    "detail": "mean std=4.87uV, mean whole-recording ptp=110.74uV, mean skew=-0.02"
+  },
+  {
+    "metric": "RAW: line noise peak SNR (50/60 Hz)",
+    "raw_value": 20.915338160248893,
+    "clean_value": null,
+    "status": "FAIL",
+    "likely_artifact": "Power-line interference (50.0 Hz)",
+    "detail": "{50.0: np.float64(20.92), 60.0: np.float64(0.36)}"
+  },
+  {
+    "metric": "PREPROCESSED: line noise peak SNR (50/60 Hz)",
+    "raw_value": null,
+    "clean_value": null,
+    "status": "INFO",
+    "likely_artifact": "",
+    "detail": "Skipped -- [50.0, 60.0] Hz all lie above this signal's lowpass filter cutoff (40.0 Hz), so any 'line noise' reading there would just be filter stopband floor, not real interference."
+  },
+  {
+    "metric": "Band power [delta] raw vs clean (Wilcoxon signed-rank)",
+    "raw_value": 492.44079394375586,
+    "clean_value": 3.4292523504711676,
+    "status": "INFO",
+    "likely_artifact": "",
+    "detail": "pct_change=-99.3%, wilcoxon_p=1.49e-08, paired_t_p=0.04404"
+  },
+  {
+    "metric": "Band power [theta] raw vs clean (Wilcoxon signed-rank)",
+    "raw_value": 22.22011962335323,
+    "clean_value": 0.5318023384904768,
+    "status": "INFO",
+    "likely_artifact": "",
+    "detail": "pct_change=-97.6%, wilcoxon_p=3.725e-08, paired_t_p=0.03575"
+  },
+  {
+    "metric": "Band power [alpha] raw vs clean (Wilcoxon signed-rank)",
+    "raw_value": 2.028045211670855,
+    "clean_value": 0.35402198922996275,
+    "status": "INFO",
+    "likely_artifact": "",
+    "detail": "pct_change=-82.5%, wilcoxon_p=7.451e-08, paired_t_p=0.003933"
+  },
+  {
+    "metric": "Band power [beta] raw vs clean (Wilcoxon signed-rank)",
+    "raw_value": 1.0119346420727449,
+    "clean_value": 0.30161689553719534,
+    "status": "INFO",
+    "likely_artifact": "",
+    "detail": "pct_change=-70.2%, wilcoxon_p=8.196e-07, paired_t_p=0.006595"
+  },
+  {
+    "metric": "Band power [gamma] raw vs clean (Wilcoxon signed-rank)",
+    "raw_value": 0.7449344956652713,
+    "clean_value": 0.16721251791717942,
+    "status": "INFO",
+    "likely_artifact": "",
+    "detail": "pct_change=-77.6%, wilcoxon_p=5.215e-07, paired_t_p=0.01994"
+  },
+  {
+    "metric": "Band power [muscle_hf] raw vs clean (Wilcoxon signed-rank)",
+    "raw_value": 0.8162329436896076,
+    "clean_value": 0.000964709958003326,
+    "status": "INFO",
+    "likely_artifact": "EMG/muscle power reduced by cleaning (expected & good)",
+    "detail": "pct_change=-99.9%, wilcoxon_p=7.451e-09, paired_t_p=0.02327"
+  },
+  {
+    "metric": "RAW: fraction of non-stationary channels (ADF p >= 0.05)",
+    "raw_value": 0.0,
+    "clean_value": null,
+    "status": "PASS",
+    "likely_artifact": "",
+    "detail": "mean ADF p-value=2.805e-09"
+  },
+  {
+    "metric": "PREPROCESSED: fraction of non-stationary channels (ADF p >= 0.05)",
+    "raw_value": 0.0,
+    "clean_value": null,
+    "status": "PASS",
+    "likely_artifact": "",
+    "detail": "mean ADF p-value=0"
+  },
+  {
+    "metric": "RAW: fraction of non-Gaussian channels (Shapiro-Wilk p < 0.05)",
+    "raw_value": 1.0,
+    "clean_value": null,
+    "status": "INFO",
+    "likely_artifact": "Heavy-tailed/non-Gaussian amplitude distribution -- consistent with residual blink/muscle spikes if fraction is high",
+    "detail": "mean Shapiro p=9.623e-22, mean KS p=5.37e-10"
+  },
+  {
+    "metric": "PREPROCESSED: fraction of non-Gaussian channels (Shapiro-Wilk p < 0.05)",
+    "raw_value": 1.0,
+    "clean_value": null,
+    "status": "INFO",
+    "likely_artifact": "Heavy-tailed/non-Gaussian amplitude distribution -- consistent with residual blink/muscle spikes if fraction is high",
+    "detail": "mean Shapiro p=4.562e-08, mean KS p=0.1412"
+  },
+  {
+    "metric": "RAW: inter-channel correlation",
+    "raw_value": 0.6888283290408538,
+    "clean_value": null,
+    "status": "PASS",
+    "likely_artifact": "",
+    "detail": "low-corr channels: [] | CAR-expected baseline: -0.037, effective threshold used: 0.400"
+  },
+  {
+    "metric": "PREPROCESSED: inter-channel correlation",
+    "raw_value": -0.028050512062963634,
+    "clean_value": null,
+    "status": "PASS",
+    "likely_artifact": "",
+    "detail": "low-corr channels: [] | CAR-expected baseline: -0.037, effective threshold used: -0.187"
+  },
+  {
+    "metric": "RAW: Hjorth complexity (fraction of channels > 2.0)",
+    "raw_value": 0.9642857142857143,
+    "clean_value": null,
+    "status": "INFO",
+    "likely_artifact": "High signal irregularity -- consistent with EMG/muscle contamination",
+    "detail": "mean activity=3739.57, mean mobility=0.205, mean complexity=9.334"
+  },
+  {
+    "metric": "PREPROCESSED: Hjorth complexity (fraction of channels > 2.0)",
+    "raw_value": 0.5714285714285714,
+    "clean_value": null,
+    "status": "INFO",
+    "likely_artifact": "High signal irregularity -- consistent with EMG/muscle contamination",
+    "detail": "mean activity=26.70, mean mobility=0.480, mean complexity=2.038"
+  },
+  {
+    "metric": "Broadband SNR (1-40Hz signal / 45-100Hz noise band), dB",
+    "raw_value": 15.068652568706781,
+    "clean_value": 15.870618764626956,
+    "status": "PASS",
+    "likely_artifact": "",
+    "detail": "delta SNR = +0.80 dB"
+  },
+  {
+    "metric": "Residual ICA-detectable artifact components in PREPROCESSED data",
+    "raw_value": 3,
+    "clean_value": null,
+    "status": "WARN",
+    "likely_artifact": "eye blink, muscle artifact",
+    "detail": "{'brain': 11, 'eye blink': 2, 'muscle artifact': 1, 'other': 1}"
+  }
+]

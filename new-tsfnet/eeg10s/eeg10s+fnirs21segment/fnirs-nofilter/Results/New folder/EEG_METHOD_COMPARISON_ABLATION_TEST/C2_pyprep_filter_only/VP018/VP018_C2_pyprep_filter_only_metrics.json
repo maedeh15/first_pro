@@ -1,0 +1,35 @@
+{
+  "subject": "VP018",
+  "variant": "C2_pyprep_filter_only",
+  "runtime_s": 420.8,
+  "n_channels_used": 28,
+  "bad_channels_detected": [
+    "Cz",
+    "Fp1",
+    "Fp2",
+    "O2",
+    "POz"
+  ],
+  "n_bad_channels_detected": 5,
+  "n_ica_components_excluded": 0,
+  "ica_excluded_ids": [],
+  "still_bad_after_cleaning": [
+    "Fp1",
+    "Fp2"
+  ],
+  "known_persistent_noise_channels": [],
+  "known_persistent_still_present": [],
+  "target_channel_emg_band_power": {},
+  "median_variance_before": 9.299851013653391e-10,
+  "median_variance_after": 7.867263855885959e-11,
+  "max_variance_ratio_after": 4.606899015978118,
+  "median_emg_band_power_after_30_49hz": 6.437574223884759e-14,
+  "median_eeg_band_power_retention_ratio_4_30hz": 0.37869826959530456,
+  "filter_band_hz": [
+    1.0,
+    45.0
+  ],
+  "autoreject_epochs_rejected": 139,
+  "autoreject_epochs_total": 647,
+  "autoreject_reject_fraction": 0.215
+}

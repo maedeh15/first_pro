@@ -1,0 +1,3 @@
+Subject: VP018   Stage: stage3_full
+Total excluded so far: [0, 4, 6, 9]
+Newly excluded this stage: []

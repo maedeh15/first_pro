@@ -1,0 +1,31 @@
+{
+  "subject": "VP015",
+  "variant": "A2_ica_then_car",
+  "runtime_s": 253.6,
+  "n_channels_used": 28,
+  "bad_channels_detected": [
+    "CP1",
+    "Cz",
+    "FC1",
+    "T7"
+  ],
+  "n_bad_channels_detected": 4,
+  "n_ica_components_excluded": 3,
+  "ica_excluded_ids": [
+    0,
+    2,
+    3
+  ],
+  "still_bad_after_cleaning": [
+    "Fp2"
+  ],
+  "median_variance_before": 8.240782077416886e-10,
+  "median_variance_after": 9.539527116492087e-12,
+  "max_variance_ratio_after": 4.119867355061506,
+  "median_emg_band_power_after_30_49hz": 5.541946638445924e-14,
+  "median_eeg_band_power_retention_ratio_4_30hz": 0.12111802247473429,
+  "mean_abs_interchannel_correlation": 0.29749872583008374,
+  "autoreject_epochs_rejected": 28,
+  "autoreject_epochs_total": 646,
+  "autoreject_reject_fraction": 0.043
+}

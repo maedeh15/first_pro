@@ -1,0 +1,405 @@
+[2026-08-18 12:46:36] [PID27116] ===== START VP002 =====
+[2026-08-18 12:46:37] [PID27116]   EEG channel check: 30 total in cnt.clab, 28 non-EOG (scalp) channels, TP9/TP10 present=False (expected: 28 channels, False -- confirmed via VP001).
+[2026-08-18 12:46:37] [PID27116]   VP002: EEG loaded, 395238 samples @ 200.0Hz, 567 markers
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+[2026-08-18 12:46:36] [PID2204] ===== START VP001 =====
+[2026-08-18 12:46:36] [PID2204]   EEG channel check: 30 total in cnt.clab, 28 non-EOG (scalp) channels, TP9/TP10 present=False (expected: 28 channels, False -- confirmed via VP001).
+[2026-08-18 12:46:36] [PID2204]   VP001: EEG loaded, 394930 samples @ 200.0Hz, 567 markers
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+[2026-08-18 12:46:36] [PID27956] ===== START VP005 =====
+[2026-08-18 12:46:36] [PID27956]   EEG channel check: 30 total in cnt.clab, 28 non-EOG (scalp) channels, TP9/TP10 present=False (expected: 28 channels, False -- confirmed via VP001).
+[2026-08-18 12:46:37] [PID27956]   VP005: EEG loaded, 389105 samples @ 200.0Hz, 567 markers
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+[2026-08-18 12:46:36] [PID30656] ===== START VP004 =====
+[2026-08-18 12:46:37] [PID30656]   EEG channel check: 30 total in cnt.clab, 28 non-EOG (scalp) channels, TP9/TP10 present=False (expected: 28 channels, False -- confirmed via VP001).
+[2026-08-18 12:46:37] [PID30656]   VP004: EEG loaded, 388969 samples @ 200.0Hz, 567 markers
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+[2026-08-18 12:46:36] [PID26500] ===== START VP006 =====
+[2026-08-18 12:46:37] [PID26500]   EEG channel check: 30 total in cnt.clab, 28 non-EOG (scalp) channels, TP9/TP10 present=False (expected: 28 channels, False -- confirmed via VP001).
+[2026-08-18 12:46:37] [PID26500]   VP006: EEG loaded, 388467 samples @ 200.0Hz, 567 markers
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+[2026-08-18 12:46:36] [PID12816] ===== START VP003 =====
+[2026-08-18 12:46:36] [PID12816]   EEG channel check: 30 total in cnt.clab, 28 non-EOG (scalp) channels, TP9/TP10 present=False (expected: 28 channels, False -- confirmed via VP001).
+[2026-08-18 12:46:36] [PID12816]   VP003: EEG loaded, 389241 samples @ 200.0Hz, 567 markers
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 11 components
+Selecting by explained variance: 10 components
+Selecting by explained variance: 9 components
+Selecting by explained variance: 15 components
+Selecting by explained variance: 9 components
+Selecting by explained variance: 12 components
+Fitting ICA took 21.2s.
+Fitting ICA took 23.6s.
+Fitting ICA took 37.1s.
+Fitting ICA took 44.1s.
+Fitting ICA took 50.6s.
+Fitting ICA took 84.3s.
+[2026-08-18 12:47:04] [PID26500]   VP006: EOG threshold used = 2.0 (default)
+[2026-08-18 12:47:16] [PID26500]   VP006: removed 4 ocular ICA component(s): [np.int64(0), np.int64(1), 2, 7]
+[2026-08-18 12:47:30] [PID26500]   VP006: saved EEG all-channels QC plots (before/after, full+zoomed)
+[2026-08-18 12:47:30] [PID26500]   VP006: applied per-channel z-score to EEG (sanity check, mean per-channel std AFTER norm, should be ~1.0: 0.997266)
+[2026-08-18 12:47:31] [PID26500]   VP006: saved cleaned channel-space EEG (VP006_eeg_clean_raw.fif)
+[2026-08-18 12:47:31] [PID26500]   VP006: saved cleaned channel-space fNIRS (VP006_fnirs_clean_raw.fif)
+[2026-08-18 12:47:32] [PID26500]   VP006: applied per-channel z-score to fNIRS HbO/HbR (sanity check, mean per-channel std AFTER norm, should be ~1.0: HbO=0.999992, HbR=0.99997)
+[2026-08-18 12:47:42] [PID26500]   VP006: fNIRS preprocessed, shape (20813, 16, 16, 2)
+[2026-08-18 12:48:58] [PID26500] DONE VP006 in 2.4 min | EEG (880, 16, 16, 2000) | fNIRS (880, 21, 16, 16, 30, 2) | labels [293 289 298]
+[2026-08-18 12:48:59] [PID26500] ===== START VP007 =====
+[2026-08-18 12:49:00] [PID26500]   EEG channel check: 30 total in cnt.clab, 28 non-EOG (scalp) channels, TP9/TP10 present=False (expected: 28 channels, False -- confirmed via VP001).
+[2026-08-18 12:49:00] [PID26500]   VP007: EEG loaded, 388727 samples @ 200.0Hz, 567 markers
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 12 components
+[2026-08-18 12:47:02] [PID2204]   VP001: EOG threshold used = 2.0 (default)
+[2026-08-18 12:47:16] [PID2204]   VP001: removed 4 ocular ICA component(s): [np.int64(0), np.int64(2), 3, np.int64(5)]
+[2026-08-18 12:47:29] [PID2204]   VP001: saved EEG all-channels QC plots (before/after, full+zoomed)
+[2026-08-18 12:47:30] [PID2204]   VP001: applied per-channel z-score to EEG (sanity check, mean per-channel std AFTER norm, should be ~1.0: 0.998226)
+[2026-08-18 12:47:30] [PID2204]   VP001: saved cleaned channel-space EEG (VP001_eeg_clean_raw.fif)
+[2026-08-18 12:47:31] [PID2204]   VP001: saved cleaned channel-space fNIRS (VP001_fnirs_clean_raw.fif)
+[2026-08-18 12:47:32] [PID2204]   VP001: applied per-channel z-score to fNIRS HbO/HbR (sanity check, mean per-channel std AFTER norm, should be ~1.0: HbO=0.999994, HbR=0.999975)
+[2026-08-18 12:47:41] [PID2204]   VP001: fNIRS preprocessed, shape (21178, 16, 16, 2)
+[2026-08-18 12:48:59] [PID2204] DONE VP001 in 2.4 min | EEG (849, 16, 16, 2000) | fNIRS (849, 21, 16, 16, 30, 2) | labels [272 294 283]
+[2026-08-18 12:49:00] [PID2204] ===== START VP008 =====
+[2026-08-18 12:49:01] [PID2204]   EEG channel check: 30 total in cnt.clab, 28 non-EOG (scalp) channels, TP9/TP10 present=False (expected: 28 channels, False -- confirmed via VP001).
+[2026-08-18 12:49:01] [PID2204]   VP008: EEG loaded, 388781 samples @ 200.0Hz, 567 markers
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 6 components
+[2026-08-18 12:47:18] [PID27956]   VP005: EOG threshold used = 2.0 (default)
+[2026-08-18 12:47:25] [PID27956]   VP005: removed 5 ocular ICA component(s): [np.int64(0), np.int64(1), np.int64(2), np.int64(3), 5]
+[2026-08-18 12:47:44] [PID27956]   VP005: saved EEG all-channels QC plots (before/after, full+zoomed)
+[2026-08-18 12:47:45] [PID27956]   VP005: applied per-channel z-score to EEG (sanity check, mean per-channel std AFTER norm, should be ~1.0: 0.998014)
+[2026-08-18 12:47:46] [PID27956]   VP005: saved cleaned channel-space EEG (VP005_eeg_clean_raw.fif)
+[2026-08-18 12:47:47] [PID27956]   VP005: saved cleaned channel-space fNIRS (VP005_fnirs_clean_raw.fif)
+[2026-08-18 12:47:47] [PID27956]   VP005: applied per-channel z-score to fNIRS HbO/HbR (sanity check, mean per-channel std AFTER norm, should be ~1.0: HbO=0.999991, HbR=0.999977)
+[2026-08-18 12:47:57] [PID27956]   VP005: fNIRS preprocessed, shape (20825, 16, 16, 2)
+[2026-08-18 12:49:03] [PID27956] DONE VP005 in 2.5 min | EEG (866, 16, 16, 2000) | fNIRS (866, 21, 16, 16, 30, 2) | labels [284 298 284]
+[2026-08-18 12:49:03] [PID27956] ===== START VP009 =====
+[2026-08-18 12:49:05] [PID27956]   EEG channel check: 30 total in cnt.clab, 28 non-EOG (scalp) channels, TP9/TP10 present=False (expected: 28 channels, False -- confirmed via VP001).
+[2026-08-18 12:49:05] [PID27956]   VP009: EEG loaded, 388611 samples @ 200.0Hz, 567 markers
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 6 components
+[2026-08-18 12:47:25] [PID27116]   VP002: EOG threshold used = 2.0 (default)
+[2026-08-18 12:47:34] [PID27116]   VP002: removed 3 ocular ICA component(s): [np.int64(0), np.int64(3), 10]
+[2026-08-18 12:47:57] [PID27116]   VP002: saved EEG all-channels QC plots (before/after, full+zoomed)
+[2026-08-18 12:47:57] [PID27116]   VP002: applied per-channel z-score to EEG (sanity check, mean per-channel std AFTER norm, should be ~1.0: 0.998134)
+[2026-08-18 12:47:58] [PID27116]   VP002: saved cleaned channel-space EEG (VP002_eeg_clean_raw.fif)
+[2026-08-18 12:47:59] [PID27116]   VP002: saved cleaned channel-space fNIRS (VP002_fnirs_clean_raw.fif)
+[2026-08-18 12:48:00] [PID27116]   VP002: applied per-channel z-score to fNIRS HbO/HbR (sanity check, mean per-channel std AFTER norm, should be ~1.0: HbO=0.999994, HbR=0.999984)
+[2026-08-18 12:48:10] [PID27116]   VP002: fNIRS preprocessed, shape (21218, 16, 16, 2)
+[2026-08-18 12:49:08] [PID27116] DONE VP002 in 2.5 min | EEG (934, 16, 16, 2000) | fNIRS (934, 21, 16, 16, 30, 2) | labels [305 314 315]
+[2026-08-18 12:49:08] [PID27116] ===== START VP010 =====
+[2026-08-18 12:49:09] [PID27116]   EEG channel check: 30 total in cnt.clab, 28 non-EOG (scalp) channels, TP9/TP10 present=False (expected: 28 channels, False -- confirmed via VP001).
+[2026-08-18 12:49:09] [PID27116]   VP010: EEG loaded, 388340 samples @ 200.0Hz, 567 markers
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+[2026-08-18 12:47:32] [PID30656]   VP004: EOG threshold used = 2.0 (default)
+[2026-08-18 12:47:47] [PID30656]   VP004: removed 5 ocular ICA component(s): [np.int64(0), np.int64(1), 2, np.int64(5), np.int64(7)]
+[2026-08-18 12:48:06] [PID30656]   VP004: saved EEG all-channels QC plots (before/after, full+zoomed)
+[2026-08-18 12:48:06] [PID30656]   VP004: applied per-channel z-score to EEG (sanity check, mean per-channel std AFTER norm, should be ~1.0: 0.998838)
+[2026-08-18 12:48:07] [PID30656]   VP004: saved cleaned channel-space EEG (VP004_eeg_clean_raw.fif)
+[2026-08-18 12:48:08] [PID30656]   VP004: saved cleaned channel-space fNIRS (VP004_fnirs_clean_raw.fif)
+[2026-08-18 12:48:09] [PID30656]   VP004: applied per-channel z-score to fNIRS HbO/HbR (sanity check, mean per-channel std AFTER norm, should be ~1.0: HbO=0.999996, HbR=0.999977)
+[2026-08-18 12:48:18] [PID30656]   VP004: fNIRS preprocessed, shape (20879, 16, 16, 2)
+[2026-08-18 12:49:08] [PID30656] DONE VP004 in 2.5 min | EEG (829, 16, 16, 2000) | fNIRS (829, 21, 16, 16, 30, 2) | labels [293 266 270]
+[2026-08-18 12:49:08] [PID30656] ===== START VP011 =====
+[2026-08-18 12:49:10] [PID30656]   EEG channel check: 30 total in cnt.clab, 28 non-EOG (scalp) channels, TP9/TP10 present=False (expected: 28 channels, False -- confirmed via VP001).
+[2026-08-18 12:49:10] [PID30656]   VP011: EEG loaded, 388728 samples @ 200.0Hz, 567 markers
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 11 components
+Selecting by explained variance: 15 components
+Fitting ICA took 15.7s.
+Fitting ICA took 13.5s.
+[2026-08-18 12:48:06] [PID12816]   VP003: EOG threshold used = 2.0 (default)
+[2026-08-18 12:48:18] [PID12816]   VP003: removed 4 ocular ICA component(s): [np.int64(0), np.int64(1), 2, 8]
+[2026-08-18 12:48:38] [PID12816]   VP003: saved EEG all-channels QC plots (before/after, full+zoomed)
+[2026-08-18 12:48:39] [PID12816]   VP003: applied per-channel z-score to EEG (sanity check, mean per-channel std AFTER norm, should be ~1.0: 0.998052)
+[2026-08-18 12:48:40] [PID12816]   VP003: saved cleaned channel-space EEG (VP003_eeg_clean_raw.fif)
+[2026-08-18 12:48:41] [PID12816]   VP003: saved cleaned channel-space fNIRS (VP003_fnirs_clean_raw.fif)
+[2026-08-18 12:48:42] [PID12816]   VP003: applied per-channel z-score to fNIRS HbO/HbR (sanity check, mean per-channel std AFTER norm, should be ~1.0: HbO=0.999992, HbR=0.99996)
+[2026-08-18 12:48:48] [PID12816]   VP003: fNIRS preprocessed, shape (20929, 16, 16, 2)
+[2026-08-18 12:49:21] [PID12816] DONE VP003 in 2.8 min | EEG (909, 16, 16, 2000) | fNIRS (909, 21, 16, 16, 30, 2) | labels [301 315 293]
+[2026-08-18 12:49:22] [PID12816] ===== START VP012 =====
+[2026-08-18 12:49:23] [PID12816]   EEG channel check: 30 total in cnt.clab, 28 non-EOG (scalp) channels, TP9/TP10 present=False (expected: 28 channels, False -- confirmed via VP001).
+[2026-08-18 12:49:23] [PID12816]   VP012: EEG loaded, 388844 samples @ 200.0Hz, 567 markers
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 12 components
+Fitting ICA took 29.2s.
+Fitting ICA took 28.5s.
+Fitting ICA took 29.9s.
+[2026-08-18 12:49:18] [PID2204]   VP008: EOG threshold used = 2.0 (default)
+[2026-08-18 12:49:20] [PID2204]   VP008: removed 2 ocular ICA component(s): [np.int64(0), np.int64(1)]
+[2026-08-18 12:49:33] [PID2204]   VP008: saved EEG all-channels QC plots (before/after, full+zoomed)
+[2026-08-18 12:49:33] [PID2204]   VP008: applied per-channel z-score to EEG (sanity check, mean per-channel std AFTER norm, should be ~1.0: 0.997574)
+[2026-08-18 12:49:33] [PID2204]   VP008: saved cleaned channel-space EEG (VP008_eeg_clean_raw.fif)
+[2026-08-18 12:49:34] [PID2204]   VP008: saved cleaned channel-space fNIRS (VP008_fnirs_clean_raw.fif)
+[2026-08-18 12:49:34] [PID2204]   VP008: applied per-channel z-score to fNIRS HbO/HbR (sanity check, mean per-channel std AFTER norm, should be ~1.0: HbO=0.999989, HbR=0.999953)
+[2026-08-18 12:49:37] [PID2204]   VP008: fNIRS preprocessed, shape (20832, 16, 16, 2)
+[2026-08-18 12:50:08] [PID2204] DONE VP008 in 1.1 min | EEG (866, 16, 16, 2000) | fNIRS (866, 21, 16, 16, 30, 2) | labels [268 300 298]
+[2026-08-18 12:50:08] [PID2204] ===== START VP013 =====
+[2026-08-18 12:50:10] [PID2204]   EEG channel check: 30 total in cnt.clab, 28 non-EOG (scalp) channels, TP9/TP10 present=False (expected: 28 channels, False -- confirmed via VP001).
+[2026-08-18 12:50:10] [PID2204]   VP013: EEG loaded, 388433 samples @ 200.0Hz, 567 markers
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 6 components
+[2026-08-18 12:49:20] [PID27956]   VP009: EOG threshold used = 2.0 (default)
+[2026-08-18 12:49:22] [PID27956]   VP009: removed 3 ocular ICA component(s): [np.int64(0), np.int64(1), 3]
+[2026-08-18 12:49:35] [PID27956]   VP009: saved EEG all-channels QC plots (before/after, full+zoomed)
+[2026-08-18 12:49:36] [PID27956]   VP009: applied per-channel z-score to EEG (sanity check, mean per-channel std AFTER norm, should be ~1.0: 0.997633)
+[2026-08-18 12:49:36] [PID27956]   VP009: saved cleaned channel-space EEG (VP009_eeg_clean_raw.fif)
+[2026-08-18 12:49:37] [PID27956]   VP009: saved cleaned channel-space fNIRS (VP009_fnirs_clean_raw.fif)
+[2026-08-18 12:49:37] [PID27956]   VP009: applied per-channel z-score to fNIRS HbO/HbR (sanity check, mean per-channel std AFTER norm, should be ~1.0: HbO=0.999992, HbR=0.99996)
+[2026-08-18 12:49:40] [PID27956]   VP009: fNIRS preprocessed, shape (20821, 16, 16, 2)
+[2026-08-18 12:50:13] [PID27956] DONE VP009 in 1.2 min | EEG (893, 16, 16, 2000) | fNIRS (893, 21, 16, 16, 30, 2) | labels [303 305 285]
+[2026-08-18 12:50:13] [PID27956] ===== START VP014 =====
+[2026-08-18 12:50:14] [PID27956]   EEG channel check: 30 total in cnt.clab, 28 non-EOG (scalp) channels, TP9/TP10 present=False (expected: 28 channels, False -- confirmed via VP001).
+[2026-08-18 12:50:14] [PID27956]   VP014: EEG loaded, 386876 samples @ 200.0Hz, 567 markers
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 6 components
+[2026-08-18 12:49:31] [PID26500]   VP007: EOG threshold used = 2.0 (default)
+[2026-08-18 12:49:34] [PID26500]   VP007: removed 3 ocular ICA component(s): [np.int64(0), np.int64(3), np.int64(5)]
+[2026-08-18 12:49:45] [PID26500]   VP007: saved EEG all-channels QC plots (before/after, full+zoomed)
+[2026-08-18 12:49:46] [PID26500]   VP007: applied per-channel z-score to EEG (sanity check, mean per-channel std AFTER norm, should be ~1.0: 0.998305)
+[2026-08-18 12:49:46] [PID26500]   VP007: saved cleaned channel-space EEG (VP007_eeg_clean_raw.fif)
+[2026-08-18 12:49:46] [PID26500]   VP007: saved cleaned channel-space fNIRS (VP007_fnirs_clean_raw.fif)
+[2026-08-18 12:49:47] [PID26500]   VP007: applied per-channel z-score to fNIRS HbO/HbR (sanity check, mean per-channel std AFTER norm, should be ~1.0: HbO=0.999992, HbR=0.999944)
+[2026-08-18 12:49:49] [PID26500]   VP007: fNIRS preprocessed, shape (20867, 16, 16, 2)
+[2026-08-18 12:50:21] [PID26500] DONE VP007 in 1.4 min | EEG (838, 16, 16, 2000) | fNIRS (838, 21, 16, 16, 30, 2) | labels [261 277 300]
+[2026-08-18 12:50:22] [PID26500] ===== START VP015 =====
+[2026-08-18 12:50:23] [PID26500]   EEG channel check: 30 total in cnt.clab, 28 non-EOG (scalp) channels, TP9/TP10 present=False (expected: 28 channels, False -- confirmed via VP001).
+[2026-08-18 12:50:23] [PID26500]   VP015: EEG loaded, 388022 samples @ 200.0Hz, 567 markers
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 7 components
+Fitting ICA took 19.2s.
+[2026-08-18 12:49:39] [PID27116]   VP010: EOG threshold used = 2.0 (default)
+[2026-08-18 12:49:42] [PID27116]   VP010: removed 3 ocular ICA component(s): [np.int64(1), 7, np.int64(8)]
+[2026-08-18 12:49:55] [PID27116]   VP010: saved EEG all-channels QC plots (before/after, full+zoomed)
+[2026-08-18 12:49:55] [PID27116]   VP010: applied per-channel z-score to EEG (sanity check, mean per-channel std AFTER norm, should be ~1.0: 0.998543)
+[2026-08-18 12:49:55] [PID27116]   VP010: saved cleaned channel-space EEG (VP010_eeg_clean_raw.fif)
+[2026-08-18 12:49:56] [PID27116]   VP010: saved cleaned channel-space fNIRS (VP010_fnirs_clean_raw.fif)
+[2026-08-18 12:49:56] [PID27116]   VP010: applied per-channel z-score to fNIRS HbO/HbR (sanity check, mean per-channel std AFTER norm, should be ~1.0: HbO=0.999994, HbR=0.999973)
+[2026-08-18 12:49:59] [PID27116]   VP010: fNIRS preprocessed, shape (20798, 16, 16, 2)
+[2026-08-18 12:50:33] [PID27116] DONE VP010 in 1.4 min | EEG (917, 16, 16, 2000) | fNIRS (917, 21, 16, 16, 30, 2) | labels [307 314 296]
+[2026-08-18 12:50:33] [PID27116] ===== START VP016 =====
+[2026-08-18 12:50:34] [PID27116]   EEG channel check: 30 total in cnt.clab, 28 non-EOG (scalp) channels, TP9/TP10 present=False (expected: 28 channels, False -- confirmed via VP001).
+[2026-08-18 12:50:34] [PID27116]   VP016: EEG loaded, 387560 samples @ 200.0Hz, 567 markers
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Fitting ICA took 12.6s.
+Selecting by explained variance: 4 components
+Fitting ICA took 22.2s.
+Fitting ICA took 4.0s.
+[2026-08-18 12:49:54] [PID12816]   VP012: EOG threshold used = 2.0 (default)
+[2026-08-18 12:49:57] [PID12816]   VP012: removed 3 ocular ICA component(s): [np.int64(0), np.int64(5), np.int64(6)]
+[2026-08-18 12:50:13] [PID12816]   VP012: saved EEG all-channels QC plots (before/after, full+zoomed)
+[2026-08-18 12:50:14] [PID12816]   VP012: applied per-channel z-score to EEG (sanity check, mean per-channel std AFTER norm, should be ~1.0: 0.99786)
+[2026-08-18 12:50:14] [PID12816]   VP012: saved cleaned channel-space EEG (VP012_eeg_clean_raw.fif)
+[2026-08-18 12:50:15] [PID12816]   VP012: saved cleaned channel-space fNIRS (VP012_fnirs_clean_raw.fif)
+[2026-08-18 12:50:15] [PID12816]   VP012: applied per-channel z-score to fNIRS HbO/HbR (sanity check, mean per-channel std AFTER norm, should be ~1.0: HbO=0.999992, HbR=0.999943)
+[2026-08-18 12:50:19] [PID12816]   VP012: fNIRS preprocessed, shape (20821, 16, 16, 2)
+[2026-08-18 12:50:49] [PID12816] DONE VP012 in 1.5 min | EEG (861, 16, 16, 2000) | fNIRS (861, 21, 16, 16, 30, 2) | labels [253 305 303]
+[2026-08-18 12:50:50] [PID12816] ===== START VP017 =====
+[2026-08-18 12:50:51] [PID12816]   EEG channel check: 30 total in cnt.clab, 28 non-EOG (scalp) channels, TP9/TP10 present=False (expected: 28 channels, False -- confirmed via VP001).
+[2026-08-18 12:50:51] [PID12816]   VP017: EEG loaded, 387709 samples @ 200.0Hz, 567 markers
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 14 components
+[2026-08-18 12:50:30] [PID2204]   VP013: EOG threshold used = 2.0 (default)
+[2026-08-18 12:50:32] [PID2204]   VP013: removed 2 ocular ICA component(s): [np.int64(0), np.int64(2)]
+[2026-08-18 12:50:46] [PID2204]   VP013: saved EEG all-channels QC plots (before/after, full+zoomed)
+[2026-08-18 12:50:46] [PID2204]   VP013: applied per-channel z-score to EEG (sanity check, mean per-channel std AFTER norm, should be ~1.0: 0.998193)
+[2026-08-18 12:50:47] [PID2204]   VP013: saved cleaned channel-space EEG (VP013_eeg_clean_raw.fif)
+[2026-08-18 12:50:47] [PID2204]   VP013: saved cleaned channel-space fNIRS (VP013_fnirs_clean_raw.fif)
+[2026-08-18 12:50:48] [PID2204]   VP013: applied per-channel z-score to fNIRS HbO/HbR (sanity check, mean per-channel std AFTER norm, should be ~1.0: HbO=0.999993, HbR=0.999955)
+[2026-08-18 12:50:51] [PID2204]   VP013: fNIRS preprocessed, shape (20733, 16, 16, 2)
+[2026-08-18 12:51:20] [PID2204] DONE VP013 in 1.2 min | EEG (916, 16, 16, 2000) | fNIRS (916, 21, 16, 16, 30, 2) | labels [304 315 297]
+[2026-08-18 12:51:20] [PID2204] ===== START VP018 =====
+[2026-08-18 12:51:21] [PID2204]   EEG channel check: 30 total in cnt.clab, 28 non-EOG (scalp) channels, TP9/TP10 present=False (expected: 28 channels, False -- confirmed via VP001).
+[2026-08-18 12:51:21] [PID2204]   VP018: EEG loaded, 388265 samples @ 200.0Hz, 567 markers
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 11 components
+[2026-08-18 12:50:38] [PID27956]   VP014: EOG threshold used = 2.0 (default)
+[2026-08-18 12:50:40] [PID27956]   VP014: removed 3 ocular ICA component(s): [np.int64(0), np.int64(1), 5]
+[2026-08-18 12:50:52] [PID27956]   VP014: saved EEG all-channels QC plots (before/after, full+zoomed)
+[2026-08-18 12:50:53] [PID27956]   VP014: applied per-channel z-score to EEG (sanity check, mean per-channel std AFTER norm, should be ~1.0: 0.9973)
+[2026-08-18 12:50:53] [PID27956]   VP014: saved cleaned channel-space EEG (VP014_eeg_clean_raw.fif)
+[2026-08-18 12:50:53] [PID27956]   VP014: saved cleaned channel-space fNIRS (VP014_fnirs_clean_raw.fif)
+[2026-08-18 12:50:54] [PID27956]   VP014: applied per-channel z-score to fNIRS HbO/HbR (sanity check, mean per-channel std AFTER norm, should be ~1.0: HbO=0.999988, HbR=0.999967)
+[2026-08-18 12:50:56] [PID27956]   VP014: fNIRS preprocessed, shape (20706, 16, 16, 2)
+[2026-08-18 12:51:24] [PID27956] DONE VP014 in 1.2 min | EEG (712, 16, 16, 2000) | fNIRS (712, 21, 16, 16, 30, 2) | labels [292 195 225]
+[2026-08-18 12:51:25] [PID27956] ===== START VP019 =====
+[2026-08-18 12:51:26] [PID27956]   EEG channel check: 30 total in cnt.clab, 28 non-EOG (scalp) channels, TP9/TP10 present=False (expected: 28 channels, False -- confirmed via VP001).
+[2026-08-18 12:51:26] [PID27956]   VP019: EEG loaded, 388698 samples @ 200.0Hz, 567 markers
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+[2026-08-18 12:50:37] [PID26500]   VP015: EOG threshold used = 2.0 (default)
+[2026-08-18 12:50:39] [PID26500]   VP015: removed 2 ocular ICA component(s): [np.int64(0), np.int64(3)]
+[2026-08-18 12:50:51] [PID26500]   VP015: saved EEG all-channels QC plots (before/after, full+zoomed)
+[2026-08-18 12:50:51] [PID26500]   VP015: applied per-channel z-score to EEG (sanity check, mean per-channel std AFTER norm, should be ~1.0: 0.997759)
+[2026-08-18 12:50:52] [PID26500]   VP015: saved cleaned channel-space EEG (VP015_eeg_clean_raw.fif)
+[2026-08-18 12:50:52] [PID26500]   VP015: saved cleaned channel-space fNIRS (VP015_fnirs_clean_raw.fif)
+[2026-08-18 12:50:53] [PID26500]   VP015: applied per-channel z-score to fNIRS HbO/HbR (sanity check, mean per-channel std AFTER norm, should be ~1.0: HbO=0.999995, HbR=0.999966)
+[2026-08-18 12:50:55] [PID26500]   VP015: fNIRS preprocessed, shape (20937, 16, 16, 2)
+[2026-08-18 12:51:25] [PID26500] DONE VP015 in 1.1 min | EEG (882, 16, 16, 2000) | fNIRS (882, 21, 16, 16, 30, 2) | labels [296 299 287]
+[2026-08-18 12:51:25] [PID26500] ===== START VP020 =====
+[2026-08-18 12:51:26] [PID26500]   EEG channel check: 30 total in cnt.clab, 28 non-EOG (scalp) channels, TP9/TP10 present=False (expected: 28 channels, False -- confirmed via VP001).
+[2026-08-18 12:51:26] [PID26500]   VP020: EEG loaded, 388501 samples @ 200.0Hz, 567 markers
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 9 components
+Selecting by explained variance: 8 components
+[2026-08-18 12:50:40] [PID27116]   VP016: EOG threshold used = 2.0 (default)
+[2026-08-18 12:50:41] [PID27116]   VP016: removed 2 ocular ICA component(s): [0, 1]
+[2026-08-18 12:50:53] [PID27116]   VP016: saved EEG all-channels QC plots (before/after, full+zoomed)
+[2026-08-18 12:50:54] [PID27116]   VP016: applied per-channel z-score to EEG (sanity check, mean per-channel std AFTER norm, should be ~1.0: 0.996006)
+[2026-08-18 12:50:54] [PID27116]   VP016: saved cleaned channel-space EEG (VP016_eeg_clean_raw.fif)
+[2026-08-18 12:50:55] [PID27116]   VP016: saved cleaned channel-space fNIRS (VP016_fnirs_clean_raw.fif)
+[2026-08-18 12:50:55] [PID27116]   VP016: applied per-channel z-score to fNIRS HbO/HbR (sanity check, mean per-channel std AFTER norm, should be ~1.0: HbO=0.99999, HbR=0.999958)
+[2026-08-18 12:50:58] [PID27116]   VP016: fNIRS preprocessed, shape (20722, 16, 16, 2)
+[2026-08-18 12:51:27] [PID27116] DONE VP016 in 0.9 min | EEG (818, 16, 16, 2000) | fNIRS (818, 21, 16, 16, 30, 2) | labels [295 273 250]
+[2026-08-18 12:51:28] [PID27116] ===== START VP021 =====
+[2026-08-18 12:51:29] [PID27116]   EEG channel check: 30 total in cnt.clab, 28 non-EOG (scalp) channels, TP9/TP10 present=False (expected: 28 channels, False -- confirmed via VP001).
+[2026-08-18 12:51:29] [PID27116]   VP021: EEG loaded, 388607 samples @ 200.0Hz, 567 markers
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 10 components
+Fitting ICA took 51.5s.
+Fitting ICA took 21.6s.
+Fitting ICA took 172.6s.
+Fitting ICA took 41.5s.
+Fitting ICA took 38.9s.
+Fitting ICA took 65.0s.
+[2026-08-18 12:51:44] [PID12816]   VP017: EOG threshold used = 2.0 (default)
+[2026-08-18 12:51:48] [PID12816]   VP017: removed 5 ocular ICA component(s): [np.int64(0), 2, np.int64(3), 5, 10]
+[2026-08-18 12:52:00] [PID12816]   VP017: saved EEG all-channels QC plots (before/after, full+zoomed)
+[2026-08-18 12:52:01] [PID12816]   VP017: applied per-channel z-score to EEG (sanity check, mean per-channel std AFTER norm, should be ~1.0: 0.997735)
+[2026-08-18 12:52:01] [PID12816]   VP017: saved cleaned channel-space EEG (VP017_eeg_clean_raw.fif)
+[2026-08-18 12:52:02] [PID12816]   VP017: saved cleaned channel-space fNIRS (VP017_fnirs_clean_raw.fif)
+[2026-08-18 12:52:02] [PID12816]   VP017: applied per-channel z-score to fNIRS HbO/HbR (sanity check, mean per-channel std AFTER norm, should be ~1.0: HbO=0.999992, HbR=0.999969)
+[2026-08-18 12:52:05] [PID12816]   VP017: fNIRS preprocessed, shape (20722, 16, 16, 2)
+[2026-08-18 12:52:34] [PID12816] DONE VP017 in 1.7 min | EEG (901, 16, 16, 2000) | fNIRS (901, 21, 16, 16, 30, 2) | labels [315 294 292]
+[2026-08-18 12:52:34] [PID12816] ===== START VP022 =====
+[2026-08-18 12:52:35] [PID12816]   EEG channel check: 30 total in cnt.clab, 28 non-EOG (scalp) channels, TP9/TP10 present=False (expected: 28 channels, False -- confirmed via VP001).
+[2026-08-18 12:52:35] [PID12816]   VP022: EEG loaded, 388120 samples @ 200.0Hz, 567 markers
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 16 components
+[2026-08-18 12:51:49] [PID27956]   VP019: EOG threshold used = 2.0 (default)
+[2026-08-18 12:51:51] [PID27956]   VP019: removed 5 ocular ICA component(s): [np.int64(0), np.int64(1), 2, np.int64(3), 5]
+[2026-08-18 12:52:04] [PID27956]   VP019: saved EEG all-channels QC plots (before/after, full+zoomed)
+[2026-08-18 12:52:04] [PID27956]   VP019: applied per-channel z-score to EEG (sanity check, mean per-channel std AFTER norm, should be ~1.0: 0.997399)
+[2026-08-18 12:52:04] [PID27956]   VP019: saved cleaned channel-space EEG (VP019_eeg_clean_raw.fif)
+[2026-08-18 12:52:05] [PID27956]   VP019: saved cleaned channel-space fNIRS (VP019_fnirs_clean_raw.fif)
+[2026-08-18 12:52:05] [PID27956]   VP019: applied per-channel z-score to fNIRS HbO/HbR (sanity check, mean per-channel std AFTER norm, should be ~1.0: HbO=0.999992, HbR=0.999974)
+[2026-08-18 12:52:08] [PID27956]   VP019: fNIRS preprocessed, shape (20852, 16, 16, 2)
+[2026-08-18 12:52:37] [PID27956] DONE VP019 in 1.2 min | EEG (882, 16, 16, 2000) | fNIRS (882, 21, 16, 16, 30, 2) | labels [303 279 300]
+[2026-08-18 12:52:38] [PID27956] ===== START VP023 =====
+[2026-08-18 12:52:39] [PID27956]   EEG channel check: 30 total in cnt.clab, 28 non-EOG (scalp) channels, TP9/TP10 present=False (expected: 28 channels, False -- confirmed via VP001).
+[2026-08-18 12:52:39] [PID27956]   VP023: EEG loaded, 387241 samples @ 200.0Hz, 567 markers
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 12 components
+Traceback (most recent call last):
+  File "E:\kntu\Thesis\codes\HOPE-LAST-CODE-FILE\new-tsfnet\eeg10s\eeg10s+fnirs21segment\Preprocessing_TSFNet_paper_nback_v2_EEG10s_21seg.py", line 1170, in process_subject
+    eeg_windows, fnirs_windows, labels, session_ids, trial_ids = extract_windows(
+                                                                 ^^^^^^^^^^^^^^^^
+  File "E:\kntu\Thesis\codes\HOPE-LAST-CODE-FILE\new-tsfnet\eeg10s\eeg10s+fnirs21segment\Preprocessing_TSFNet_paper_nback_v2_EEG10s_21seg.py", line 1125, in extract_windows
+    np.array(eeg_windows, dtype=np.float32),
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+numpy._core._exceptions._ArrayMemoryError: Unable to allocate 1.55 GiB for an array with shape (814, 16, 16, 2000) and data type float32
+[2026-08-18 12:52:09] [PID27116]   VP021: EOG threshold used = 2.0 (default)
+[2026-08-18 12:52:12] [PID27116]   VP021: removed 3 ocular ICA component(s): [np.int64(0), 2, np.int64(3)]
+[2026-08-18 12:52:23] [PID27116]   VP021: saved EEG all-channels QC plots (before/after, full+zoomed)
+[2026-08-18 12:52:24] [PID27116]   VP021: applied per-channel z-score to EEG (sanity check, mean per-channel std AFTER norm, should be ~1.0: 0.998201)
+[2026-08-18 12:52:24] [PID27116]   VP021: saved cleaned channel-space EEG (VP021_eeg_clean_raw.fif)
+[2026-08-18 12:52:25] [PID27116]   VP021: saved cleaned channel-space fNIRS (VP021_fnirs_clean_raw.fif)
+[2026-08-18 12:52:25] [PID27116]   VP021: applied per-channel z-score to fNIRS HbO/HbR (sanity check, mean per-channel std AFTER norm, should be ~1.0: HbO=0.999992, HbR=0.999947)
+[2026-08-18 12:52:28] [PID27116]   VP021: fNIRS preprocessed, shape (20783, 16, 16, 2)
+[2026-08-18 12:52:54] [PID27116] ERROR processing VP021 after 1.4 min: Unable to allocate 1.55 GiB for an array with shape (814, 16, 16, 2000) and data type float32
+[2026-08-18 12:52:54] [PID27116] ===== START VP024 =====
+[2026-08-18 12:52:55] [PID27116]   EEG channel check: 30 total in cnt.clab, 28 non-EOG (scalp) channels, TP9/TP10 present=False (expected: 28 channels, False -- confirmed via VP001).
+[2026-08-18 12:52:55] [PID27116]   VP024: EEG loaded, 387199 samples @ 200.0Hz, 567 markers
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+[2026-08-18 12:52:04] [PID30656]   VP011: EOG threshold used = 2.0 (default)
+[2026-08-18 12:52:07] [PID30656]   VP011: MANUAL OVERRIDE -- removed IC(s) [6] from exclusion (false positive per visual QC). Reason: Clear 8-10Hz alpha peak, lateralized (non-frontal) topography, continuous oscillatory time-course -- genuine brain activity, not ocular. (Automated spectral veto: AUTO_UNEXCLUDE.)
+[2026-08-18 12:52:08] [PID30656]   VP011: removed 4 ocular ICA component(s): [np.int64(0), np.int64(2), np.int64(4), 8]
+[2026-08-18 12:52:19] [PID30656]   VP011: saved EEG all-channels QC plots (before/after, full+zoomed)
+[2026-08-18 12:52:19] [PID30656]   VP011: applied per-channel z-score to EEG (sanity check, mean per-channel std AFTER norm, should be ~1.0: 0.998695)
+[2026-08-18 12:52:20] [PID30656]   VP011: saved cleaned channel-space EEG (VP011_eeg_clean_raw.fif)
+[2026-08-18 12:52:21] [PID30656]   VP011: saved cleaned channel-space fNIRS (VP011_fnirs_clean_raw.fif)
+[2026-08-18 12:52:21] [PID30656]   VP011: applied per-channel z-score to fNIRS HbO/HbR (sanity check, mean per-channel std AFTER norm, should be ~1.0: HbO=0.999995, HbR=0.99997)
+[2026-08-18 12:52:24] [PID30656]   VP011: fNIRS preprocessed, shape (20840, 16, 16, 2)
+[2026-08-18 12:52:54] [PID30656] DONE VP011 in 3.8 min | EEG (928, 16, 16, 2000) | fNIRS (928, 21, 16, 16, 30, 2) | labels [305 308 315]
+[2026-08-18 12:52:54] [PID30656] ===== START VP025 =====
+[2026-08-18 12:52:56] [PID30656]   EEG channel check: 30 total in cnt.clab, 28 non-EOG (scalp) channels, TP9/TP10 present=False (expected: 28 channels, False -- confirmed via VP001).
+[2026-08-18 12:52:56] [PID30656]   VP025: EEG loaded, 387327 samples @ 200.0Hz, 567 markers
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 17 components
+Selecting by explained variance: 5 components
+[2026-08-18 12:52:09] [PID26500]   VP020: EOG threshold used = 2.0 (default)
+[2026-08-18 12:52:11] [PID26500]   VP020: removed 3 ocular ICA component(s): [np.int64(0), np.int64(1), 2]
+[2026-08-18 12:52:22] [PID26500]   VP020: saved EEG all-channels QC plots (before/after, full+zoomed)
+[2026-08-18 12:52:23] [PID26500]   VP020: applied per-channel z-score to EEG (sanity check, mean per-channel std AFTER norm, should be ~1.0: 0.997853)
+[2026-08-18 12:52:23] [PID26500]   VP020: saved cleaned channel-space EEG (VP020_eeg_clean_raw.fif)
+[2026-08-18 12:52:24] [PID26500]   VP020: saved cleaned channel-space fNIRS (VP020_fnirs_clean_raw.fif)
+[2026-08-18 12:52:24] [PID26500]   VP020: applied per-channel z-score to fNIRS HbO/HbR (sanity check, mean per-channel std AFTER norm, should be ~1.0: HbO=0.999994, HbR=0.999949)
+[2026-08-18 12:52:27] [PID26500]   VP020: fNIRS preprocessed, shape (20729, 16, 16, 2)
+[2026-08-18 12:52:58] [PID26500] DONE VP020 in 1.6 min | EEG (876, 16, 16, 2000) | fNIRS (876, 21, 16, 16, 30, 2) | labels [315 270 291]
+[2026-08-18 12:52:59] [PID26500] ===== START VP026 =====
+[2026-08-18 12:53:00] [PID26500]   EEG channel check: 30 total in cnt.clab, 28 non-EOG (scalp) channels, TP9/TP10 present=False (expected: 28 channels, False -- confirmed via VP001).
+[2026-08-18 12:53:00] [PID26500]   VP026: EEG loaded, 386760 samples @ 200.0Hz, 567 markers
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 9 components
+Fitting ICA took 23.1s.
+Fitting ICA took 44.3s.
+Fitting ICA took 24.1s.
+Fitting ICA took 53.4s.
+Fitting ICA took 75.6s.
+[2026-08-18 12:53:20] [PID30656]   VP025: EOG threshold used = 2.0 (default)
+[2026-08-18 12:53:22] [PID30656]   VP025: removed 3 ocular ICA component(s): [0, 1, 2]
+[2026-08-18 12:53:34] [PID30656]   VP025: saved EEG all-channels QC plots (before/after, full+zoomed)
+[2026-08-18 12:53:34] [PID30656]   VP025: applied per-channel z-score to EEG (sanity check, mean per-channel std AFTER norm, should be ~1.0: 0.997237)
+[2026-08-18 12:53:35] [PID30656]   VP025: saved cleaned channel-space EEG (VP025_eeg_clean_raw.fif)
+[2026-08-18 12:53:35] [PID30656]   VP025: saved cleaned channel-space fNIRS (VP025_fnirs_clean_raw.fif)
+[2026-08-18 12:53:36] [PID30656]   VP025: applied per-channel z-score to fNIRS HbO/HbR (sanity check, mean per-channel std AFTER norm, should be ~1.0: HbO=0.999992, HbR=0.999956)
+[2026-08-18 12:53:38] [PID30656]   VP025: fNIRS preprocessed, shape (20747, 16, 16, 2)
+[2026-08-18 12:54:04] [PID30656] DONE VP025 in 1.2 min | EEG (838, 16, 16, 2000) | fNIRS (838, 21, 16, 16, 30, 2) | labels [253 301 284]
+[2026-08-18 12:52:28] [PID2204]   VP018: EOG threshold used = 2.0 (default)
+[2026-08-18 12:52:31] [PID2204]   VP018: removed 4 ocular ICA component(s): [np.int64(0), np.int64(4), np.int64(5), 7]
+[2026-08-18 12:52:45] [PID2204]   VP018: saved EEG all-channels QC plots (before/after, full+zoomed)
+[2026-08-18 12:52:45] [PID2204]   VP018: applied per-channel z-score to EEG (sanity check, mean per-channel std AFTER norm, should be ~1.0: 0.998671)
+[2026-08-18 12:52:45] [PID2204]   VP018: saved cleaned channel-space EEG (VP018_eeg_clean_raw.fif)
+[2026-08-18 12:52:46] [PID2204]   VP018: saved cleaned channel-space fNIRS (VP018_fnirs_clean_raw.fif)
+[2026-08-18 12:52:46] [PID2204]   VP018: applied per-channel z-score to fNIRS HbO/HbR (sanity check, mean per-channel std AFTER norm, should be ~1.0: HbO=0.999994, HbR=0.999963)
+[2026-08-18 12:52:49] [PID2204]   VP018: fNIRS preprocessed, shape (20752, 16, 16, 2)
+[2026-08-18 12:53:21] [PID2204] DONE VP018 in 2.0 min | EEG (925, 16, 16, 2000) | fNIRS (925, 21, 16, 16, 30, 2) | labels [295 315 315]
+[2026-08-18 12:54:12] [PID27116]   VP024: EOG threshold used = 2.0 (default)
+[2026-08-18 12:54:15] [PID27116]   VP024: removed 2 ocular ICA component(s): [np.int64(0), np.int64(3)]
+[2026-08-18 12:54:22] [PID27116]   VP024: saved EEG all-channels QC plots (before/after, full+zoomed)
+[2026-08-18 12:54:22] [PID27116]   VP024: applied per-channel z-score to EEG (sanity check, mean per-channel std AFTER norm, should be ~1.0: 0.998055)
+[2026-08-18 12:54:22] [PID27116]   VP024: saved cleaned channel-space EEG (VP024_eeg_clean_raw.fif)
+[2026-08-18 12:54:22] [PID27116]   VP024: saved cleaned channel-space fNIRS (VP024_fnirs_clean_raw.fif)
+[2026-08-18 12:54:23] [PID27116]   VP024: applied per-channel z-score to fNIRS HbO/HbR (sanity check, mean per-channel std AFTER norm, should be ~1.0: HbO=0.99999, HbR=0.999977)
+[2026-08-18 12:54:24] [PID27116]   VP024: fNIRS preprocessed, shape (20714, 16, 16, 2)
+[2026-08-18 12:54:41] [PID27116] DONE VP024 in 1.8 min | EEG (828, 16, 16, 2000) | fNIRS (828, 21, 16, 16, 30, 2) | labels [242 308 278]
+[2026-08-18 12:53:34] [PID27956]   VP023: EOG threshold used = 2.0 (default)
+[2026-08-18 12:53:37] [PID27956]   VP023: removed 3 ocular ICA component(s): [np.int64(0), 5, np.int64(6)]
+[2026-08-18 12:53:48] [PID27956]   VP023: saved EEG all-channels QC plots (before/after, full+zoomed)
+[2026-08-18 12:53:48] [PID27956]   VP023: applied per-channel z-score to EEG (sanity check, mean per-channel std AFTER norm, should be ~1.0: 0.997832)
+[2026-08-18 12:53:48] [PID27956]   VP023: saved cleaned channel-space EEG (VP023_eeg_clean_raw.fif)
+[2026-08-18 12:53:49] [PID27956]   VP023: saved cleaned channel-space fNIRS (VP023_fnirs_clean_raw.fif)
+[2026-08-18 12:53:49] [PID27956]   VP023: applied per-channel z-score to fNIRS HbO/HbR (sanity check, mean per-channel std AFTER norm, should be ~1.0: HbO=0.999991, HbR=0.999959)
+[2026-08-18 12:53:52] [PID27956]   VP023: fNIRS preprocessed, shape (20682, 16, 16, 2)
+[2026-08-18 12:54:15] [PID27956] DONE VP023 in 1.6 min | EEG (904, 16, 16, 2000) | fNIRS (904, 21, 16, 16, 30, 2) | labels [305 294 305]
+[2026-08-18 12:53:25] [PID26500]   VP026: EOG threshold used = 2.0 (default)
+[2026-08-18 12:53:27] [PID26500]   VP026: removed 2 ocular ICA component(s): [np.int64(0), np.int64(3)]
+[2026-08-18 12:53:39] [PID26500]   VP026: saved EEG all-channels QC plots (before/after, full+zoomed)
+[2026-08-18 12:53:39] [PID26500]   VP026: applied per-channel z-score to EEG (sanity check, mean per-channel std AFTER norm, should be ~1.0: 0.998224)
+[2026-08-18 12:53:40] [PID26500]   VP026: saved cleaned channel-space EEG (VP026_eeg_clean_raw.fif)
+[2026-08-18 12:53:40] [PID26500]   VP026: saved cleaned channel-space fNIRS (VP026_fnirs_clean_raw.fif)
+[2026-08-18 12:53:41] [PID26500]   VP026: applied per-channel z-score to fNIRS HbO/HbR (sanity check, mean per-channel std AFTER norm, should be ~1.0: HbO=0.999992, HbR=0.999974)
+[2026-08-18 12:53:43] [PID26500]   VP026: fNIRS preprocessed, shape (20656, 16, 16, 2)
+[2026-08-18 12:54:09] [PID26500] DONE VP026 in 1.2 min | EEG (893, 16, 16, 2000) | fNIRS (893, 21, 16, 16, 30, 2) | labels [308 300 285]
+[2026-08-18 12:53:22] [PID12816]   VP022: EOG threshold used = 2.0 (default)
+[2026-08-18 12:53:25] [PID12816]   VP022: removed 5 ocular ICA component(s): [np.int64(0), np.int64(3), np.int64(6), 10, 14]
+[2026-08-18 12:53:36] [PID12816]   VP022: saved EEG all-channels QC plots (before/after, full+zoomed)
+[2026-08-18 12:53:36] [PID12816]   VP022: applied per-channel z-score to EEG (sanity check, mean per-channel std AFTER norm, should be ~1.0: 0.997826)
+[2026-08-18 12:53:36] [PID12816]   VP022: saved cleaned channel-space EEG (VP022_eeg_clean_raw.fif)
+[2026-08-18 12:53:37] [PID12816]   VP022: saved cleaned channel-space fNIRS (VP022_fnirs_clean_raw.fif)
+[2026-08-18 12:53:37] [PID12816]   VP022: applied per-channel z-score to fNIRS HbO/HbR (sanity check, mean per-channel std AFTER norm, should be ~1.0: HbO=0.999988, HbR=0.999965)
+[2026-08-18 12:53:40] [PID12816]   VP022: fNIRS preprocessed, shape (20771, 16, 16, 2)
+[2026-08-18 12:54:06] [PID12816] DONE VP022 in 1.5 min | EEG (830, 16, 16, 2000) | fNIRS (830, 21, 16, 16, 30, 2) | labels [283 271 276]
+[2026-08-18 12:46:34] [PID17580] ===== PIPELINE STARTED (TSFNet paper-exact, n-back, extended windows) =====
+[2026-08-18 12:46:34] [PID17580] EEG: 0.5-50.0Hz order-6 Butterworth, CAR, ICA-EOG
+[2026-08-18 12:46:34] [PID17580] fNIRS: 0.01-0.1Hz bandpass, design order=2 (effective zero-phase order=4), baseline [-5.0,-2.0]s
+[2026-08-18 12:46:34] [PID17580] Windows: EEG 10.0s / fNIRS-segment 3.0s, step 1.0s, slide [-2.0,42.0]s, fNIRS segments=21
+[2026-08-18 12:46:34] [PID17580] Parallel run: N_WORKERS=6 (subject-level parallelism, 1 BLAS/OMP thread pinned per worker)
+[2026-08-18 12:54:41] [PID17580] ===== PIPELINE FINISHED in 8.1 min (26 subjects, 6 parallel workers) =====

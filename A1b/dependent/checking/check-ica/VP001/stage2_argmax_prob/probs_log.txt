@@ -1,0 +1,3 @@
+Subject: VP001   Stage: stage2_argmax_prob
+Total excluded so far: [0, 2, 7]
+Newly excluded this stage: []

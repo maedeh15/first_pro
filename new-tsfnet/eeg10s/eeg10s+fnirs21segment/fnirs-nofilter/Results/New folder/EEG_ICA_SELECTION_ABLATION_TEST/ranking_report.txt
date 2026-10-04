@@ -1,0 +1,64 @@
+==============================================================================
+EEG ICA-SELECTION ABLATION — RANKING REPORT (B1: argmax-only vs B2: prob-threshold)
+==============================================================================
+Subjects tested: ['VP001', 'VP005', 'VP015', 'VP018', 'VP021', 'VP025']
+Variants tested: ['B1_argmax_only', 'B2_prob_threshold']
+
+--- Per-variant averages across all test subjects ---
+          variant  mean_still_bad_count  mean_max_variance_ratio_after  mean_emg_band_power_after  mean_eeg_band_retention  mean_ica_excluded  mean_autoreject_reject_fraction  mean_runtime_s
+   B1_argmax_only              0.333333                       3.196131               1.110012e-13                 0.163607           2.500000                         0.109500      274.166667
+B2_prob_threshold              0.333333                       3.324720               9.473210e-14                 0.158028           3.166667                         0.104833      260.100000
+
+--- THE KEY QUESTION FOR THIS TEST: VP025's Fp1/Fp2 ---
+  B1_argmax_only       still_bad=['Fp1', 'Fp2'] known_persistent_still_present=['Fp1', 'Fp2'] target_channel_emg_power={'Fp1': 6.094839951396733e-13, 'Fp2': 5.465482395503575e-13} ica_excluded_ids=[0, 1]
+  B2_prob_threshold    still_bad=['Fp1', 'Fp2'] known_persistent_still_present=['Fp1', 'Fp2'] target_channel_emg_power={'Fp1': 6.094839951396733e-13, 'Fp2': 5.465482395503575e-13} ica_excluded_ids=[0, 1]
+
+If B2's known_persistent_still_present is EMPTY (or its target_channel_emg_band_power
+values are clearly lower than B1's) while B1's still shows Fp1/Fp2, that is direct
+evidence the probability-threshold mechanism caught the diluted noise source B1 missed.
+
+--- How to read the rest ---
+mean_still_bad_count            : LOWER is better (channels still >4x median variance).
+mean_emg_band_power_after       : LOWER is better (less residual muscle noise), BUT
+                                   check eeg_band_retention below for over-cleaning.
+mean_eeg_band_retention         : should stay close to B1's value for the OTHER 5
+                                   subjects -- if B2's retention drops sharply there
+                                   (not just on VP025), it is over-cleaning real brain
+                                   signal by being too aggressive with the probability
+                                   threshold.
+mean_ica_excluded               : B2 removing noticeably MORE components across ALL
+                                   subjects (not just VP025) without a clear metric
+                                   benefit is a red flag for false positives.
+
+IMPORTANT: as with previous ablation tests, this is a starting point -- open the QC
+images for VP025 under both:
+  E:\kntu\Thesis\codes\HOPE-LAST-CODE-FILE\new-tsfnet\eeg10s\eeg10s+fnirs21segment\fnirs-nofilter\Results\EEG_ICA_SELECTION_ABLATION_TEST\B1_argmax_only\VP025\
+  E:\kntu\Thesis\codes\HOPE-LAST-CODE-FILE\new-tsfnet\eeg10s\eeg10s+fnirs21segment\fnirs-nofilter\Results\EEG_ICA_SELECTION_ABLATION_TEST\B2_prob_threshold\VP025\
+and visually confirm whether Fp1/Fp2's persistent noise actually looks cleaner in B2,
+and that the other 5 subjects were NOT over-cleaned by B2.
+
+--- Per-subject detail (all subjects) ---
+
+VP001:
+  B1_argmax_only       bads=['AFF6h', 'Fp1', 'Fp2', 'T7', 'T8'] still_bad=[] ica_excluded=2 [0, 2] emg_power=1.041e-13 eeg_retention=0.149
+  B2_prob_threshold    bads=['AFF6h', 'Fp1', 'Fp2', 'T7', 'T8'] still_bad=[] ica_excluded=3 [0, 2, 7] emg_power=9.262e-14 eeg_retention=0.137
+
+VP005:
+  B1_argmax_only       bads=['CP1', 'Fp1', 'Fp2', 'P4'] still_bad=[] ica_excluded=4 [0, np.int64(1), 2, 3] emg_power=1.757e-13 eeg_retention=0.147
+  B2_prob_threshold    bads=['CP1', 'Fp1', 'Fp2', 'P4'] still_bad=[] ica_excluded=7 [0, 1, 2, 3, 7, 9, 10] emg_power=8.963e-14 eeg_retention=0.126
+
+VP015:
+  B1_argmax_only       bads=['CP1', 'Cz', 'FC1', 'T7'] still_bad=[] ica_excluded=3 [0, 1, 2] emg_power=5.517e-14 eeg_retention=0.110
+  B2_prob_threshold    bads=['CP1', 'Cz', 'FC1', 'T7'] still_bad=[] ica_excluded=3 [0, 1, 2] emg_power=5.517e-14 eeg_retention=0.110
+
+VP018:
+  B1_argmax_only       bads=['Cz', 'Fp1', 'Fp2', 'O2', 'POz'] still_bad=[] ica_excluded=2 [0, 3] emg_power=9.936e-14 eeg_retention=0.311
+  B2_prob_threshold    bads=['Cz', 'Fp1', 'Fp2', 'O2', 'POz'] still_bad=[] ica_excluded=2 [0, 3] emg_power=9.936e-14 eeg_retention=0.311
+
+VP021:
+  B1_argmax_only       bads=['CP1', 'CP2', 'FC1', 'FC5', 'Fp1', 'Fp2', 'O2'] still_bad=[] ica_excluded=2 [0, 1] emg_power=9.107e-14 eeg_retention=0.119
+  B2_prob_threshold    bads=['CP1', 'CP2', 'FC1', 'FC5', 'Fp1', 'Fp2', 'O2'] still_bad=[] ica_excluded=2 [0, 1] emg_power=9.107e-14 eeg_retention=0.119
+
+VP025:
+  B1_argmax_only       bads=['AFF6h', 'FC6', 'Fp1', 'Fp2', 'T8'] still_bad=['Fp1', 'Fp2'] ica_excluded=2 [0, 1] emg_power=1.405e-13 eeg_retention=0.145
+  B2_prob_threshold    bads=['AFF6h', 'FC6', 'Fp1', 'Fp2', 'T8'] still_bad=['Fp1', 'Fp2'] ica_excluded=2 [0, 1] emg_power=1.405e-13 eeg_retention=0.145

@@ -1,0 +1,51 @@
+==============================================================================
+C1 vs C3b CONTROL TEST — both use filter band 0.5-50Hz.
+Only difference: ICA component-selection method.
+==============================================================================
+
+--- THE ANSWER (VP025's Fp1/Fp2) ---
+  C1_our_final_pipeline            still_bad=['Fp1', 'Fp2'] known_persistent_still_present=['Fp1', 'Fp2'] target_channel_emg_power={'Fp1': 6.094839951396733e-13, 'Fp2': 5.465482395503575e-13} n_excluded=2
+  C3b_bemobil_keep_brain_c1band    still_bad=['Fp2'] known_persistent_still_present=['Fp2'] target_channel_emg_power={'Fp1': 3.5427741168153053e-13, 'Fp2': 3.653487813759094e-13} n_excluded=3
+
+If C3b's known_persistent_still_present is EMPTY -> keep-brain-only ICA is
+genuinely effective, independent of filter band -- consider adopting it.
+If C3b's known_persistent_still_present still shows Fp1/Fp2 (like C1) ->
+C3's earlier apparent success on VP025 was solely due to its narrower
+0.1-30Hz filter band cutting off the 30-49Hz band our metric measures, NOT
+the keep-brain-only ICA method itself. In that case, do not adopt C3/C3b --
+stick with C1, and VP025's Fp1/Fp2 remains a case needing the manual
+decision discussed earlier (e.g. dropping the whole subject).
+
+--- Sanity check on VP001 (catastrophic 97.3% epoch-rejection under full C3) ---
+  C1_our_final_pipeline            autoreject_reject_frac=0.018 n_excluded=2 eeg_retention=0.149
+  C3b_bemobil_keep_brain_c1band    autoreject_reject_frac=0.0 n_excluded=5 eeg_retention=0.117
+
+If C3b's autoreject_reject_frac for VP001 is still very high (close to C3's
+0.973), the keep-brain-only method is inherently too aggressive regardless of
+filter band, and should not be adopted even if it happened to help VP025.
+
+--- Full detail ---
+
+VP001:
+  C1_our_final_pipeline            bads=['AFF6h', 'Fp1', 'Fp2', 'T7', 'T8'] still_bad=[] n_excluded=2 emg_power=1.041e-13 eeg_retention=0.149 autoreject_reject_frac=0.018
+  C3b_bemobil_keep_brain_c1band    bads=['AFF6h', 'Fp1', 'Fp2', 'T7', 'T8'] still_bad=['O2'] n_excluded=5 emg_power=8.075e-14 eeg_retention=0.117 autoreject_reject_frac=0.0
+
+VP005:
+  C1_our_final_pipeline            bads=['CP1', 'Fp1', 'Fp2', 'P4'] still_bad=[] n_excluded=4 emg_power=1.757e-13 eeg_retention=0.147 autoreject_reject_frac=0.045
+  C3b_bemobil_keep_brain_c1band    bads=['CP1', 'Fp1', 'Fp2', 'P4'] still_bad=[] n_excluded=7 emg_power=8.963e-14 eeg_retention=0.126 autoreject_reject_frac=0.029
+
+VP015:
+  C1_our_final_pipeline            bads=['CP1', 'Cz', 'FC1', 'T7'] still_bad=[] n_excluded=3 emg_power=5.517e-14 eeg_retention=0.110 autoreject_reject_frac=0.045
+  C3b_bemobil_keep_brain_c1band    bads=['CP1', 'Cz', 'FC1', 'T7'] still_bad=[] n_excluded=3 emg_power=5.517e-14 eeg_retention=0.110 autoreject_reject_frac=0.045
+
+VP018:
+  C1_our_final_pipeline            bads=['Cz', 'Fp1', 'Fp2', 'O2', 'POz'] still_bad=[] n_excluded=2 emg_power=9.936e-14 eeg_retention=0.311 autoreject_reject_frac=0.51
+  C3b_bemobil_keep_brain_c1band    bads=['Cz', 'Fp1', 'Fp2', 'O2', 'POz'] still_bad=[] n_excluded=4 emg_power=7.822e-14 eeg_retention=0.299 autoreject_reject_frac=0.515
+
+VP021:
+  C1_our_final_pipeline            bads=['CP1', 'CP2', 'FC1', 'FC5', 'Fp1', 'Fp2', 'O2'] still_bad=[] n_excluded=2 emg_power=9.107e-14 eeg_retention=0.119 autoreject_reject_frac=0.014
+  C3b_bemobil_keep_brain_c1band    bads=['CP1', 'CP2', 'FC1', 'FC5', 'Fp1', 'Fp2', 'O2'] still_bad=[] n_excluded=3 emg_power=8.145e-14 eeg_retention=0.117 autoreject_reject_frac=0.014
+
+VP025:
+  C1_our_final_pipeline            bads=['AFF6h', 'FC6', 'Fp1', 'Fp2', 'T8'] still_bad=['Fp1', 'Fp2'] n_excluded=2 emg_power=1.405e-13 eeg_retention=0.145 autoreject_reject_frac=0.025
+  C3b_bemobil_keep_brain_c1band    bads=['AFF6h', 'FC6', 'Fp1', 'Fp2', 'T8'] still_bad=['Fp2'] n_excluded=3 emg_power=1.143e-13 eeg_retention=0.086 autoreject_reject_frac=0.028

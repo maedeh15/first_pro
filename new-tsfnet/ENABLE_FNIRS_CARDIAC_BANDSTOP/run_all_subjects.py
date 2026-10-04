@@ -1,0 +1,604 @@
+# ============================================================================
+# FULL BASELINE RUN -- all 26 subjects, subject-dependent (paper-exact
+# protocol: Sec. 3.6), for later comparison against any changes you make.
+#
+# Paste this as CELL 9 in tsfnet_model_notebook.py (after CELL 8's imports/
+# setup are already in the kernel), or run standalone with %run after
+# %run tsfnet_model_notebook.py and %run crash_safe_logger.py.
+#
+# WHY THIS SHAPE:
+#   - run_diagnostics_flag=False by default here: PCA/t-SNE/saliency for
+#     26 subjects x 3 sessions = 78 diagnostic runs would take a very long
+#     time and isn't needed for a baseline comparison run (accuracy/kappa
+#     numbers are what you compare across changes). Diagnostics are for
+#     drilling into ONE subject's behavior, not for a 26-subject sweep.
+#     Set RUN_DIAGNOSTICS=True below if you want them anyway.
+#   - Per-subject try/except: one subject crashing (e.g. a corrupted .npy,
+#     an out-of-memory spike) does NOT stop the other 25 -- this matters a
+#     lot for an unattended multi-hour run.
+#   - CrashSafeLogger wraps the WHOLE run: every subject's full training
+#     log is on disk in real time, so even a full kernel crash partway
+#     through subject 15 still leaves you with subjects 1-14's complete
+#     logs (and the results/checkpoints already written by
+#     run_subject_cross_session for each finished subject).
+#   - A combined summary (baseline_all_subjects_<timestamp>.csv/.json) is
+#     written incrementally (after EACH subject, not just at the end), so
+#     partial results are never lost even if the run stops partway.
+# ============================================================================
+import os
+import csv
+import json
+import time
+import datetime
+import traceback
+import argparse
+import random
+
+# Make this script self-sufficient regardless of what was run in earlier
+# cells: explicitly import CrashSafeLogger here rather than relying on it
+# already being in the notebook's namespace from a previous %run. Requires
+# crash_safe_logger.py to be in the same folder as this script (or on
+# sys.path). If CrashSafeLogger truly isn't available for any other reason,
+# a plain no-op fallback context manager is used instead of crashing --
+# real-time crash-safe logging is a nice-to-have, not something that should
+# ever block your 26-subject run from starting.
+try:
+    from crash_safe_logger import CrashSafeLogger
+except ImportError:
+    print("WARNING: could not import CrashSafeLogger from crash_safe_logger.py "
+          "(is it in the same folder as this script?). Falling back to plain "
+          "print() with no crash-safe file logging for this run.")
+
+    class CrashSafeLogger:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            return False
+
+import torch   # needed for torch.cuda.is_available() below; harmless re-import if already loaded
+
+# ----------------------------------------------------------------------------
+# SEED CONTROL -- for the multi-seed ablation-vs-baseline statistical comparison.
+# By default this script previously had NO fixed seed at all, meaning every run
+# was a random draw from the training-stochasticity distribution (weight
+# initialization, batch order, dropout masks, etc.) -- this is exactly the
+# noise source that made the 11-seg vs 20-seg paired comparison statistically
+# non-significant despite a consistent positive mean effect. Running the SAME
+# preprocessing output with 3 different fixed seeds and averaging each
+# subject's result across those 3 runs reduces this noise component by
+# ~1/sqrt(3) (~42% reduction in std), making the true effect (if any) easier
+# to detect without collecting any new data.
+#
+# Usage:
+#   python run_all_subjects.py --seed 42
+#   python run_all_subjects.py --seed 123
+#   python run_all_subjects.py --seed 2024
+# (Run three times, once per seed value, for both the 11-segment and
+# 20-segment pipelines -- 6 total runs -- then average_seeds_and_compare.py
+# aggregates all of them.)
+_arg_parser = argparse.ArgumentParser()
+_arg_parser.add_argument("--seed", type=int, default=42,
+                          help="Random seed for numpy/torch/python random, for reproducibility "
+                               "and for the multi-seed noise-averaging ablation comparison.")
+# RESULT OF PRIORITY-1 SUB-EXPERIMENT (gradient clipping, norm=1.0): REJECTED.
+# Both seeds (42, 2024) showed a consistent drop vs. the no-clip baseline
+# (overall acc -1.57pp, kappa -0.023, fusion-branch acc -2.06pp), matching
+# the same "EEG branch improves alone, fusion/overall degrades" pattern seen
+# in every preprocessing ablation (AutoReject, ICLabel, SSP). Default is now
+# False (no clipping) so this script reproduces the accepted baseline unless
+# explicitly re-enabled with --grad-clip (e.g. to revisit with a larger norm
+# such as 5.0 later, if time permits).
+_arg_parser.add_argument("--grad-clip", dest="grad_clip", action="store_true",
+                          help="Re-enable gradient clipping (norm=1.0), which was tested "
+                               "and REJECTED in the priority-1 sub-experiment. Off by default.")
+_arg_parser.set_defaults(grad_clip=False)
+
+# ISOLATED ABLATION FLAG (priority-2 sub-experiment: fusion combination formula).
+# Default is now "paper_mean" (Eq. 4 exactly: independent Sigmoid per weight,
+# plain mean / divide-by-3, no renormalization) -- this is the ONLY variable
+# this script changes relative to the accepted priority-1 baseline (no grad
+# clipping); everything else (epochs, patience, lr, weight_decay, class
+# weights, CAFE dim) is untouched. Pass --fusion-combination wsum to
+# reproduce the prior (renormalized-by-sum) behavior for a direct A/B run.
+_arg_parser.add_argument("--fusion-combination", type=str, default="paper_mean",
+                          choices=["paper_mean", "wsum"],
+                          help="Final decision-level combination formula for y_eeg/y_fusion/"
+                               "y_fnirs. 'paper_mean' (default): Eq.4 as written, sigmoid+mean/3. "
+                               "'wsum': prior renormalized-by-sum behavior, for comparison only.")
+
+# ISOLATED ABLATION FLAG (priority-3 family: class weighting). Default
+# "none" so a plain `python run_all_subjects.py --seed X` still reproduces
+# the accepted priority-1+2 baseline exactly.
+#   --class-weighting-scheme inverse_freq       -> priority-3a: TESTED, REJECTED
+#     (26 subj x 3 seeds: acc -1.17pp; 13-subject confusion-matrix check:
+#     minority-class recall did NOT improve either, -0.043/-0.020; cross-
+#     subject std=5.78pp, worst case -12.47pp)
+#   --class-weighting-scheme effective_number   -> priority-3b: TESTED, ACCEPTED
+#     (beta=0.9; 2 seeds: acc +0.20pp, kappa +0.0031 vs. baseline, stable)
+#   --class-weighting-scheme focal               -> priority-3c: NEW, testing now
+#     (Lin et al. 2017; per-SAMPLE (1-p_t)^gamma focusing, no per-class
+#     alpha -- an independent axis from 3a/3b's fixed per-class weight)
+# This is the ONLY variable this script changes relative to the accepted
+# baseline when a non-"none" scheme is used; everything else (epochs,
+# patience, lr, weight_decay, combination formula, CAFE dim) is untouched.
+_arg_parser.add_argument("--class-weighting-scheme", type=str, default="none",
+                          choices=["none", "inverse_freq", "effective_number", "focal"],
+                          help="Loss class-weighting scheme (priority-3 family). 'none' "
+                               "(default): unweighted, matches accepted baseline. "
+                               "'inverse_freq': priority-3a, tested and REJECTED. "
+                               "'effective_number': priority-3b (Cui et al. 2019), ACCEPTED "
+                               "with beta=0.9. 'focal': priority-3c (Lin et al. 2017), new.")
+_arg_parser.add_argument("--effective-number-beta", type=float, default=0.999,
+                          help="beta hyperparameter for --class-weighting-scheme "
+                               "effective_number (Cui et al. 2019 use 0.9/0.99/0.999/0.9999; "
+                               "0.9 was the ACCEPTED value in this project). "
+                               "Ignored for other schemes. Default 0.999.")
+_arg_parser.add_argument("--focal-gamma", type=float, default=2.0,
+                          help="gamma hyperparameter for --class-weighting-scheme focal "
+                               "(Lin et al. 2017 use gamma=2.0 as their main setting). "
+                               "Ignored for other schemes. Default 2.0.")
+# ISOLATED ABLATION FLAG (priority-3d sub-experiment: SMOTE, a DATA-level
+# axis independent of --class-weighting-scheme's LOSS-level axis). Default
+# "none" so a plain run still reproduces the accepted baseline exactly.
+_arg_parser.add_argument("--oversampling-scheme", type=str, default="none",
+                          choices=["none", "smote"],
+                          help="Training-data oversampling scheme (priority-3d, independent "
+                               "of --class-weighting-scheme). 'none' (default): matches "
+                               "accepted baseline. 'smote': Chawla et al. 2002, adapted for "
+                               "paired multimodal EEG+fNIRS windows -- see "
+                               "smote_oversample_fold()'s docstring for methodological caveats.")
+_arg_parser.add_argument("--smote-k-neighbors", type=int, default=5,
+                          help="k for SMOTE's same-class nearest-neighbor search (Chawla et "
+                               "al. 2002 default: 5). Ignored unless --oversampling-scheme smote.")
+# ISOLATED ABLATION FLAG (priority-5: EEG branch temporal pooling). This is
+# the project's largest architecture change (documented as "RUN 3A" / item
+# #12 in the architecture-changes list). Default "gap" reproduces the
+# paper's exact method; pass --eeg-temporal-mode bilstm to test the
+# BiLSTM-based replacement, isolated to the EEG-only classification branch
+# alone (see EEGLikeBranch's docstring in the notebook for the full design).
+_arg_parser.add_argument("--eeg-temporal-mode", type=str, default="gap",
+                          choices=["gap", "bilstm"],
+                          help="EEG branch's temporal pooling for its OWN classifier (y_eeg) "
+                               "only -- never affects EFGF/Fusion/CAFE. 'gap' (default): "
+                               "paper-exact Global Average Pooling over time. 'bilstm': "
+                               "priority-5, replace GAP with a bidirectional LSTM's last "
+                               "time-step output.")
+_arg_parser.add_argument("--eeg-lstm-hidden", type=int, default=64,
+                          help="hidden_size for --eeg-temporal-mode bilstm's LSTM (bidirectional, "
+                               "so output dim = 2x this). Ignored for 'gap'. Default 64.")
+# BUG NOTICE (see EEGLikeBranch's docstring in the notebook for full detail):
+# the FIRST priority-5 run used "last_step" (lstm_out[:, -1, :]), which for a
+# bidirectional LSTM only correctly summarizes the FORWARD direction over the
+# whole sequence -- the backward half at that index only saw ONE time step.
+# Default is now "h_n" (the bug-fixed, correct bidirectional summary using
+# nn.LSTM's own final hidden states). Pass --eeg-readout-mode last_step ONLY
+# to exactly reproduce that earlier (buggy) run for a direct comparison.
+_arg_parser.add_argument("--eeg-readout-mode", type=str, default="h_n",
+                          choices=["h_n", "last_step", "mean_pool"],
+                          help="How to reduce the BiLSTM's per-time-step outputs to one feature "
+                               "vector (only used with --eeg-temporal-mode bilstm). 'h_n' "
+                               "(default, FIXED): correct forward+backward whole-sequence "
+                               "summary. 'last_step' (BUGGY, A/B comparison only): naive "
+                               "lstm_out[:,-1,:] indexing -- backward half only saw 1 time step. "
+                               "'mean_pool': average the BiLSTM's outputs over the full sequence.")
+# Off by default -- generating PCA/t-SNE/saliency diagnostics for all 26
+# subjects x 3 sessions (78 diagnostic runs) noticeably slows down a full
+# sweep. Pass --diagnostics only for a specific run you want to inspect
+# closely (e.g. the final winning variant), not for every ablation sweep.
+_arg_parser.add_argument("--diagnostics", dest="run_diagnostics", action="store_true",
+                          help="Also generate PCA/t-SNE/saliency plots per subject/session "
+                               "(slow: 78 extra diagnostic runs for 26 subjects x 3 sessions). "
+                               "Off by default.")
+_arg_parser.set_defaults(run_diagnostics=False)
+# ISOLATED ABLATION FLAG (priority-4, deferred until after priority-5 per
+# project decision). Default 64 reproduces the accepted baseline. See
+# run_subject_cross_session's docstring for why 128 (not the paper's
+# original 256, already independently ruled out) is the value under test.
+# ISOLATED ABLATION FLAGS (priority-A1: TAFN-style asymmetric loss term).
+# Motivated directly by this project's confusion-matrix audit: summed over 16
+# subjects x 3 folds, 3649 of 6124 errors (59.6%) are 2-back<->3-back
+# confusions, while 0-back recall is 68.1%. Every architecture/capacity change
+# tried so far (AutoReject, ICLabel, SSP, BiLSTM, CAFE-128) offered only a
+# GENERAL improvement and was rejected; this is the first change that targets
+# the actual, localized failure mode.
+# Class indices: 0 = 0-back, 1 = 2-back, 2 = 3-back. Default "1,2" therefore
+# means the 2-back/3-back pair, applied symmetrically.
+_arg_parser.add_argument("--asymmetric-pairs", type=str, default="",
+                          help="Comma/semicolon list of class-index pairs to penalize extra, "
+                               "e.g. '1,2' for the 2-back/3-back pair, or '1,2;0,1' for two "
+                               "pairs. Empty (default) disables the asymmetric term entirely "
+                               "and reproduces the accepted baseline.")
+_arg_parser.add_argument("--asymmetric-weight", type=float, default=2.0,
+                          help="Cost multiplier for the pairs given by --asymmetric-pairs. "
+                               "TAFN's reference config uses asymmetric weights [1,2], i.e. 2.0. "
+                               "Ignored when --asymmetric-pairs is empty.")
+_arg_parser.add_argument("--ordinal-reg-lambda", type=float, default=0.0,
+                          help="Weight of TAFN's smoothness regularization term (Eq.14). The "
+                               "reference implementation differences ADJACENT CLASS scores, "
+                               "which for this project's ordinal classes (0<2<3-back load) acts "
+                               "as an ordinal prior. Reference value 1e-4; 0.0 (default) "
+                               "disables it so it can be ablated separately.")
+_arg_parser.add_argument("--cafe-d-model", type=int, default=64,
+                          help="CAFE cross-attention dimension (priority-4). Project's "
+                               "current accepted default is 64; testing 128 here. Watch "
+                               "overfitting_gap_val_vs_test, not just accuracy.")
+_arg_parser.add_argument("--fnirs-num-segments", type=int, default=21,
+                          help="Must match FNIRS_NUM_SEGMENTS used by the currently-loaded "
+                               "preprocessed .npy files (preprocessing constant). Previously "
+                               "hardcoded to 21 inside TSFNet/CAFELayer -- changing the "
+                               "preprocessing's segment count (e.g. to 18, per the reference-"
+                               "paper-calibrated formula) without updating this would crash "
+                               "with a reshape RuntimeError in CAFELayer.forward. Default 21 "
+                               "reproduces prior behavior; set to 18 for the corrected "
+                               "preprocessing.")
+_arg_parser.add_argument("--class-count-level", type=str, default="window",
+                          choices=["window", "trial"],
+                          help="Unit at which class_counts is computed for "
+                               "--class-weighting-scheme != 'none'. 'window' (default, legacy "
+                               "behavior). 'trial': verified to be a no-op on this dataset "
+                               "(trial-level counts are always exactly [6,6,6] per fold, by "
+                               "fixed experimental design) -- kept only for completeness.")
+SEED_ARGS, _ = _arg_parser.parse_known_args()
+SEED = SEED_ARGS.seed
+GRAD_CLIP_NORM = 1.0 if SEED_ARGS.grad_clip else None
+FUSION_COMBINATION = SEED_ARGS.fusion_combination
+CLASS_WEIGHTING_SCHEME = SEED_ARGS.class_weighting_scheme
+EFFECTIVE_NUMBER_BETA = SEED_ARGS.effective_number_beta
+FOCAL_GAMMA = SEED_ARGS.focal_gamma
+OVERSAMPLING_SCHEME = SEED_ARGS.oversampling_scheme
+SMOTE_K_NEIGHBORS = SEED_ARGS.smote_k_neighbors
+EEG_TEMPORAL_MODE = SEED_ARGS.eeg_temporal_mode
+EEG_LSTM_HIDDEN = SEED_ARGS.eeg_lstm_hidden
+EEG_READOUT_MODE = SEED_ARGS.eeg_readout_mode
+CAFE_D_MODEL = SEED_ARGS.cafe_d_model
+FNIRS_NUM_SEGMENTS = SEED_ARGS.fnirs_num_segments
+CLASS_COUNT_LEVEL = SEED_ARGS.class_count_level
+
+
+def _parse_pairs(spec):
+    """Parse '1,2;0,1' -> [(1,2), (0,1)]. Empty string -> None (feature off)."""
+    spec = (spec or "").strip()
+    if not spec:
+        return None
+    pairs = []
+    for chunk in spec.split(";"):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        parts = [c for c in chunk.replace(",", " ").split() if c]
+        if len(parts) != 2:
+            raise ValueError(f"--asymmetric-pairs chunk {chunk!r} is not a pair of two "
+                              f"class indices (expected e.g. '1,2').")
+        i, j = int(parts[0]), int(parts[1])
+        if not (0 <= i < 3 and 0 <= j < 3):
+            raise ValueError(f"--asymmetric-pairs indices must be in 0..2 (got {i},{j}).")
+        if i == j:
+            raise ValueError(f"--asymmetric-pairs got a self-pair ({i},{j}); the diagonal is "
+                              f"always 1.0 (a correct prediction is never up-weighted).")
+        pairs.append((i, j))
+    return pairs
+
+
+ASYMMETRIC_PAIRS = _parse_pairs(SEED_ARGS.asymmetric_pairs)
+ASYMMETRIC_WEIGHT = SEED_ARGS.asymmetric_weight
+ORDINAL_REG_LAMBDA = SEED_ARGS.ordinal_reg_lambda
+
+random.seed(SEED)
+import numpy as np
+np.random.seed(SEED)
+torch.manual_seed(SEED)
+if torch.cuda.is_available():
+    torch.cuda.manual_seed_all(SEED)
+# Deterministic cuDNN (slightly slower, but removes another source of
+# run-to-run noise beyond just the initial seed).
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
+print(f"[SEED CONTROL] Using seed={SEED} (numpy/torch/python random all seeded, cuDNN deterministic)")
+
+# Same self-sufficiency pattern for run_subject_cross_session: if it's already in
+# the notebook's namespace (from an earlier %run tsfnet_model_notebook.py), that
+# version is used as-is. Otherwise, try importing it from the installed
+# tsfnet_model PACKAGE (folder) if that's what you're using; if that package
+# isn't present either (e.g. you're only using the single-file
+# tsfnet_model_notebook.py, not the tsfnet_model/ package folder), fall back
+# to running tsfnet_model_notebook.py itself, found next to THIS script --
+# this covers all three ways this project can be set up without silently
+# depending on cell execution order in any of them.
+try:
+    run_subject_cross_session
+except NameError:
+    try:
+        from tsfnet_model.train import run_subject_cross_session
+    except ModuleNotFoundError:
+        try:
+            _this_dir = os.path.dirname(os.path.abspath(__file__))
+        except NameError:
+            # __file__ may not be defined in some exec/%run contexts -- fall back
+            # to the current working directory (Jupyter's default is usually the
+            # notebook's own folder, which is where these files normally live).
+            _this_dir = os.getcwd()
+        _notebook_path = os.path.join(_this_dir, "tsfnet_model_notebook.py")
+        if not os.path.isfile(_notebook_path):
+            raise ModuleNotFoundError(
+                "Could not find run_subject_cross_session anywhere: no "
+                "tsfnet_model package installed, and tsfnet_model_notebook.py "
+                f"not found next to this script ({_notebook_path}). Put "
+                "tsfnet_model_notebook.py in the same folder as "
+                "run_all_subjects.py, or run it first via %run.")
+        print(f"NOTE: tsfnet_model package not found; loading definitions from "
+              f"{_notebook_path} instead.")
+        exec(open(_notebook_path, encoding="utf-8").read(), globals())
+
+DATA_ROOT = r"E:\kntu\Thesis\codes\Results\TSFNET_PAPER_EXACT_nback"
+SUBJECTS = [f"VP{i:03d}" for i in range(1, 27)]     # VP001..VP026
+RUN_DIAGNOSTICS = SEED_ARGS.run_diagnostics          # True = also make PCA/t-SNE/saliency plots per subject (SLOW: 26 subjects x 3 sessions = 78 diagnostic runs). Off by default; pass --diagnostics to enable.
+# Variant tag distinguishes this isolated ablation (fusion combination formula,
+# plus the now-accepted no-clip setting from priority-1) from any other
+# variant in every filename, so conditions can NEVER be accidentally mixed up
+# or overwrite each other on disk.
+_CLIP_SUBTAG = "gradclip1p0" if GRAD_CLIP_NORM is not None else "noclip"
+_CW_SUBTAG = CLASS_WEIGHTING_SCHEME if CLASS_WEIGHTING_SCHEME != "none" else "noclassweight"
+if CLASS_WEIGHTING_SCHEME == "effective_number":
+    _CW_SUBTAG += f"beta{EFFECTIVE_NUMBER_BETA}"
+elif CLASS_WEIGHTING_SCHEME == "focal":
+    _CW_SUBTAG += f"gamma{FOCAL_GAMMA}"
+_OS_SUBTAG = "smoteK" + str(SMOTE_K_NEIGHBORS) if OVERSAMPLING_SCHEME == "smote" else "nosmote"
+_EEG_SUBTAG = f"bilstmH{EEG_LSTM_HIDDEN}{EEG_READOUT_MODE}" if EEG_TEMPORAL_MODE == "bilstm" else "gap"
+_CAFE_SUBTAG = f"cafe{CAFE_D_MODEL}"
+if ASYMMETRIC_PAIRS:
+    _pair_str = "-".join(f"{i}{j}" for i, j in ASYMMETRIC_PAIRS)
+    _ASYM_SUBTAG = f"asym{_pair_str}w{ASYMMETRIC_WEIGHT}"
+else:
+    _ASYM_SUBTAG = "noasym"
+if ORDINAL_REG_LAMBDA > 0:
+    _ASYM_SUBTAG += f"_ordreg{ORDINAL_REG_LAMBDA}"
+_VARIANT_TAG = (f"{FUSION_COMBINATION}_{_CLIP_SUBTAG}_{_CW_SUBTAG}_{_OS_SUBTAG}"
+                f"_{_EEG_SUBTAG}_{_CAFE_SUBTAG}_{_ASYM_SUBTAG}")
+RUN_TAG = datetime.datetime.now().strftime("%Y%m%d_%H%M%S") + f"_seed{SEED}_{_VARIANT_TAG}"   # unique per run+seed+variant, so a later comparison run never overwrites this baseline
+
+# Per-subject cross_session_VPxxx_summary.json + .pt checkpoints (written by
+# run_subject_cross_session) previously went straight into each subject's own
+# data folder (subject_dir) with a FIXED filename -- so every new run variant
+# silently overwrote the previous variant's session-level results, destroying
+# the confusion-matrix-level detail needed for the kind of per-subject/
+# per-class analysis done for SSP and class-weighting. Every run now gets its
+# own variant+seed-tagged results folder instead (NOT timestamped, so that
+# re-running the SAME variant+seed on purpose still lands in the same place
+# -- e.g. to resume a crashed run -- but a DIFFERENT variant or seed always
+# gets a distinct, permanent folder that no later run can touch).
+RESULTS_DIR_VARIANT = os.path.join(DATA_ROOT, f"results_{_VARIANT_TAG}_seed{SEED}")
+os.makedirs(RESULTS_DIR_VARIANT, exist_ok=True)
+print(f"[RESULTS] Per-subject session-level JSON/checkpoints for this run go to: "
+      f"{RESULTS_DIR_VARIANT}")
+
+# Moved into RESULTS_DIR_VARIANT (was directly under DATA_ROOT before) so the
+# whole-run summary CSV/JSON, the run log, AND every per-subject file for
+# this run all sit together in one folder instead of being split between
+# DATA_ROOT's root and this subfolder.
+SUMMARY_CSV = os.path.join(RESULTS_DIR_VARIANT, f"baseline_all_subjects_{RUN_TAG}.csv")
+SUMMARY_JSON = os.path.join(RESULTS_DIR_VARIANT, f"baseline_all_subjects_{RUN_TAG}.json")
+
+_csv_fields = ["subject_id", "status", "mean_acc", "std_acc", "mean_kappa", "std_kappa",
+               "eeg_only_acc", "fnirs_only_acc", "fusion_only_acc",
+               "w_eeg", "w_fusion", "w_fnirs",
+               # NEW: per-class recall from the confusion matrix summed over this
+               # subject's 3 session-folds. Added because overall accuracy alone
+               # hides WHICH class the model fails on -- and for this 3-class
+               # n-back task the 2-back/3-back pair is the known-hard one, so a
+               # drop in recall_2back/recall_3back is the signal that actually
+               # matters when judging an ablation.
+               "recall_0back", "recall_2back", "recall_3back",
+               "elapsed_min", "error"]
+
+
+def _fmt_cm(cm):
+    """Render a 3x3 confusion matrix as compact aligned text for the run log."""
+    names = ["0-back", "2-back", "3-back"]
+    out = ["          " + "".join(f"{('pred ' + n):>12}" for n in names)]
+    for i, n in enumerate(names):
+        row_total = sum(cm[i])
+        rec = (cm[i][i] / row_total * 100) if row_total else float("nan")
+        out.append(f"  true {n:<4}" + "".join(f"{v:>12d}" for v in cm[i]) +
+                   f"   | recall {rec:5.1f}%")
+    return "\n".join(out)
+
+
+def _append_csv_row(row):
+    file_exists = os.path.exists(SUMMARY_CSV)
+    with open(SUMMARY_CSV, "a", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=_csv_fields)
+        if not file_exists:
+            writer.writeheader()
+        writer.writerow(row)
+
+
+all_results = {}
+_all_cms = []      # one 3x3 confusion matrix per completed subject, for the grand total below
+
+with CrashSafeLogger(os.path.join(RESULTS_DIR_VARIANT, f"baseline_run_log_{RUN_TAG}.txt"),
+                      experiment_tag=f"11SEG_BASELINE_{_VARIANT_TAG.upper()}") as log:
+    print(f"===== FULL BASELINE RUN started {RUN_TAG} (seed={SEED}) =====")
+    print(f"[ABLATION] asymmetric_pairs={ASYMMETRIC_PAIRS!r} weight={ASYMMETRIC_WEIGHT} "
+          f"ordinal_reg_lambda={ORDINAL_REG_LAMBDA} (priority-A1 isolated variable) "
+          f"| cafe_d_model={CAFE_D_MODEL!r} (priority-4 result: rejected) "
+          f"| eeg_temporal_mode={EEG_TEMPORAL_MODE!r} (hidden={EEG_LSTM_HIDDEN}, "
+          f"readout={EEG_READOUT_MODE!r} if bilstm) "
+          f"(priority-5 result: rejected, fixed at 'gap') "
+          f"| class_weighting_scheme={CLASS_WEIGHTING_SCHEME!r} "
+          f"(beta={EFFECTIVE_NUMBER_BETA} if effective_number, gamma={FOCAL_GAMMA} if focal) "
+          f"| oversampling_scheme={OVERSAMPLING_SCHEME!r} (k={SMOTE_K_NEIGHBORS} if smote) "
+          f"(priority-3 family isolated variables) "
+          f"| fusion_combination={FUSION_COMBINATION!r} (priority-2 result: accepted) "
+          f"| grad_clip_norm={GRAD_CLIP_NORM!r} (priority-1 result: rejected, fixed at None)")
+    print(f"Subjects: {len(SUBJECTS)} | diagnostics={RUN_DIAGNOSTICS} | device="
+          f"{'cuda' if torch.cuda.is_available() else 'cpu'}")
+    print(f"Summary CSV: {SUMMARY_CSV}")
+    print(f"Summary JSON: {SUMMARY_JSON}")
+    print(f"Per-subject session-level results (JSON + checkpoints): {RESULTS_DIR_VARIANT}\n")
+
+    run_t0 = time.time()
+    for i, subject_id in enumerate(SUBJECTS, 1):
+        subject_dir = os.path.join(DATA_ROOT, subject_id)
+        print(f"\n{'='*70}")
+        print(f"[{i}/{len(SUBJECTS)}] {subject_id}  ({time.time()-run_t0:.1f}s elapsed so far)")
+        print(f"{'='*70}")
+
+        if not os.path.isdir(subject_dir):
+            print(f"  SKIP: {subject_dir} does not exist (preprocessing not run for this subject?)")
+            row = {"subject_id": subject_id, "status": "skipped_no_data", "mean_acc": "",
+                   "std_acc": "", "mean_kappa": "", "std_kappa": "",
+                   "eeg_only_acc": "", "fnirs_only_acc": "", "fusion_only_acc": "",
+                   "w_eeg": "", "w_fusion": "", "w_fnirs": "",
+                   "recall_0back": "", "recall_2back": "", "recall_3back": "",
+                   "elapsed_min": "", "error": ""}
+            all_results[subject_id] = row
+            _append_csv_row(row)
+            continue
+
+        t0 = time.time()
+        try:
+            mean_acc, std_acc, mean_kappa, std_kappa, summary = run_subject_cross_session(
+                subject_dir, subject_id,
+                device="cuda" if torch.cuda.is_available() else "cpu",
+                batch_size=16,
+                run_diagnostics_flag=RUN_DIAGNOSTICS,
+                results_dir=RESULTS_DIR_VARIANT,  # variant+seed-tagged folder -- never overwrites another run's session-level JSON/checkpoints
+                fusion_combination=FUSION_COMBINATION,   # priority-2 result: accepted, fixed at "paper_mean"
+                class_weighting_scheme=CLASS_WEIGHTING_SCHEME,  # ISOLATED ABLATION (priority-3): only this differs vs. the accepted priority-1+2 baseline
+                effective_number_beta=EFFECTIVE_NUMBER_BETA,    # only used if scheme=="effective_number"
+                focal_gamma=FOCAL_GAMMA,                        # only used if scheme=="focal"
+                oversampling_scheme=OVERSAMPLING_SCHEME,        # ISOLATED ABLATION (priority-3d): data-level axis, independent of class_weighting_scheme
+                smote_k_neighbors=SMOTE_K_NEIGHBORS,            # only used if oversampling_scheme=="smote"
+                eeg_temporal_mode=EEG_TEMPORAL_MODE,            # ISOLATED ABLATION (priority-5): EEG branch's own classifier only, never touches EFGF/Fusion/CAFE
+                eeg_lstm_hidden=EEG_LSTM_HIDDEN,                # only used if eeg_temporal_mode=="bilstm"
+                eeg_readout_mode=EEG_READOUT_MODE,              # "h_n" (fixed, default), "last_step" (buggy, A/B only), "mean_pool"
+                cafe_d_model=CAFE_D_MODEL,                       # priority-4 result: rejected -> fixed at 64
+                fnirs_num_segments=FNIRS_NUM_SEGMENTS,           # must match preprocessing's FNIRS_NUM_SEGMENTS
+                asymmetric_hard_pairs=ASYMMETRIC_PAIRS,          # ISOLATED ABLATION (priority-A1): targets the 2-back/3-back failure mode
+                asymmetric_hard_weight=ASYMMETRIC_WEIGHT,
+                ordinal_reg_lambda=ORDINAL_REG_LAMBDA,
+                grad_clip_norm=GRAD_CLIP_NORM,           # priority-1 result: rejected -> default None
+                class_count_level=CLASS_COUNT_LEVEL,     # "window" (legacy/verified) or "trial" (verified no-op)
+            )
+            elapsed = (time.time() - t0) / 60
+            branch = summary["branch_accuracy"]
+            weights = summary["learned_fusion_weights"]
+            _cm = summary.get("confusion_matrix_summed", [[0] * 3 for _ in range(3)])
+            _pcr = summary.get("per_class_recall", [None, None, None])
+            _all_cms.append(_cm)
+            row = {"subject_id": subject_id, "status": "ok",
+                   "mean_acc": mean_acc, "std_acc": std_acc,
+                   "mean_kappa": mean_kappa, "std_kappa": std_kappa,
+                   "eeg_only_acc": round(branch["eeg_only_mean"], 4),
+                   "fnirs_only_acc": round(branch["fnirs_only_mean"], 4),
+                   "fusion_only_acc": round(branch["fusion_only_mean"], 4),
+                   "w_eeg": round(weights["w_eeg_mean"], 4),
+                   "w_fusion": round(weights["w_fusion_mean"], 4),
+                   "w_fnirs": round(weights["w_fnirs_mean"], 4),
+                   "recall_0back": (round(_pcr[0], 4) if _pcr[0] is not None else ""),
+                   "recall_2back": (round(_pcr[1], 4) if _pcr[1] is not None else ""),
+                   "recall_3back": (round(_pcr[2], 4) if _pcr[2] is not None else ""),
+                   "elapsed_min": round(elapsed, 2), "error": ""}
+            print(f"\n[{subject_id}] DONE in {elapsed:.1f} min | "
+                  f"acc={mean_acc:.4f}+-{std_acc:.4f}  kappa={mean_kappa:.4f}+-{std_kappa:.4f} | "
+                  f"branch acc: eeg={branch['eeg_only_mean']:.4f} fnirs={branch['fnirs_only_mean']:.4f} "
+                  f"fusion={branch['fusion_only_mean']:.4f} | "
+                  f"fusion weights: w_eeg={weights['w_eeg_mean']:.4f} w_fusion={weights['w_fusion_mean']:.4f} "
+                  f"w_fnirs={weights['w_fnirs_mean']:.4f}")
+            print(f"  confusion matrix (summed over 3 session-folds):")
+            print(_fmt_cm(_cm))
+
+        except Exception as e:
+            elapsed = (time.time() - t0) / 60
+            print(f"\n[{subject_id}] FAILED after {elapsed:.1f} min: {e}")
+            traceback.print_exc()
+            row = {"subject_id": subject_id, "status": "error", "mean_acc": "",
+                   "std_acc": "", "mean_kappa": "", "std_kappa": "",
+                   "eeg_only_acc": "", "fnirs_only_acc": "", "fusion_only_acc": "",
+                   "w_eeg": "", "w_fusion": "", "w_fnirs": "",
+                   "recall_0back": "", "recall_2back": "", "recall_3back": "",
+                   "elapsed_min": round(elapsed, 2), "error": str(e)}
+
+        all_results[subject_id] = row
+        _append_csv_row(row)               # written immediately -- survives a crash on the NEXT subject
+        with open(SUMMARY_JSON, "w") as f:  # full JSON rewritten each time (cheap at 26 subjects)
+            json.dump(all_results, f, indent=2)
+
+    # ----- final aggregate across all successfully completed subjects -----
+    ok_rows = [r for r in all_results.values() if r["status"] == "ok"]
+    print(f"\n\n{'='*70}")
+    print(f"BASELINE RUN COMPLETE: {len(ok_rows)}/{len(SUBJECTS)} subjects finished successfully")
+    print(f"{'='*70}")
+    if ok_rows:
+        import statistics
+        accs = [r["mean_acc"] for r in ok_rows]
+        kappas = [r["mean_kappa"] for r in ok_rows]
+        print(f"Grand mean accuracy across subjects: {statistics.mean(accs):.4f} "
+              f"(+-{statistics.pstdev(accs):.4f})")
+        print(f"Grand mean kappa across subjects:    {statistics.mean(kappas):.4f} "
+              f"(+-{statistics.pstdev(kappas):.4f})")
+
+        eeg_accs = [r["eeg_only_acc"] for r in ok_rows]
+        fnirs_accs = [r["fnirs_only_acc"] for r in ok_rows]
+        fusion_accs = [r["fusion_only_acc"] for r in ok_rows]
+        w_eeg = [r["w_eeg"] for r in ok_rows]
+        w_fusion = [r["w_fusion"] for r in ok_rows]
+        w_fnirs = [r["w_fnirs"] for r in ok_rows]
+        print(f"Grand mean branch accuracy:  eeg={statistics.mean(eeg_accs):.4f}  "
+              f"fnirs={statistics.mean(fnirs_accs):.4f}  fusion={statistics.mean(fusion_accs):.4f}")
+        print(f"Grand mean learned fusion weights:  w_eeg={statistics.mean(w_eeg):.4f}  "
+              f"w_fusion={statistics.mean(w_fusion):.4f}  w_fnirs={statistics.mean(w_fnirs):.4f}")
+
+    # ----- dataset-level confusion matrix, summed over every completed subject -----
+    # This is the single most informative number-block for judging an ablation on
+    # this task: mean accuracy can stay flat while the model quietly trades
+    # 2-back recall for 3-back recall (or collapses one class entirely, as was
+    # observed for some subjects in the SSP and class-weighting experiments).
+    if _all_cms:
+        grand_cm = [[sum(cm[i][j] for cm in _all_cms) for j in range(3)] for i in range(3)]
+        print(f"\n{'='*70}")
+        print(f"GRAND CONFUSION MATRIX (summed over {len(_all_cms)} subjects x 3 folds)")
+        print(f"{'='*70}")
+        print(_fmt_cm(grand_cm))
+        _tot = sum(sum(r) for r in grand_cm)
+        _diag = sum(grand_cm[i][i] for i in range(3))
+        print(f"\n  overall accuracy from matrix: {_diag / _tot * 100:.2f}%  (n={_tot} windows)")
+        # Off-diagonal traffic between the two hard classes, called out explicitly:
+        # 2-back <-> 3-back is the pair the literature (Cao et al.) reports as the
+        # bottleneck for 3-class n-back.
+        _hard = grand_cm[1][2] + grand_cm[2][1]
+        _errs = _tot - _diag
+        if _errs > 0:
+            print(f"  2-back <-> 3-back confusions: {_hard} of {_errs} total errors "
+                  f"({_hard / _errs * 100:.1f}% of all errors)")
+
+    failed = [sid for sid, r in all_results.items() if r["status"] != "ok"]
+    if failed:
+        print(f"\nSubjects that did NOT complete: {failed}")
+
+    # ----- per-subject listing: mean accuracy/kappa for every subject, one line each -----
+    print(f"\n{'='*70}")
+    print(f"PER-SUBJECT RESULTS ({len(ok_rows)} completed / {len(SUBJECTS)} total)")
+    print(f"{'='*70}")
+    for subject_id in SUBJECTS:   # preserves VP001..VP026 order regardless of completion order
+        r = all_results.get(subject_id)
+        if r is None:
+            print(f"{subject_id}: NOT RUN")
+        elif r["status"] == "ok":
+            print(f"{subject_id}: acc={r['mean_acc']:.4f} +- {r['std_acc']:.4f}  "
+                  f"kappa={r['mean_kappa']:.4f} +- {r['std_kappa']:.4f}  |  "
+                  f"branch acc: eeg={r['eeg_only_acc']:.4f} fnirs={r['fnirs_only_acc']:.4f} "
+                  f"fusion={r['fusion_only_acc']:.4f}  |  "
+                  f"fusion weights: w_eeg={r['w_eeg']:.4f} w_fusion={r['w_fusion']:.4f} "
+                  f"w_fnirs={r['w_fnirs']:.4f}")
+        elif r["status"] == "skipped_no_data":
+            print(f"{subject_id}: SKIPPED (no preprocessed data)")
+        else:
+            print(f"{subject_id}: FAILED ({r.get('error', 'unknown error')})")
+
+    print(f"\nFull results: {SUMMARY_CSV}")
+    print(f"             {SUMMARY_JSON}")

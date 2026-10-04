@@ -1,0 +1,26 @@
+[16:25:47] ===== EEG ORDERING ABLATION TEST STARTED (A1: CAR->ICA vs A2: ICA->CAR) =====
+[16:25:47] Test subjects: [1, 15, 18, 21, 5, 25]
+[16:25:47] Variants: ['A1_car_then_ica', 'A2_ica_then_car']
+[16:25:47] Output root: E:\kntu\Thesis\codes\HOPE-LAST-CODE-FILE\new-tsfnet\eeg10s\eeg10s+fnirs21segment\fnirs-nofilter\Results\EEG_ORDERING_ABLATION_TEST
+[16:25:48] Loading VP001 from E:\kntu\Thesis\codes\DATA\VP001-EEG ...
+[16:25:48] Loading VP015 from E:\kntu\Thesis\codes\DATA\VP015-EEG ...
+[16:30:00]   VP015 [A1_car_then_ica] done in 244.9s | bads=['CP1', 'FC1', 'T7', 'Cz'] | ICA excluded=3 | still_bad_after=[] | interchannel_corr=0.347
+[16:30:22]   VP001 [A1_car_then_ica] done in 267.1s | bads=['Fp1', 'T8', 'Fp2', 'AFF6h', 'T7'] | ICA excluded=2 | still_bad_after=[] | interchannel_corr=0.457
+[16:34:20]   VP015 [A2_ica_then_car] done in 253.6s | bads=['CP1', 'FC1', 'T7', 'Cz'] | ICA excluded=3 | still_bad_after=['Fp2'] | interchannel_corr=0.297
+[16:34:20] Loading VP018 from E:\kntu\Thesis\codes\DATA\VP018-EEG ...
+[16:34:55]   VP001 [A2_ica_then_car] done in 267.0s | bads=['Fp1', 'T8', 'Fp2', 'AFF6h', 'T7'] | ICA excluded=2 | still_bad_after=[] | interchannel_corr=0.462
+[16:34:55] Loading VP021 from E:\kntu\Thesis\codes\DATA\VP021-EEG ...
+[16:39:09]   VP018 [A1_car_then_ica] done in 281.7s | bads=['O2', 'Cz', 'Fp1', 'POz', 'Fp2'] | ICA excluded=2 | still_bad_after=[] | interchannel_corr=0.454
+[16:39:14]   VP021 [A1_car_then_ica] done in 251.3s | bads=['Fp1', 'O2', 'Fp2', 'CP1', 'CP2', 'FC5', 'FC1'] | ICA excluded=2 | still_bad_after=[] | interchannel_corr=0.372
+[16:43:23]   VP021 [A2_ica_then_car] done in 243.1s | bads=['Fp1', 'O2', 'Fp2', 'CP1', 'CP2', 'FC5', 'FC1'] | ICA excluded=1 | still_bad_after=['Fp2', 'AFF6h'] | interchannel_corr=0.425
+[16:43:23] Loading VP005 from E:\kntu\Thesis\codes\DATA\VP005-EEG ...
+[16:43:36]   VP018 [A2_ica_then_car] done in 260.5s | bads=['O2', 'Cz', 'Fp1', 'POz', 'Fp2'] | ICA excluded=2 | still_bad_after=[] | interchannel_corr=0.452
+[16:43:36] Loading VP025 from E:\kntu\Thesis\codes\DATA\VP025-EEG ...
+[16:47:30]   VP025 [A1_car_then_ica] done in 227.0s | bads=['FC6', 'AFF6h', 'T8', 'Fp1', 'Fp2'] | ICA excluded=2 | still_bad_after=['Fp1', 'Fp2'] | interchannel_corr=0.479
+[16:47:35]   VP005 [A1_car_then_ica] done in 245.2s | bads=['Fp1', 'Fp2', 'CP1', 'P4'] | ICA excluded=4 | still_bad_after=[] | interchannel_corr=0.334
+[16:51:21]   VP025 [A2_ica_then_car] done in 225.7s | bads=['FC6', 'AFF6h', 'T8', 'Fp1', 'Fp2'] | ICA excluded=2 | still_bad_after=['Fp1'] | interchannel_corr=0.342
+[16:51:34]   VP005 [A2_ica_then_car] done in 232.9s | bads=['Fp1', 'Fp2', 'CP1', 'P4'] | ICA excluded=3 | still_bad_after=[] | interchannel_corr=0.299
+[16:51:34] Saved combined metrics table: E:\kntu\Thesis\codes\HOPE-LAST-CODE-FILE\new-tsfnet\eeg10s\eeg10s+fnirs21segment\fnirs-nofilter\Results\EEG_ORDERING_ABLATION_TEST\all_metrics.csv
+[16:51:34] Saved ranking report: E:\kntu\Thesis\codes\HOPE-LAST-CODE-FILE\new-tsfnet\eeg10s\eeg10s+fnirs21segment\fnirs-nofilter\Results\EEG_ORDERING_ABLATION_TEST\ranking_report.txt
+[16:51:34] Saved ranking chart: E:\kntu\Thesis\codes\HOPE-LAST-CODE-FILE\new-tsfnet\eeg10s\eeg10s+fnirs21segment\fnirs-nofilter\Results\EEG_ORDERING_ABLATION_TEST\ranking_summary.png
+[16:51:34] ===== EEG ORDERING ABLATION TEST FINISHED =====

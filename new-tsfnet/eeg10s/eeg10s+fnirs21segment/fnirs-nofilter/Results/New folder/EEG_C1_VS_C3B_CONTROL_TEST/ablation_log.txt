@@ -1,0 +1,26 @@
+[22:41:10] ===== C1 vs C3b CONTROL TEST STARTED (same filter band, only ICA method differs) =====
+[22:41:10] Test subjects: [25, 1, 15, 18, 21, 5]
+[22:41:10] Variants: ['C1_our_final_pipeline', 'C3b_bemobil_keep_brain_c1band']
+[22:41:10] Filter band (BOTH variants): (0.5, 50.0)
+[22:41:10] Output root: E:\kntu\Thesis\codes\HOPE-LAST-CODE-FILE\new-tsfnet\eeg10s\eeg10s+fnirs21segment\fnirs-nofilter\Results\EEG_C1_VS_C3B_CONTROL_TEST
+[22:41:12] Loading VP025 from E:\kntu\Thesis\codes\DATA\VP025-EEG ...
+[22:41:12] Loading VP001 from E:\kntu\Thesis\codes\DATA\VP001-EEG ...
+[22:45:13]   VP025 [C1_our_final_pipeline] done in 234.9s | bads=['Fp1', 'T8', 'AFF6h', 'Fp2', 'FC6'] | excluded=2 | still_bad_after=['Fp1', 'Fp2'] | known_persistent_still_present=['Fp1', 'Fp2'] | autoreject_reject_frac=0.025
+[22:45:43]   VP001 [C1_our_final_pipeline] done in 265.1s | bads=['Fp1', 'AFF6h', 'T8', 'Fp2', 'T7'] | excluded=2 | still_bad_after=[] | known_persistent_still_present=[] | autoreject_reject_frac=0.018
+[22:49:18]   VP025 [C3b_bemobil_keep_brain_c1band] done in 238.2s | bads=['Fp1', 'T8', 'AFF6h', 'Fp2', 'FC6'] | excluded=3 | still_bad_after=['Fp2'] | known_persistent_still_present=['Fp2'] | autoreject_reject_frac=0.028
+[22:49:18] Loading VP015 from E:\kntu\Thesis\codes\DATA\VP015-EEG ...
+[22:49:53]   VP001 [C3b_bemobil_keep_brain_c1band] done in 243.7s | bads=['Fp1', 'AFF6h', 'T8', 'Fp2', 'T7'] | excluded=5 | still_bad_after=['O2'] | known_persistent_still_present=[] | autoreject_reject_frac=0.0
+[22:49:53] Loading VP018 from E:\kntu\Thesis\codes\DATA\VP018-EEG ...
+[22:53:28]   VP015 [C1_our_final_pipeline] done in 243.5s | bads=['T7', 'FC1', 'CP1', 'Cz'] | excluded=3 | still_bad_after=[] | known_persistent_still_present=[] | autoreject_reject_frac=0.045
+[22:54:44]   VP018 [C1_our_final_pipeline] done in 284.5s | bads=['Cz', 'POz', 'Fp1', 'Fp2', 'O2'] | excluded=2 | still_bad_after=[] | known_persistent_still_present=[] | autoreject_reject_frac=0.51
+[22:57:31]   VP015 [C3b_bemobil_keep_brain_c1band] done in 236.6s | bads=['T7', 'FC1', 'CP1', 'Cz'] | excluded=3 | still_bad_after=[] | known_persistent_still_present=[] | autoreject_reject_frac=0.045
+[22:57:31] Loading VP021 from E:\kntu\Thesis\codes\DATA\VP021-EEG ...
+[22:59:29]   VP018 [C3b_bemobil_keep_brain_c1band] done in 277.7s | bads=['Cz', 'POz', 'Fp1', 'Fp2', 'O2'] | excluded=4 | still_bad_after=[] | known_persistent_still_present=[] | autoreject_reject_frac=0.515
+[22:59:29] Loading VP005 from E:\kntu\Thesis\codes\DATA\VP005-EEG ...
+[23:01:48]   VP021 [C1_our_final_pipeline] done in 249.8s | bads=['Fp1', 'FC5', 'O2', 'FC1', 'Fp2', 'CP2', 'CP1'] | excluded=2 | still_bad_after=[] | known_persistent_still_present=[] | autoreject_reject_frac=0.014
+[23:03:41]   VP005 [C1_our_final_pipeline] done in 244.9s | bads=['P4', 'Fp1', 'CP1', 'Fp2'] | excluded=4 | still_bad_after=[] | known_persistent_still_present=[] | autoreject_reject_frac=0.045
+[23:06:08]   VP021 [C3b_bemobil_keep_brain_c1band] done in 253.5s | bads=['Fp1', 'FC5', 'O2', 'FC1', 'Fp2', 'CP2', 'CP1'] | excluded=3 | still_bad_after=[] | known_persistent_still_present=[] | autoreject_reject_frac=0.014
+[23:07:46]   VP005 [C3b_bemobil_keep_brain_c1band] done in 238.7s | bads=['P4', 'Fp1', 'CP1', 'Fp2'] | excluded=7 | still_bad_after=[] | known_persistent_still_present=[] | autoreject_reject_frac=0.029
+[23:07:46] Saved combined metrics table: E:\kntu\Thesis\codes\HOPE-LAST-CODE-FILE\new-tsfnet\eeg10s\eeg10s+fnirs21segment\fnirs-nofilter\Results\EEG_C1_VS_C3B_CONTROL_TEST\all_metrics.csv
+[23:07:46] Saved report: E:\kntu\Thesis\codes\HOPE-LAST-CODE-FILE\new-tsfnet\eeg10s\eeg10s+fnirs21segment\fnirs-nofilter\Results\EEG_C1_VS_C3B_CONTROL_TEST\ranking_report.txt
+[23:07:46] ===== C1 vs C3b CONTROL TEST FINISHED =====

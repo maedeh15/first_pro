@@ -1,0 +1,215 @@
+--- VP003 (PID 4636) ---
+[2026-08-15 15:53:43] [PID4636]   EEG channel check: 30 total in cnt.clab, 28 non-EOG (scalp) channels, TP9/TP10 present=False (expected: 28 channels, False -- confirmed via VP001).
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+--- VP007 (PID 8940) ---
+[2026-08-15 15:53:43] [PID8940]   EEG channel check: 30 total in cnt.clab, 28 non-EOG (scalp) channels, TP9/TP10 present=False (expected: 28 channels, False -- confirmed via VP001).
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+--- VP009 (PID 7192) ---
+[2026-08-15 15:53:43] [PID7192]   EEG channel check: 30 total in cnt.clab, 28 non-EOG (scalp) channels, TP9/TP10 present=False (expected: 28 channels, False -- confirmed via VP001).
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+--- VP005 (PID 20576) ---
+[2026-08-15 15:53:43] [PID20576]   EEG channel check: 30 total in cnt.clab, 28 non-EOG (scalp) channels, TP9/TP10 present=False (expected: 28 channels, False -- confirmed via VP001).
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+--- VP001 (PID 7924) ---
+[2026-08-15 15:53:43] [PID7924]   EEG channel check: 30 total in cnt.clab, 28 non-EOG (scalp) channels, TP9/TP10 present=False (expected: 28 channels, False -- confirmed via VP001).
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 9 components
+Selecting by explained variance: 10 components
+Selecting by explained variance: 6 components
+Selecting by explained variance: 12 components
+Selecting by explained variance: 11 components
+Fitting ICA took 15.1s.
+Fitting ICA took 24.3s.
+Fitting ICA took 27.1s.
+  [VP009] n_ics=6, excluded(post-veto)=3 (50.0%), corr_only=0 (auto_unexcluded=0, ambiguous=0), iclabel_only=1, both=2, FLAGGED=True
+--- VP010 (PID 7192) ---
+[2026-08-15 15:54:12] [PID7192]   EEG channel check: 30 total in cnt.clab, 28 non-EOG (scalp) channels, TP9/TP10 present=False (expected: 28 channels, False -- confirmed via VP001).
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 11 components
+  [VP001] n_ics=9, excluded(post-veto)=4 (44.4%), corr_only=0 (auto_unexcluded=0, ambiguous=0), iclabel_only=1, both=3, FLAGGED=True
+--- VP002 (PID 7924) ---
+[2026-08-15 15:54:14] [PID7924]   EEG channel check: 30 total in cnt.clab, 28 non-EOG (scalp) channels, TP9/TP10 present=False (expected: 28 channels, False -- confirmed via VP001).
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 12 components
+  [VP007] IC5 (CORR_ONLY) -> AUTO_UNEXCLUDE: alpha peak (8.0-13.0Hz) detected, likely genuine brain activity
+  [VP007] n_ics=12, excluded(post-veto)=2 (16.7%), corr_only=1 (auto_unexcluded=1, ambiguous=0), iclabel_only=0, both=2, FLAGGED=False
+--- VP008 (PID 8940) ---
+[2026-08-15 15:54:18] [PID8940]   EEG channel check: 30 total in cnt.clab, 28 non-EOG (scalp) channels, TP9/TP10 present=False (expected: 28 channels, False -- confirmed via VP001).
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 6 components
+Fitting ICA took 34.5s.
+  [VP005] n_ics=10, excluded(post-veto)=5 (50.0%), corr_only=0 (auto_unexcluded=0, ambiguous=0), iclabel_only=1, both=4, FLAGGED=True
+--- VP006 (PID 20576) ---
+[2026-08-15 15:54:25] [PID20576]   EEG channel check: 30 total in cnt.clab, 28 non-EOG (scalp) channels, TP9/TP10 present=False (expected: 28 channels, False -- confirmed via VP001).
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 9 components
+Fitting ICA took 10.2s.
+Fitting ICA took 18.2s.
+  [VP008] n_ics=6, excluded(post-veto)=2 (33.3%), corr_only=0 (auto_unexcluded=0, ambiguous=0), iclabel_only=0, both=2, FLAGGED=True
+--- VP011 (PID 8940) ---
+[2026-08-15 15:54:31] [PID8940]   EEG channel check: 30 total in cnt.clab, 28 non-EOG (scalp) channels, TP9/TP10 present=False (expected: 28 channels, False -- confirmed via VP001).
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 15 components
+  [VP010] IC8 (CORR_ONLY) -> KEEP_EXCLUDED: low-freq dominant (<5.0Hz), consistent with ocular pattern
+  [VP010] n_ics=11, excluded(post-veto)=3 (27.3%), corr_only=1 (auto_unexcluded=0, ambiguous=0), iclabel_only=1, both=1, FLAGGED=True
+--- VP013 (PID 7192) ---
+[2026-08-15 15:54:34] [PID7192]   EEG channel check: 30 total in cnt.clab, 28 non-EOG (scalp) channels, TP9/TP10 present=False (expected: 28 channels, False -- confirmed via VP001).
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 6 components
+Fitting ICA took 51.8s.
+Fitting ICA took 16.7s.
+  [VP003] n_ics=11, excluded(post-veto)=4 (36.4%), corr_only=0 (auto_unexcluded=0, ambiguous=0), iclabel_only=2, both=2, FLAGGED=True
+--- VP004 (PID 4636) ---
+[2026-08-15 15:54:42] [PID4636]   EEG channel check: 30 total in cnt.clab, 28 non-EOG (scalp) channels, TP9/TP10 present=False (expected: 28 channels, False -- confirmed via VP001).
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 15 components
+Fitting ICA took 30.1s.
+  [VP006] n_ics=9, excluded(post-veto)=4 (44.4%), corr_only=0 (auto_unexcluded=0, ambiguous=0), iclabel_only=2, both=2, FLAGGED=True
+--- VP015 (PID 20576) ---
+[2026-08-15 15:54:45] [PID20576]   EEG channel check: 30 total in cnt.clab, 28 non-EOG (scalp) channels, TP9/TP10 present=False (expected: 28 channels, False -- confirmed via VP001).
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 7 components
+Fitting ICA took 12.3s.
+  [VP002] n_ics=12, excluded(post-veto)=3 (25.0%), corr_only=0 (auto_unexcluded=0, ambiguous=0), iclabel_only=1, both=2, FLAGGED=False
+--- VP017 (PID 7924) ---
+[2026-08-15 15:54:48] [PID7924]   EEG channel check: 30 total in cnt.clab, 28 non-EOG (scalp) channels, TP9/TP10 present=False (expected: 28 channels, False -- confirmed via VP001).
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 14 components
+  [VP013] n_ics=6, excluded(post-veto)=2 (33.3%), corr_only=0 (auto_unexcluded=0, ambiguous=0), iclabel_only=0, both=2, FLAGGED=True
+--- VP014 (PID 7192) ---
+[2026-08-15 15:54:49] [PID7192]   EEG channel check: 30 total in cnt.clab, 28 non-EOG (scalp) channels, TP9/TP10 present=False (expected: 28 channels, False -- confirmed via VP001).
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 6 components
+Fitting ICA took 8.5s.
+  [VP015] n_ics=7, excluded(post-veto)=2 (28.6%), corr_only=0 (auto_unexcluded=0, ambiguous=0), iclabel_only=0, both=2, FLAGGED=True
+--- VP016 (PID 20576) ---
+[2026-08-15 15:54:56] [PID20576]   EEG channel check: 30 total in cnt.clab, 28 non-EOG (scalp) channels, TP9/TP10 present=False (expected: 28 channels, False -- confirmed via VP001).
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 4 components
+Fitting ICA took 2.9s.
+  [VP016] n_ics=4, excluded(post-veto)=2 (50.0%), corr_only=0 (auto_unexcluded=0, ambiguous=0), iclabel_only=2, both=0, FLAGGED=True
+--- VP019 (PID 20576) ---
+[2026-08-15 15:55:02] [PID20576]   EEG channel check: 30 total in cnt.clab, 28 non-EOG (scalp) channels, TP9/TP10 present=False (expected: 28 channels, False -- confirmed via VP001).
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 9 components
+Fitting ICA took 14.3s.
+  [VP014] n_ics=6, excluded(post-veto)=3 (50.0%), corr_only=0 (auto_unexcluded=0, ambiguous=0), iclabel_only=1, both=2, FLAGGED=True
+--- VP021 (PID 7192) ---
+[2026-08-15 15:55:06] [PID7192]   EEG channel check: 30 total in cnt.clab, 28 non-EOG (scalp) channels, TP9/TP10 present=False (expected: 28 channels, False -- confirmed via VP001).
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 10 components
+Fitting ICA took 33.4s.
+Fitting ICA took 14.4s.
+  [VP019] n_ics=9, excluded(post-veto)=5 (55.6%), corr_only=0 (auto_unexcluded=0, ambiguous=0), iclabel_only=2, both=3, FLAGGED=True
+--- VP020 (PID 20576) ---
+[2026-08-15 15:55:19] [PID20576]   EEG channel check: 30 total in cnt.clab, 28 non-EOG (scalp) channels, TP9/TP10 present=False (expected: 28 channels, False -- confirmed via VP001).
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 8 components
+  [VP004] n_ics=15, excluded(post-veto)=5 (33.3%), corr_only=0 (auto_unexcluded=0, ambiguous=0), iclabel_only=1, both=4, FLAGGED=True
+--- VP023 (PID 4636) ---
+[2026-08-15 15:55:20] [PID4636]   EEG channel check: 30 total in cnt.clab, 28 non-EOG (scalp) channels, TP9/TP10 present=False (expected: 28 channels, False -- confirmed via VP001).
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 12 components
+Fitting ICA took 35.1s.
+  [VP017] n_ics=14, excluded(post-veto)=5 (35.7%), corr_only=0 (auto_unexcluded=0, ambiguous=0), iclabel_only=3, both=2, FLAGGED=True
+--- VP018 (PID 7924) ---
+[2026-08-15 15:55:27] [PID7924]   EEG channel check: 30 total in cnt.clab, 28 non-EOG (scalp) channels, TP9/TP10 present=False (expected: 28 channels, False -- confirmed via VP001).
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 11 components
+Fitting ICA took 26.1s.
+  [VP021] n_ics=10, excluded(post-veto)=3 (30.0%), corr_only=0 (auto_unexcluded=0, ambiguous=0), iclabel_only=1, both=2, FLAGGED=True
+--- VP022 (PID 7192) ---
+[2026-08-15 15:55:36] [PID7192]   EEG channel check: 30 total in cnt.clab, 28 non-EOG (scalp) channels, TP9/TP10 present=False (expected: 28 channels, False -- confirmed via VP001).
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 16 components
+Fitting ICA took 27.8s.
+  [VP020] n_ics=8, excluded(post-veto)=3 (37.5%), corr_only=0 (auto_unexcluded=0, ambiguous=0), iclabel_only=1, both=2, FLAGGED=True
+--- VP025 (PID 20576) ---
+[2026-08-15 15:55:50] [PID20576]   EEG channel check: 30 total in cnt.clab, 28 non-EOG (scalp) channels, TP9/TP10 present=False (expected: 28 channels, False -- confirmed via VP001).
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 5 components
+Fitting ICA took 34.7s.
+  [VP023] n_ics=12, excluded(post-veto)=3 (25.0%), corr_only=0 (auto_unexcluded=0, ambiguous=0), iclabel_only=1, both=2, FLAGGED=False
+--- VP024 (PID 4636) ---
+[2026-08-15 15:55:59] [PID4636]   EEG channel check: 30 total in cnt.clab, 28 non-EOG (scalp) channels, TP9/TP10 present=False (expected: 28 channels, False -- confirmed via VP001).
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 17 components
+Fitting ICA took 27.9s.
+Fitting ICA took 14.8s.
+  [VP025] n_ics=5, excluded(post-veto)=3 (60.0%), corr_only=0 (auto_unexcluded=0, ambiguous=0), iclabel_only=3, both=0, FLAGGED=True
+--- VP026 (PID 20576) ---
+[2026-08-15 15:56:07] [PID20576]   EEG channel check: 30 total in cnt.clab, 28 non-EOG (scalp) channels, TP9/TP10 present=False (expected: 28 channels, False -- confirmed via VP001).
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+  [VP022] IC6 (CORR_ONLY) -> AMBIGUOUS: neither pattern clearly dominant -- needs manual visual check
+  [VP022] n_ics=16, excluded(post-veto)=5 (31.2%), corr_only=1 (auto_unexcluded=0, ambiguous=1), iclabel_only=2, both=2, FLAGGED=True
+    Using multitaper spectrum estimation with 7 DPSS windows
+Not setting metadata
+970 matching events found
+No baseline correction applied
+0 projection items activated
+Selecting by explained variance: 9 components
+Fitting ICA took 43.4s.
+  [VP018] IC4 (CORR_ONLY) -> AMBIGUOUS: neither pattern clearly dominant -- needs manual visual check
+  [VP018] n_ics=11, excluded(post-veto)=4 (36.4%), corr_only=1 (auto_unexcluded=0, ambiguous=1), iclabel_only=1, both=2, FLAGGED=True
+    Using multitaper spectrum estimation with 7 DPSS windows
+Not setting metadata
+970 matching events found
+No baseline correction applied
+0 projection items activated
+Fitting ICA took 109.4s.
+Fitting ICA took 14.0s.
+  [VP011] IC6 (CORR_ONLY) -> AUTO_UNEXCLUDE: alpha peak (8.0-13.0Hz) detected, likely genuine brain activity
+  [VP011] n_ics=15, excluded(post-veto)=4 (26.7%), corr_only=1 (auto_unexcluded=1, ambiguous=0), iclabel_only=1, both=3, FLAGGED=True
+--- VP012 (PID 8940) ---
+[2026-08-15 15:56:24] [PID8940]   EEG channel check: 30 total in cnt.clab, 28 non-EOG (scalp) channels, TP9/TP10 present=False (expected: 28 channels, False -- confirmed via VP001).
+Fitting ICA to data using 28 channels (please be patient, this may take a while)
+Selecting by explained variance: 12 components
+Fitting ICA took 15.3s.
+  [VP012] IC6 (CORR_ONLY) -> AMBIGUOUS: neither pattern clearly dominant -- needs manual visual check
+  [VP012] n_ics=12, excluded(post-veto)=3 (25.0%), corr_only=1 (auto_unexcluded=0, ambiguous=1), iclabel_only=0, both=2, FLAGGED=True
+    Using multitaper spectrum estimation with 7 DPSS windows
+Not setting metadata
+972 matching events found
+No baseline correction applied
+0 projection items activated
+Fitting ICA took 47.7s.
+  [VP018] plotted AMBIGUOUS ICs [np.int64(4)] -> E:\kntu\Thesis\codes\Results\TSFNET_PAPER_EXACT_nback\eog_fast_full_check\VP018
+  [VP022] plotted AMBIGUOUS ICs [np.int64(6)] -> E:\kntu\Thesis\codes\Results\TSFNET_PAPER_EXACT_nback\eog_fast_full_check\VP022
+  [VP026] n_ics=9, excluded(post-veto)=2 (22.2%), corr_only=0 (auto_unexcluded=0, ambiguous=0), iclabel_only=0, both=2, FLAGGED=False
+  [VP012] plotted AMBIGUOUS ICs [np.int64(6)] -> E:\kntu\Thesis\codes\Results\TSFNET_PAPER_EXACT_nback\eog_fast_full_check\VP012
+  [VP024] n_ics=17, excluded(post-veto)=2 (11.8%), corr_only=0 (auto_unexcluded=0, ambiguous=0), iclabel_only=0, both=2, FLAGGED=False
+
+=== FAST FULL EOG CHECK on 26 subjects, n_workers=5 ===
+
+Traceback (most recent call last):
+  File "E:\kntu\Thesis\codes\HOPE-LAST-CODE-FILE\new-tsfnet\qc_eog_fast_full_check.py", line 317, in <module>
+    main()
+  File "E:\kntu\Thesis\codes\HOPE-LAST-CODE-FILE\new-tsfnet\qc_eog_fast_full_check.py", line 269, in main
+    df["veto_details"] = df["veto_details"].apply(json.dumps)   # dict -> JSON string for CSV
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\SPACE\myenv\Lib\site-packages\pandas\core\series.py", line 5084, in apply
+    ).apply()
+      ^^^^^^^
+  File "C:\Users\SPACE\myenv\Lib\site-packages\pandas\core\apply.py", line 1520, in apply
+    return self.apply_standard()
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\SPACE\myenv\Lib\site-packages\pandas\core\apply.py", line 1578, in apply_standard
+    mapped = obj._map_values(mapper=curried)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\SPACE\myenv\Lib\site-packages\pandas\core\base.py", line 1022, in _map_values
+    return algorithms.map_array(arr, mapper, na_action=na_action)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\SPACE\myenv\Lib\site-packages\pandas\core\algorithms.py", line 1710, in map_array
+    return lib.map_infer(values, mapper)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "pandas/_libs/lib.pyx", line 3071, in pandas._libs.lib.map_infer
+  File "C:\Users\SPACE\AppData\Local\Programs\Python\Python312\Lib\json\__init__.py", line 231, in dumps
+    return _default_encoder.encode(obj)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\SPACE\AppData\Local\Programs\Python\Python312\Lib\json\encoder.py", line 200, in encode
+    chunks = self.iterencode(o, _one_shot=True)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\SPACE\AppData\Local\Programs\Python\Python312\Lib\json\encoder.py", line 258, in iterencode
+    return _iterencode(o, 0)
+           ^^^^^^^^^^^^^^^^^
+TypeError: keys must be str, int, float, bool or None, not numpy.int64

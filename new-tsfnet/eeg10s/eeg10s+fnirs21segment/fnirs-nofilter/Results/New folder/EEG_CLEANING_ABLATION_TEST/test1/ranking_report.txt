@@ -1,0 +1,85 @@
+==============================================================================
+EEG CLEANING ABLATION — RANKING REPORT
+==============================================================================
+Subjects tested: ['VP001', 'VP005', 'VP015', 'VP018', 'VP021', 'VP025']
+Variants tested: ['V0_baseline', 'V1_prep', 'V2_prep_autoreject', 'V3_prep_iclabel_all']
+
+--- Per-variant averages across all test subjects ---
+            variant  mean_still_bad_count  mean_known_bad_recall  mean_max_variance_ratio_after  mean_emg_band_power_after  mean_eeg_band_retention  mean_ica_excluded  mean_runtime_s
+        V0_baseline              2.000000                    0.0                      18.171379               1.338190e-13                 0.183858           3.333333       23.050000
+            V1_prep              0.333333                    1.0                       3.196131               1.110012e-13                 0.163607           2.500000       30.766667
+ V2_prep_autoreject              0.333333                    1.0                       3.196131               1.110012e-13                 0.163607           2.500000      277.066667
+V3_prep_iclabel_all              0.333333                    1.0                       3.316454               9.665051e-14                 0.159995           3.000000       27.900000
+
+--- How to read this (lower/higher = better, per column) ---
+mean_still_bad_count           : LOWER is better. Channels still >4x median
+                                  variance AFTER cleaning = cleaning failed for
+                                  that channel. Should be ~0 for a good variant.
+mean_known_bad_recall          : HIGHER is better (max 1.0). Fraction of the
+                                  manually-identified bad channels (Cz/POz/O2/CP2)
+                                  that were automatically caught.
+mean_max_variance_ratio_after  : LOWER is better, closer to 1-3 is healthy.
+                                  Very high = one channel still dominates.
+mean_emg_band_power_after      : LOWER is better = less residual muscle noise
+                                  (30-49Hz), BUT check against eeg_band_retention
+                                  below -- if that also crashed, the variant is
+                                  over-cleaning, not genuinely fixing EMG.
+mean_eeg_band_retention         : Should stay reasonably close across variants.
+                                  A variant that is MUCH lower than V0_baseline's
+                                  value here is destroying real EEG signal, even
+                                  if its other numbers look 'better'.
+
+--- Automatic recommendation (heuristic, please confirm visually) ---
+Suggested winning variant: V3_prep_iclabel_all
+
+This pick is based on: (1) fewest channels still behaving badly after
+cleaning, (2) highest recall of your manually-identified bad channels, (3)
+lowest residual EMG-band power -- AMONG variants that did not lose more than
+~15% of baseline EEG-band power (i.e. did not over-clean).
+
+IMPORTANT: this is a starting point, not a final verdict. Before committing
+this variant to the full 26-subject run, open the QC images for all 5 test
+subjects under:
+  E:\kntu\Thesis\codes\HOPE-LAST-CODE-FILE\new-tsfnet\eeg10s\eeg10s+fnirs21segment\fnirs-nofilter\Results\EEG_CLEANING_ABLATION_TEST\V3_prep_iclabel_all\
+and visually confirm (same way we reviewed VP001/VP015/VP018/VP021 together)
+that the previously-bad channels (Cz, POz, O2, CP2) now look like normal EEG,
+and that the presumed-clean control subject (VP005 by default) was NOT altered
+in a way that removes real brain signal.
+
+--- Per-subject detail ---
+
+VP001:
+  V0_baseline          bads=[] still_bad=[] known_bad_recall=nan ica_excluded=4 emg_power=1.464e-13 eeg_retention=0.122
+  V1_prep              bads=['AFF6h', 'Fp1', 'Fp2', 'T7', 'T8'] still_bad=[] known_bad_recall=nan ica_excluded=2 emg_power=1.041e-13 eeg_retention=0.149
+  V2_prep_autoreject   bads=['AFF6h', 'Fp1', 'Fp2', 'T7', 'T8'] still_bad=[] known_bad_recall=nan ica_excluded=2 emg_power=1.041e-13 eeg_retention=0.149
+  V3_prep_iclabel_all  bads=['AFF6h', 'Fp1', 'Fp2', 'T7', 'T8'] still_bad=[] known_bad_recall=nan ica_excluded=2 emg_power=1.041e-13 eeg_retention=0.149
+
+VP005:
+  V0_baseline          bads=[] still_bad=['P4'] known_bad_recall=nan ica_excluded=5 emg_power=2.406e-13 eeg_retention=0.162
+  V1_prep              bads=['CP1', 'Fp1', 'Fp2', 'P4'] still_bad=[] known_bad_recall=nan ica_excluded=4 emg_power=1.757e-13 eeg_retention=0.147
+  V2_prep_autoreject   bads=['CP1', 'Fp1', 'Fp2', 'P4'] still_bad=[] known_bad_recall=nan ica_excluded=4 emg_power=1.757e-13 eeg_retention=0.147
+  V3_prep_iclabel_all  bads=['CP1', 'Fp1', 'Fp2', 'P4'] still_bad=[] known_bad_recall=nan ica_excluded=7 emg_power=8.963e-14 eeg_retention=0.126
+
+VP015:
+  V0_baseline          bads=[] still_bad=['Fp1', 'Cz', 'Fp2'] known_bad_recall=0.0 ica_excluded=2 emg_power=8.635e-14 eeg_retention=0.167
+  V1_prep              bads=['CP1', 'Cz', 'FC1', 'T7'] still_bad=[] known_bad_recall=1.0 ica_excluded=3 emg_power=5.517e-14 eeg_retention=0.110
+  V2_prep_autoreject   bads=['CP1', 'Cz', 'FC1', 'T7'] still_bad=[] known_bad_recall=1.0 ica_excluded=3 emg_power=5.517e-14 eeg_retention=0.110
+  V3_prep_iclabel_all  bads=['CP1', 'Cz', 'FC1', 'T7'] still_bad=[] known_bad_recall=1.0 ica_excluded=3 emg_power=5.517e-14 eeg_retention=0.110
+
+VP018:
+  V0_baseline          bads=[] still_bad=['Cz', 'Fp2', 'O2'] known_bad_recall=0.0 ica_excluded=3 emg_power=1.202e-13 eeg_retention=0.313
+  V1_prep              bads=['Cz', 'Fp1', 'Fp2', 'O2', 'POz'] still_bad=[] known_bad_recall=1.0 ica_excluded=2 emg_power=9.936e-14 eeg_retention=0.311
+  V2_prep_autoreject   bads=['Cz', 'Fp1', 'Fp2', 'O2', 'POz'] still_bad=[] known_bad_recall=1.0 ica_excluded=2 emg_power=9.936e-14 eeg_retention=0.311
+  V3_prep_iclabel_all  bads=['Cz', 'Fp1', 'Fp2', 'O2', 'POz'] still_bad=[] known_bad_recall=1.0 ica_excluded=2 emg_power=9.936e-14 eeg_retention=0.311
+
+VP021:
+  V0_baseline          bads=[] still_bad=['CP1', 'CP2'] known_bad_recall=0.0 ica_excluded=3 emg_power=8.965e-14 eeg_retention=0.190
+  V1_prep              bads=['CP1', 'CP2', 'FC1', 'FC5', 'Fp1', 'Fp2', 'O2'] still_bad=[] known_bad_recall=1.0 ica_excluded=2 emg_power=9.107e-14 eeg_retention=0.119
+  V2_prep_autoreject   bads=['CP1', 'CP2', 'FC1', 'FC5', 'Fp1', 'Fp2', 'O2'] still_bad=[] known_bad_recall=1.0 ica_excluded=2 emg_power=9.107e-14 eeg_retention=0.119
+  V3_prep_iclabel_all  bads=['CP1', 'CP2', 'FC1', 'FC5', 'Fp1', 'Fp2', 'O2'] still_bad=[] known_bad_recall=1.0 ica_excluded=2 emg_power=9.107e-14 eeg_retention=0.119
+
+VP025:
+  V0_baseline          bads=[] still_bad=['Fp2', 'FC6', 'T8'] known_bad_recall=nan ica_excluded=3 emg_power=1.198e-13 eeg_retention=0.149
+  V1_prep              bads=['AFF6h', 'FC6', 'Fp1', 'Fp2', 'T8'] still_bad=['Fp1', 'Fp2'] known_bad_recall=nan ica_excluded=2 emg_power=1.405e-13 eeg_retention=0.145
+  V2_prep_autoreject   bads=['AFF6h', 'FC6', 'Fp1', 'Fp2', 'T8'] still_bad=['Fp1', 'Fp2'] known_bad_recall=nan ica_excluded=2 emg_power=1.405e-13 eeg_retention=0.145
+  V3_prep_iclabel_all  bads=['AFF6h', 'FC6', 'Fp1', 'Fp2', 'T8'] still_bad=['Fp1', 'Fp2'] known_bad_recall=nan ica_excluded=2 emg_power=1.405e-13 eeg_retention=0.145

@@ -1,0 +1,83 @@
+==============================================================================
+EEG METHOD COMPARISON ABLATION — RANKING REPORT
+C1 (our validated pipeline) vs C2/C3/C4 (methods found via GitHub search)
+==============================================================================
+Subjects tested: ['VP001', 'VP005', 'VP015', 'VP018', 'VP021', 'VP025']
+Variants tested: ['C1_our_final_pipeline', 'C2_pyprep_filter_only', 'C3_bemobil_keep_brain', 'C4_ssp_autoreject']
+
+REMINDER: C2/C3/C4 differ from C1 in BOTH filter band AND artifact-removal
+method (see script docstring) -- a difference here is not attributable
+purely to the artifact-removal method by itself. Use this test to see how
+each PUBLISHED METHOD AS A WHOLE performs on your data, not as a clean
+single-variable ablation.
+
+--- Per-variant averages across all test subjects ---
+              variant  mean_still_bad_count  mean_max_variance_ratio_after  mean_emg_band_power_after  mean_eeg_band_retention  mean_n_excluded  mean_autoreject_reject_fraction  mean_runtime_s
+C1_our_final_pipeline              0.333333                       3.196131               1.110012e-13                 0.163607              2.5                         0.109500      366.066667
+C2_pyprep_filter_only              3.833333                      11.710301               9.763091e-14                 0.327824              0.0                         0.150333      378.933333
+C3_bemobil_keep_brain              0.500000                       4.091539               3.129521e-15                 0.149988              5.5                         0.260000      356.716667
+    C4_ssp_autoreject              0.166667                       2.607028               3.731591e-15                 0.335849              1.0                         0.204500      331.050000
+
+--- VP025's Fp1/Fp2 across all 4 methods (the case none of our own ---
+--- ablation tests could resolve) ---
+  C1_our_final_pipeline    still_bad=['Fp1', 'Fp2'] known_persistent_still_present=['Fp1', 'Fp2'] target_channel_emg_power={'Fp2': 5.465482395503575e-13, 'Fp1': 6.094839951396733e-13}
+  C2_pyprep_filter_only    still_bad=['Fp1', 'AFz', 'Fp2', 'AFF6h'] known_persistent_still_present=['Fp1', 'Fp2'] target_channel_emg_power={'Fp2': 6.998729663349212e-13, 'Fp1': 7.296924620370492e-13}
+  C3_bemobil_keep_brain    still_bad=[] known_persistent_still_present=[] target_channel_emg_power={'Fp2': 5.2182140580322465e-15, 'Fp1': 6.5763705586704845e-15}
+  C4_ssp_autoreject        still_bad=[] known_persistent_still_present=[] target_channel_emg_power={'Fp2': 4.904599873428454e-15, 'Fp1': 6.394712524522489e-15}
+
+--- How to read the rest ---
+mean_still_bad_count            : LOWER is better.
+mean_emg_band_power_after       : LOWER is better, but check eeg_band_retention.
+mean_eeg_band_retention         : large drops vs C1 = likely over-cleaning
+                                   (relevant for C3, which excludes ALL
+                                   non-brain components, not just ocular).
+mean_autoreject_reject_fraction : for C2 (no ICA at all), a HIGH value here is
+                                   expected/consistent -- it means blink/muscle
+                                   contamination is being caught downstream by
+                                   epoch rejection instead of ICA, at the cost
+                                   of discarding more trials outright.
+
+IMPORTANT: open the QC images for VP025 (and at least one other subject) under
+  E:\kntu\Thesis\codes\HOPE-LAST-CODE-FILE\new-tsfnet\eeg10s\eeg10s+fnirs21segment\fnirs-nofilter\Results\EEG_METHOD_COMPARISON_ABLATION_TEST\C1_our_final_pipeline\VP025\
+  E:\kntu\Thesis\codes\HOPE-LAST-CODE-FILE\new-tsfnet\eeg10s\eeg10s+fnirs21segment\fnirs-nofilter\Results\EEG_METHOD_COMPARISON_ABLATION_TEST\C2_pyprep_filter_only\VP025\
+  E:\kntu\Thesis\codes\HOPE-LAST-CODE-FILE\new-tsfnet\eeg10s\eeg10s+fnirs21segment\fnirs-nofilter\Results\EEG_METHOD_COMPARISON_ABLATION_TEST\C3_bemobil_keep_brain\VP025\
+  E:\kntu\Thesis\codes\HOPE-LAST-CODE-FILE\new-tsfnet\eeg10s\eeg10s+fnirs21segment\fnirs-nofilter\Results\EEG_METHOD_COMPARISON_ABLATION_TEST\C4_ssp_autoreject\VP025\
+and visually confirm before adopting any variant over C1.
+
+--- Per-subject detail (all subjects) ---
+
+VP001:
+  C1_our_final_pipeline    band=[0.5, 50.0] bads=['AFF6h', 'Fp1', 'Fp2', 'T7', 'T8'] still_bad=[] n_excluded=2 emg_power=1.041e-13 eeg_retention=0.149 autoreject_reject_frac=0.018
+  C2_pyprep_filter_only    band=[1.0, 45.0] bads=['AFF6h', 'Fp1', 'Fp2', 'T7', 'T8'] still_bad=['Fp1', 'AFF5h', 'AFz', 'Fp2'] n_excluded=0 emg_power=9.793e-14 eeg_retention=0.324 autoreject_reject_frac=0.021
+  C3_bemobil_keep_brain    band=[0.1, 30.0] bads=['AFF5h', 'AFF6h', 'AFz', 'CP5', 'Fp1', 'Fp2', 'T7', 'T8'] still_bad=['Fp2', 'FC6', 'T8'] n_excluded=6 emg_power=3.094e-15 eeg_retention=0.183 autoreject_reject_frac=0.973
+  C4_ssp_autoreject        band=[1.0, 30.0] bads=['AFF6h', 'CP5', 'Fp1', 'Fp2', 'T7', 'T8'] still_bad=[] n_excluded=1 emg_power=3.588e-15 eeg_retention=0.355 autoreject_reject_frac=0.0
+
+VP005:
+  C1_our_final_pipeline    band=[0.5, 50.0] bads=['CP1', 'Fp1', 'Fp2', 'P4'] still_bad=[] n_excluded=4 emg_power=1.757e-13 eeg_retention=0.147 autoreject_reject_frac=0.045
+  C2_pyprep_filter_only    band=[1.0, 45.0] bads=['Fp1', 'Fp2', 'P4'] still_bad=['Fp1', 'AFz', 'Fp2', 'AFF6h'] n_excluded=0 emg_power=1.887e-13 eeg_retention=0.290 autoreject_reject_frac=0.088
+  C3_bemobil_keep_brain    band=[0.1, 30.0] bads=['Fp1', 'Fp2', 'P4'] still_bad=[] n_excluded=5 emg_power=5.615e-15 eeg_retention=0.139 autoreject_reject_frac=0.119
+  C4_ssp_autoreject        band=[1.0, 30.0] bads=['Fp1', 'Fp2', 'P4', 'T7'] still_bad=['AFF6h'] n_excluded=1 emg_power=6.798e-15 eeg_retention=0.258 autoreject_reject_frac=0.068
+
+VP015:
+  C1_our_final_pipeline    band=[0.5, 50.0] bads=['CP1', 'Cz', 'FC1', 'T7'] still_bad=[] n_excluded=3 emg_power=5.517e-14 eeg_retention=0.110 autoreject_reject_frac=0.045
+  C2_pyprep_filter_only    band=[1.0, 45.0] bads=['CP1', 'Cz', 'FC1', 'Fp1', 'Fp2', 'T7'] still_bad=['Fp1', 'AFF5h', 'AFz', 'Fp2', 'AFF6h'] n_excluded=0 emg_power=5.476e-14 eeg_retention=0.314 autoreject_reject_frac=0.294
+  C3_bemobil_keep_brain    band=[0.1, 30.0] bads=['CP1', 'Cz', 'FC1', 'T7'] still_bad=[] n_excluded=6 emg_power=1.116e-15 eeg_retention=0.096 autoreject_reject_frac=0.005
+  C4_ssp_autoreject        band=[1.0, 30.0] bads=['CP1', 'Cz', 'FC1', 'Fp1', 'Fp2', 'T7'] still_bad=[] n_excluded=1 emg_power=1.787e-15 eeg_retention=0.324 autoreject_reject_frac=0.251
+
+VP018:
+  C1_our_final_pipeline    band=[0.5, 50.0] bads=['Cz', 'Fp1', 'Fp2', 'O2', 'POz'] still_bad=[] n_excluded=2 emg_power=9.936e-14 eeg_retention=0.311 autoreject_reject_frac=0.51
+  C2_pyprep_filter_only    band=[1.0, 45.0] bads=['Cz', 'Fp1', 'Fp2', 'O2', 'POz'] still_bad=['Fp1', 'Fp2'] n_excluded=0 emg_power=6.438e-14 eeg_retention=0.379 autoreject_reject_frac=0.215
+  C3_bemobil_keep_brain    band=[0.1, 30.0] bads=['Cz', 'Fp1', 'Fp2', 'O2', 'POz'] still_bad=[] n_excluded=5 emg_power=3.587e-15 eeg_retention=0.299 autoreject_reject_frac=0.43
+  C4_ssp_autoreject        band=[1.0, 30.0] bads=['Cz', 'Fp1', 'Fp2', 'O2', 'POz'] still_bad=[] n_excluded=1 emg_power=3.890e-15 eeg_retention=0.326 autoreject_reject_frac=0.003
+
+VP021:
+  C1_our_final_pipeline    band=[0.5, 50.0] bads=['CP1', 'CP2', 'FC1', 'FC5', 'Fp1', 'Fp2', 'O2'] still_bad=[] n_excluded=2 emg_power=9.107e-14 eeg_retention=0.119 autoreject_reject_frac=0.014
+  C2_pyprep_filter_only    band=[1.0, 45.0] bads=['CP1', 'CP2', 'FC1', 'FC5', 'Fp1', 'Fp2', 'O2'] still_bad=['Fp1', 'AFz', 'Fp2', 'AFF6h'] n_excluded=0 emg_power=7.090e-14 eeg_retention=0.276 autoreject_reject_frac=0.0
+  C3_bemobil_keep_brain    band=[0.1, 30.0] bads=['CP1', 'CP2', 'FC1', 'FC5', 'Fp1', 'Fp2', 'O2'] still_bad=[] n_excluded=5 emg_power=2.193e-15 eeg_retention=0.107 autoreject_reject_frac=0.0
+  C4_ssp_autoreject        band=[1.0, 30.0] bads=['CP1', 'CP2', 'FC1', 'FC5', 'Fp1', 'Fp2', 'O2'] still_bad=[] n_excluded=1 emg_power=2.225e-15 eeg_retention=0.243 autoreject_reject_frac=0.665
+
+VP025:
+  C1_our_final_pipeline    band=[0.5, 50.0] bads=['AFF6h', 'FC6', 'Fp1', 'Fp2', 'T8'] still_bad=['Fp1', 'Fp2'] n_excluded=2 emg_power=1.405e-13 eeg_retention=0.145 autoreject_reject_frac=0.025
+  C2_pyprep_filter_only    band=[1.0, 45.0] bads=['AFF6h', 'FC6', 'Fp1', 'Fp2', 'T8'] still_bad=['Fp1', 'AFz', 'Fp2', 'AFF6h'] n_excluded=0 emg_power=1.092e-13 eeg_retention=0.384 autoreject_reject_frac=0.284
+  C3_bemobil_keep_brain    band=[0.1, 30.0] bads=['AFF6h', 'FC6', 'Fp1', 'Fp2', 'T8'] still_bad=[] n_excluded=6 emg_power=3.172e-15 eeg_retention=0.076 autoreject_reject_frac=0.033
+  C4_ssp_autoreject        band=[1.0, 30.0] bads=['AFF6h', 'FC6', 'Fp1', 'Fp2', 'T8'] still_bad=[] n_excluded=1 emg_power=4.103e-15 eeg_retention=0.507 autoreject_reject_frac=0.24

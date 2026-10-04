@@ -1,0 +1,66 @@
+==============================================================================
+EEG FULL-DATASET QC SCAN — FLAGGED SUBJECTS REPORT
+==============================================================================
+Total subjects scanned: 26
+Flagged for manual review: 5
+Clean (no manual review needed): 21
+
+Flag thresholds: still_bad_after_cleaning non-empty (any), autoreject_reject_fraction > 0.3, OR max_variance_ratio_after > 6.0
+
+--- REVIEW THESE FIRST, MOST SEVERE AT TOP ---
+
+VP026  (severity score 28.2)
+  ** still_bad_after_cleaning=['Fp2', 'AFF6h'] -- pattern matches VP025's Fp1/Fp2 case. Open this subject's QC images and decide whether manual channel interpolation is needed.
+  ** max_variance_ratio_after=16.50 -- one channel still dominates the others.
+  bads_detected_by_pyprep=['Cz', 'Fp1', 'Fp2']
+  QC images: E:\kntu\Thesis\codes\HOPE-LAST-CODE-FILE\new-tsfnet\eeg10s\eeg10s+fnirs21segment\fnirs-nofilter\Results\EEG_FULL_DATASET_QC_SCAN\VP026\
+
+VP025  (severity score 20.0)
+  ** still_bad_after_cleaning=['Fp1', 'Fp2'] -- pattern matches VP025's Fp1/Fp2 case. Open this subject's QC images and decide whether manual channel interpolation is needed.
+  bads_detected_by_pyprep=['AFF6h', 'FC6', 'Fp1', 'Fp2', 'T8']
+  QC images: E:\kntu\Thesis\codes\HOPE-LAST-CODE-FILE\new-tsfnet\eeg10s\eeg10s+fnirs21segment\fnirs-nofilter\Results\EEG_FULL_DATASET_QC_SCAN\VP025\
+
+VP004  (severity score 13.1)
+  ** still_bad_after_cleaning=['Fp2'] -- pattern matches VP025's Fp1/Fp2 case. Open this subject's QC images and decide whether manual channel interpolation is needed.
+  ** autoreject_reject_fraction=0.614 -- more than 30% of pseudo-epochs still look artifactual after cleaning.
+  bads_detected_by_pyprep=['C4', 'Fp1', 'Fp2', 'P3', 'POz']
+  QC images: E:\kntu\Thesis\codes\HOPE-LAST-CODE-FILE\new-tsfnet\eeg10s\eeg10s+fnirs21segment\fnirs-nofilter\Results\EEG_FULL_DATASET_QC_SCAN\VP004\
+
+VP018  (severity score 2.5)
+  ** autoreject_reject_fraction=0.51 -- more than 30% of pseudo-epochs still look artifactual after cleaning.
+  bads_detected_by_pyprep=['Cz', 'Fp1', 'Fp2', 'O2', 'POz']
+  QC images: E:\kntu\Thesis\codes\HOPE-LAST-CODE-FILE\new-tsfnet\eeg10s\eeg10s+fnirs21segment\fnirs-nofilter\Results\EEG_FULL_DATASET_QC_SCAN\VP018\
+
+VP002  (severity score 2.0)
+  ** autoreject_reject_fraction=0.394 -- more than 30% of pseudo-epochs still look artifactual after cleaning.
+  bads_detected_by_pyprep=['AFF5h', 'AFF6h', 'AFz', 'FC5', 'FC6', 'Fp1', 'Fp2', 'T7']
+  QC images: E:\kntu\Thesis\codes\HOPE-LAST-CODE-FILE\new-tsfnet\eeg10s\eeg10s+fnirs21segment\fnirs-nofilter\Results\EEG_FULL_DATASET_QC_SCAN\VP002\
+
+--- CLEAN, NO MANUAL REVIEW NEEDED (passed all thresholds) ---
+  VP001: bads=['AFF6h', 'Fp1', 'Fp2', 'T7', 'T8'], reject_frac=0.018, max_var_ratio=2.91
+  VP003: bads=['AFF5h', 'AFF6h', 'FC1', 'Fp1', 'Fp2'], reject_frac=0.011, max_var_ratio=2.10
+  VP005: bads=['CP1', 'Fp1', 'Fp2', 'P4'], reject_frac=0.045, max_var_ratio=3.25
+  VP006: bads=['AFF6h', 'Fp1', 'Fp2', 'T7'], reject_frac=0.083, max_var_ratio=2.34
+  VP007: bads=['AFF6h', 'Fp1', 'Fp2', 'T7'], reject_frac=0.029, max_var_ratio=2.90
+  VP008: bads=['Cz', 'FC6', 'Fp1', 'Fp2', 'T8'], reject_frac=0.012, max_var_ratio=3.43
+  VP009: bads=['FC1', 'FC2', 'Fp1', 'Fp2', 'O1', 'Pz', 'T7', 'T8'], reject_frac=0.019, max_var_ratio=3.44
+  VP010: bads=['AFF5h', 'C3', 'FC5', 'FC6', 'Fp1', 'Fp2', 'P3', 'POz', 'Pz', 'T8'], reject_frac=0.017, max_var_ratio=2.74
+  VP011: bads=['C3', 'FC5', 'T7'], reject_frac=0.051, max_var_ratio=3.13
+  VP012: bads=['AFF6h', 'Cz', 'Fp1', 'Fp2', 'P3', 'P7', 'POz', 'Pz', 'T7'], reject_frac=0.0, max_var_ratio=2.42
+  VP013: bads=['Cz', 'Fp2'], reject_frac=0.037, max_var_ratio=2.49
+  VP014: bads=['FC1', 'FC5', 'Fp1', 'Fp2', 'P3', 'T7', 'T8'], reject_frac=0.0, max_var_ratio=3.11
+  VP015: bads=['CP1', 'Cz', 'FC1', 'T7'], reject_frac=0.045, max_var_ratio=1.93
+  VP016: bads=['Fp1', 'Fp2', 'T7', 'T8'], reject_frac=0.003, max_var_ratio=2.92
+  VP017: bads=['AFF6h', 'CP6', 'Cz', 'Fp1', 'Fp2', 'T7', 'T8'], reject_frac=0.002, max_var_ratio=3.95
+  VP019: bads=['AFF5h', 'AFF6h', 'C3', 'FC5', 'Fp1', 'Fp2', 'T7', 'T8'], reject_frac=0.068, max_var_ratio=3.38
+  VP020: bads=['FC5', 'FC6', 'T7'], reject_frac=0.039, max_var_ratio=2.56
+  VP021: bads=['CP1', 'CP2', 'FC1', 'FC5', 'Fp1', 'Fp2', 'O2'], reject_frac=0.014, max_var_ratio=3.04
+  VP022: bads=['AFF6h'], reject_frac=0.002, max_var_ratio=3.21
+  VP023: bads=['AFF5h', 'AFF6h', 'CP1', 'CP6', 'Cz', 'Fp1', 'Fp2'], reject_frac=0.012, max_var_ratio=2.69
+  VP024: bads=['AFF6h', 'FC6', 'Fp1', 'Fp2', 'T7'], reject_frac=0.0, max_var_ratio=3.35
+
+NEXT STEP: open the QC images (5 per subject, same format you've reviewed
+before) for every subject in the flagged list above, starting from the top.
+For each, decide (same way we did for VP025): does this need manual channel
+interpolation, or is the automated PyPREP+CAR+ICA+AutoReject result actually
+fine and just tripped a threshold without a real visible problem?

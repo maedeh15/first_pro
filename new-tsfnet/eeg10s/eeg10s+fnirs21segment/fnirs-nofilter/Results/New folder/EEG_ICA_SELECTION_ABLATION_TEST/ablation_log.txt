@@ -1,0 +1,41 @@
+[17:54:22] ===== EEG ICA-SELECTION ABLATION TEST STARTED (B1: argmax-only vs B2: prob-threshold) =====
+[17:54:22] Test subjects: [1, 15, 18, 21, 5, 25] (VP025 first -- the targeted case)
+[17:54:22] Variants: ['B1_argmax_only', 'B2_prob_threshold']
+[17:54:22] Output root: E:\kntu\Thesis\codes\HOPE-LAST-CODE-FILE\new-tsfnet\eeg10s\eeg10s+fnirs21segment\fnirs-nofilter\Results\EEG_ICA_SELECTION_ABLATION_TEST
+[17:54:23] Loading VP001 from E:\kntu\Thesis\codes\DATA\VP001-EEG ...
+[17:54:23] Loading VP015 from E:\kntu\Thesis\codes\DATA\VP015-EEG ...
+[17:59:50]   VP015 [B1_argmax_only] done in 313.3s | bads=['CP1', 'T7', 'FC1', 'Cz'] | ICA excluded=3 [0, 1, 2] | still_bad_after=[] | known_persistent_still_present=[]
+[18:00:29]   VP001 [B1_argmax_only] done in 352.8s | bads=['AFF6h', 'Fp2', 'Fp1', 'T8', 'T7'] | ICA excluded=2 [0, 2] | still_bad_after=[] | known_persistent_still_present=[]
+[18:07:16]   VP015 [B2_prob_threshold] done in 431.8s | bads=['CP1', 'T7', 'FC1', 'Cz'] | ICA excluded=3 [0, 1, 2] | still_bad_after=[] | known_persistent_still_present=[]
+[18:07:16] Loading VP018 from E:\kntu\Thesis\codes\DATA\VP018-EEG ...
+[18:08:32]   VP001 [B2_prob_threshold] done in 471.8s | bads=['AFF6h', 'Fp2', 'Fp1', 'T8', 'T7'] | ICA excluded=3 [0, 2, 7] | still_bad_after=[] | known_persistent_still_present=[]
+[18:08:32] Loading VP021 from E:\kntu\Thesis\codes\DATA\VP021-EEG ...
+[18:08:54] Loading VP005 from E:\kntu\Thesis\codes\DATA\VP005-EEG ...
+[18:15:59] ===== EEG ICA-SELECTION ABLATION TEST STARTED (B1: argmax-only vs B2: prob-threshold) =====
+[18:15:59] Test subjects: [25, 1, 15, 18, 21, 5] (VP025 first -- the targeted case)
+[18:15:59] Variants: ['B1_argmax_only', 'B2_prob_threshold']
+[18:15:59] Output root: E:\kntu\Thesis\codes\HOPE-LAST-CODE-FILE\new-tsfnet\eeg10s\eeg10s+fnirs21segment\fnirs-nofilter\Results\EEG_ICA_SELECTION_ABLATION_TEST
+[18:16:00] Loading VP025 from E:\kntu\Thesis\codes\DATA\VP025-EEG ...
+[18:16:00] Loading VP001 from E:\kntu\Thesis\codes\DATA\VP001-EEG ...
+[18:18:53]   VP005 [B1_argmax_only] done in 575.6s | bads=['CP1', 'Fp1', 'Fp2', 'P4'] | ICA excluded=4 [0, np.int64(1), 2, 3] | still_bad_after=[] | known_persistent_still_present=[]
+[18:20:24]   VP025 [B1_argmax_only] done in 256.7s | bads=['Fp1', 'T8', 'AFF6h', 'Fp2', 'FC6'] | ICA excluded=2 [0, 1] | still_bad_after=['Fp1', 'Fp2'] | known_persistent_still_present=['Fp1', 'Fp2']
+[18:20:56]   VP001 [B1_argmax_only] done in 289.0s | bads=['T7', 'T8', 'Fp2', 'AFF6h', 'Fp1'] | ICA excluded=2 [0, 2] | still_bad_after=[] | known_persistent_still_present=[]
+[18:24:39]   VP025 [B2_prob_threshold] done in 247.5s | bads=['Fp1', 'T8', 'AFF6h', 'Fp2', 'FC6'] | ICA excluded=2 [0, 1] | still_bad_after=['Fp1', 'Fp2'] | known_persistent_still_present=['Fp1', 'Fp2']
+[18:24:39] Loading VP015 from E:\kntu\Thesis\codes\DATA\VP015-EEG ...
+[18:25:46]   VP001 [B2_prob_threshold] done in 282.3s | bads=['T7', 'T8', 'Fp2', 'AFF6h', 'Fp1'] | ICA excluded=3 [0, 2, 7] | still_bad_after=[] | known_persistent_still_present=[]
+[18:25:46] Loading VP018 from E:\kntu\Thesis\codes\DATA\VP018-EEG ...
+[18:29:22]   VP015 [B1_argmax_only] done in 275.1s | bads=['CP1', 'T7', 'FC1', 'Cz'] | ICA excluded=3 [0, 1, 2] | still_bad_after=[] | known_persistent_still_present=[]
+[18:30:13]   VP005 [B2_prob_threshold] done in 658.4s | bads=['CP1', 'Fp1', 'Fp2', 'P4'] | ICA excluded=7 [0, 1, 2, 3, 7, 9, 10] | still_bad_after=[] | known_persistent_still_present=[]
+[18:31:09]   VP018 [B1_argmax_only] done in 316.2s | bads=['Cz', 'POz', 'Fp2', 'O2', 'Fp1'] | ICA excluded=2 [0, 3] | still_bad_after=[] | known_persistent_still_present=[]
+[18:33:36]   VP015 [B2_prob_threshold] done in 247.4s | bads=['CP1', 'T7', 'FC1', 'Cz'] | ICA excluded=3 [0, 1, 2] | still_bad_after=[] | known_persistent_still_present=[]
+[18:33:36] Loading VP021 from E:\kntu\Thesis\codes\DATA\VP021-EEG ...
+[18:36:03]   VP018 [B2_prob_threshold] done in 287.6s | bads=['Cz', 'POz', 'Fp2', 'O2', 'Fp1'] | ICA excluded=2 [0, 3] | still_bad_after=[] | known_persistent_still_present=[]
+[18:36:03] Loading VP005 from E:\kntu\Thesis\codes\DATA\VP005-EEG ...
+[18:37:58]   VP021 [B1_argmax_only] done in 255.2s | bads=['Fp1', 'CP1', 'FC5', 'CP2', 'Fp2', 'O2', 'FC1'] | ICA excluded=2 [0, 1] | still_bad_after=[] | known_persistent_still_present=[]
+[18:40:23]   VP005 [B1_argmax_only] done in 252.8s | bads=['P4', 'CP1', 'Fp2', 'Fp1'] | ICA excluded=4 [0, np.int64(1), 2, 3] | still_bad_after=[] | known_persistent_still_present=[]
+[18:42:20]   VP021 [B2_prob_threshold] done in 256.1s | bads=['Fp1', 'CP1', 'FC5', 'CP2', 'Fp2', 'O2', 'FC1'] | ICA excluded=2 [0, 1] | still_bad_after=[] | known_persistent_still_present=[]
+[18:44:29]   VP005 [B2_prob_threshold] done in 239.7s | bads=['P4', 'CP1', 'Fp2', 'Fp1'] | ICA excluded=7 [0, 1, 2, 3, 7, 9, 10] | still_bad_after=[] | known_persistent_still_present=[]
+[18:44:29] Saved combined metrics table: E:\kntu\Thesis\codes\HOPE-LAST-CODE-FILE\new-tsfnet\eeg10s\eeg10s+fnirs21segment\fnirs-nofilter\Results\EEG_ICA_SELECTION_ABLATION_TEST\all_metrics.csv
+[18:44:29] Saved ranking report: E:\kntu\Thesis\codes\HOPE-LAST-CODE-FILE\new-tsfnet\eeg10s\eeg10s+fnirs21segment\fnirs-nofilter\Results\EEG_ICA_SELECTION_ABLATION_TEST\ranking_report.txt
+[18:44:30] Saved ranking chart: E:\kntu\Thesis\codes\HOPE-LAST-CODE-FILE\new-tsfnet\eeg10s\eeg10s+fnirs21segment\fnirs-nofilter\Results\EEG_ICA_SELECTION_ABLATION_TEST\ranking_summary.png
+[18:44:30] ===== EEG ICA-SELECTION ABLATION TEST FINISHED =====

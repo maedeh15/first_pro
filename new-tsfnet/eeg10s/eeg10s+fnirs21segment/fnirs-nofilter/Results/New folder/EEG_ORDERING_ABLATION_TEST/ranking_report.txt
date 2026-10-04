@@ -1,0 +1,64 @@
+==============================================================================
+EEG ORDERING ABLATION — RANKING REPORT (A1: CAR before ICA vs A2: ICA before CAR)
+==============================================================================
+Subjects tested: ['VP001', 'VP005', 'VP015', 'VP018', 'VP021', 'VP025']
+Variants tested: ['A1_car_then_ica', 'A2_ica_then_car']
+
+--- Per-variant averages across all test subjects ---
+        variant  mean_still_bad_count  mean_max_variance_ratio_after  mean_emg_band_power_after  mean_eeg_band_retention  mean_interchannel_corr  mean_ica_excluded  mean_autoreject_reject_fraction  mean_runtime_s
+A1_car_then_ica              0.333333                       3.196131               1.110012e-13                 0.163607                0.407240           2.500000                           0.1095      252.866667
+A2_ica_then_car              0.666667                       3.856625               1.090904e-13                 0.170999                0.379614           2.166667                           0.1010      247.133333
+
+--- How to read this ---
+mean_still_bad_count            : LOWER is better (channels still >4x median
+                                   variance after cleaning).
+mean_max_variance_ratio_after    : LOWER is better, closer to 1-3 is healthy.
+mean_emg_band_power_after        : LOWER is better (less residual muscle noise),
+                                   check against eeg_band_retention for over-cleaning.
+mean_eeg_band_retention          : should stay close between A1/A2 -- large gap =
+                                   one ordering is destroying more real EEG signal.
+mean_interchannel_corr           : this is the ordering-specific check. If ICA runs
+                                   BEFORE CAR (A2), CAR afterwards re-introduces a
+                                   common signal that ICA never saw/could remove --
+                                   watch for A2 showing unusually different (often
+                                   higher, less physiologically structured) correlation
+                                   than A1.
+mean_autoreject_reject_fraction  : LOWER is better -- fraction of 3s pseudo-epochs
+                                   AutoReject would still flag as bad after cleaning.
+
+--- Automatic note (heuristic, please confirm visually) ---
+A1_car_then_ica favoured by: no metric
+A2_ica_then_car favoured by: ['lower residual EMG-band power', 'fewer epochs still flagged bad by AutoReject']
+
+IMPORTANT: as with the previous ablation test, this is a starting point, not a
+final verdict -- open the QC images for both variants under:
+  E:\kntu\Thesis\codes\HOPE-LAST-CODE-FILE\new-tsfnet\eeg10s\eeg10s+fnirs21segment\fnirs-nofilter\Results\EEG_ORDERING_ABLATION_TEST\A1_car_then_ica\
+  E:\kntu\Thesis\codes\HOPE-LAST-CODE-FILE\new-tsfnet\eeg10s\eeg10s+fnirs21segment\fnirs-nofilter\Results\EEG_ORDERING_ABLATION_TEST\A2_ica_then_car\
+and compare them visually before deciding, the same way we did for the previous
+PyPREP ablation test.
+
+--- Per-subject detail ---
+
+VP001:
+  A1_car_then_ica    bads=['AFF6h', 'Fp1', 'Fp2', 'T7', 'T8'] still_bad=[] ica_excluded=2 emg_power=1.041e-13 eeg_retention=0.149 interchannel_corr=0.457 autoreject_reject_frac=0.018
+  A2_ica_then_car    bads=['AFF6h', 'Fp1', 'Fp2', 'T7', 'T8'] still_bad=[] ica_excluded=2 emg_power=1.011e-13 eeg_retention=0.146 interchannel_corr=0.462 autoreject_reject_frac=0.033
+
+VP005:
+  A1_car_then_ica    bads=['CP1', 'Fp1', 'Fp2', 'P4'] still_bad=[] ica_excluded=4 emg_power=1.757e-13 eeg_retention=0.147 interchannel_corr=0.334 autoreject_reject_frac=0.045
+  A2_ica_then_car    bads=['CP1', 'Fp1', 'Fp2', 'P4'] still_bad=[] ica_excluded=3 emg_power=1.967e-13 eeg_retention=0.144 interchannel_corr=0.299 autoreject_reject_frac=0.069
+
+VP015:
+  A1_car_then_ica    bads=['CP1', 'Cz', 'FC1', 'T7'] still_bad=[] ica_excluded=3 emg_power=5.517e-14 eeg_retention=0.110 interchannel_corr=0.347 autoreject_reject_frac=0.045
+  A2_ica_then_car    bads=['CP1', 'Cz', 'FC1', 'T7'] still_bad=['Fp2'] ica_excluded=3 emg_power=5.542e-14 eeg_retention=0.121 interchannel_corr=0.297 autoreject_reject_frac=0.043
+
+VP018:
+  A1_car_then_ica    bads=['Cz', 'Fp1', 'Fp2', 'O2', 'POz'] still_bad=[] ica_excluded=2 emg_power=9.936e-14 eeg_retention=0.311 interchannel_corr=0.454 autoreject_reject_frac=0.51
+  A2_ica_then_car    bads=['Cz', 'Fp1', 'Fp2', 'O2', 'POz'] still_bad=[] ica_excluded=2 emg_power=9.142e-14 eeg_retention=0.307 interchannel_corr=0.452 autoreject_reject_frac=0.43
+
+VP021:
+  A1_car_then_ica    bads=['CP1', 'CP2', 'FC1', 'FC5', 'Fp1', 'Fp2', 'O2'] still_bad=[] ica_excluded=2 emg_power=9.107e-14 eeg_retention=0.119 interchannel_corr=0.372 autoreject_reject_frac=0.014
+  A2_ica_then_car    bads=['CP1', 'CP2', 'FC1', 'FC5', 'Fp1', 'Fp2', 'O2'] still_bad=['Fp2', 'AFF6h'] ica_excluded=1 emg_power=1.188e-13 eeg_retention=0.172 interchannel_corr=0.425 autoreject_reject_frac=0.019
+
+VP025:
+  A1_car_then_ica    bads=['AFF6h', 'FC6', 'Fp1', 'Fp2', 'T8'] still_bad=['Fp1', 'Fp2'] ica_excluded=2 emg_power=1.405e-13 eeg_retention=0.145 interchannel_corr=0.479 autoreject_reject_frac=0.025
+  A2_ica_then_car    bads=['AFF6h', 'FC6', 'Fp1', 'Fp2', 'T8'] still_bad=['Fp1'] ica_excluded=2 emg_power=9.102e-14 eeg_retention=0.136 interchannel_corr=0.342 autoreject_reject_frac=0.012

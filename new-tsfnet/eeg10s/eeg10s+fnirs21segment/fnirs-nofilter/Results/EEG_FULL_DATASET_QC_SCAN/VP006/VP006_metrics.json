@@ -1,0 +1,26 @@
+{
+  "subject": "VP006",
+  "runtime_s": 236.9,
+  "n_channels_used": 28,
+  "bad_channels_detected": [
+    "AFF6h",
+    "Fp1",
+    "Fp2",
+    "T7"
+  ],
+  "n_bad_channels_detected": 4,
+  "n_ica_components_excluded": 2,
+  "ica_excluded_ids": [
+    0,
+    1
+  ],
+  "still_bad_after_cleaning": [],
+  "median_variance_before": 1.176287151924112e-09,
+  "median_variance_after": 1.510836877916631e-11,
+  "max_variance_ratio_after": 2.3353680690511815,
+  "median_emg_band_power_after_30_49hz": 7.844529446256674e-14,
+  "median_eeg_band_power_retention_ratio_4_30hz": 0.14550906970696653,
+  "autoreject_epochs_rejected": 54,
+  "autoreject_epochs_total": 647,
+  "autoreject_reject_fraction": 0.083
+}

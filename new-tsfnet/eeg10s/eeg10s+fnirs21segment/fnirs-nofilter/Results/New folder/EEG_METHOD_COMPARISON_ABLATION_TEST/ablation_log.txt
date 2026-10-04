@@ -1,0 +1,84 @@
+[20:03:11] ===== EEG METHOD COMPARISON ABLATION TEST STARTED =====
+[20:03:11] Test subjects: [25, 1, 15, 18, 21, 5] (VP025 first -- the targeted case)
+[20:03:11] Variants: ['C1_our_final_pipeline', 'C2_pyprep_filter_only', 'C3_bemobil_keep_brain', 'C4_ssp_autoreject']
+[20:03:11] Filter bands: {'C1_our_final_pipeline': (0.5, 50.0), 'C2_pyprep_filter_only': (1.0, 45.0), 'C3_bemobil_keep_brain': (0.1, 30.0), 'C4_ssp_autoreject': (1.0, 30.0)}
+[20:03:11] Output root: E:\kntu\Thesis\codes\HOPE-LAST-CODE-FILE\new-tsfnet\eeg10s\eeg10s+fnirs21segment\fnirs-nofilter\Results\EEG_METHOD_COMPARISON_ABLATION_TEST
+[20:03:13] Loading VP025 from E:\kntu\Thesis\codes\DATA\VP025-EEG ...
+[20:03:13] Loading VP001 from E:\kntu\Thesis\codes\DATA\VP001-EEG ...
+[20:07:21]   VP025 [C1_our_final_pipeline] done in 241.4s | band=(0.5, 50.0) | bads=['Fp1', 'AFF6h', 'FC6', 'Fp2', 'T8'] | excluded=2 | still_bad_after=['Fp1', 'Fp2'] | known_persistent_still_present=['Fp1', 'Fp2']
+[20:07:51]   VP001 [C1_our_final_pipeline] done in 270.9s | band=(0.5, 50.0) | bads=['T7', 'T8', 'Fp2', 'AFF6h', 'Fp1'] | excluded=2 | still_bad_after=[] | known_persistent_still_present=[]
+[20:11:28]   VP025 [C2_pyprep_filter_only] done in 240.8s | band=(1.0, 45.0) | bads=['Fp1', 'AFF6h', 'FC6', 'Fp2', 'T8'] | excluded=0 | still_bad_after=['Fp1', 'AFz', 'Fp2', 'AFF6h'] | known_persistent_still_present=['Fp1', 'Fp2']
+[20:12:06]   VP001 [C2_pyprep_filter_only] done in 249.9s | band=(1.0, 45.0) | bads=['T7', 'T8', 'Fp2', 'AFF6h', 'Fp1'] | excluded=0 | still_bad_after=['Fp1', 'AFF5h', 'AFz', 'Fp2'] | known_persistent_still_present=[]
+[20:16:06]   VP025 [C3_bemobil_keep_brain] done in 271.7s | band=(0.1, 30.0) | bads=['Fp1', 'AFF6h', 'FC6', 'Fp2', 'T8'] | excluded=6 | still_bad_after=[] | known_persistent_still_present=[]
+[20:16:17]   VP025: compute_proj_eog failed (compute_proj_eog() got an unexpected keyword argument 'n_eog'), skipping SSP.
+[20:17:23]   VP001 [C3_bemobil_keep_brain] done in 311.4s | band=(0.1, 30.0) | bads=['AFF5h', 'T7', 'T8', 'Fp2', 'CP5', 'AFF6h', 'AFz', 'Fp1'] | excluded=6 | still_bad_after=['Fp2', 'FC6', 'T8'] | known_persistent_still_present=[]
+[20:17:34]   VP001: compute_proj_eog failed (compute_proj_eog() got an unexpected keyword argument 'n_eog'), skipping SSP.
+[20:20:16]   VP025 [C4_ssp_autoreject] done in 243.3s | band=(1.0, 30.0) | bads=['Fp1', 'AFF6h', 'FC6', 'Fp2', 'T8'] | excluded=0 | still_bad_after=['Fp1', 'AFz', 'Fp2', 'AFF6h'] | known_persistent_still_present=['Fp1', 'Fp2']
+[20:20:16] Loading VP015 from E:\kntu\Thesis\codes\DATA\VP015-EEG ...
+[20:21:42]   VP001 [C4_ssp_autoreject] done in 252.5s | band=(1.0, 30.0) | bads=['T7', 'T8', 'Fp2', 'CP5', 'AFF6h', 'Fp1'] | excluded=0 | still_bad_after=['Fp1', 'AFF5h', 'AFz', 'Fp2'] | known_persistent_still_present=[]
+[20:21:42] Loading VP018 from E:\kntu\Thesis\codes\DATA\VP018-EEG ...
+[20:24:23]   VP015 [C1_our_final_pipeline] done in 240.5s | band=(0.5, 50.0) | bads=['FC1', 'T7', 'Cz', 'CP1'] | excluded=3 | still_bad_after=[] | known_persistent_still_present=[]
+[20:26:32]   VP018 [C1_our_final_pipeline] done in 283.2s | band=(0.5, 50.0) | bads=['Fp2', 'POz', 'Cz', 'Fp1', 'O2'] | excluded=2 | still_bad_after=[] | known_persistent_still_present=[]
+[20:28:37]   VP015 [C2_pyprep_filter_only] done in 248.2s | band=(1.0, 45.0) | bads=['Fp1', 'CP1', 'Fp2', 'FC1', 'T7', 'Cz'] | excluded=0 | still_bad_after=['Fp1', 'AFF5h', 'AFz', 'Fp2', 'AFF6h'] | known_persistent_still_present=[]
+[20:30:46]   VP018 [C2_pyprep_filter_only] done in 246.6s | band=(1.0, 45.0) | bads=['Fp2', 'POz', 'Cz', 'Fp1', 'O2'] | excluded=0 | still_bad_after=['Fp1', 'Fp2'] | known_persistent_still_present=[]
+[20:34:17]   VP015 [C3_bemobil_keep_brain] done in 333.8s | band=(0.1, 30.0) | bads=['FC1', 'T7', 'Cz', 'CP1'] | excluded=6 | still_bad_after=[] | known_persistent_still_present=[]
+[20:34:28]   VP015: compute_proj_eog failed (compute_proj_eog() got an unexpected keyword argument 'n_eog'), skipping SSP.
+[20:36:34]   VP018 [C3_bemobil_keep_brain] done in 342.5s | band=(0.1, 30.0) | bads=['Fp2', 'POz', 'Cz', 'Fp1', 'O2'] | excluded=5 | still_bad_after=[] | known_persistent_still_present=[]
+[20:36:46]   VP018: compute_proj_eog failed (compute_proj_eog() got an unexpected keyword argument 'n_eog'), skipping SSP.
+[20:38:21]   VP015 [C4_ssp_autoreject] done in 238.6s | band=(1.0, 30.0) | bads=['Fp1', 'CP1', 'Fp2', 'FC1', 'T7', 'Cz'] | excluded=0 | still_bad_after=['Fp1', 'AFF5h', 'AFz', 'Fp2', 'AFF6h'] | known_persistent_still_present=[]
+[20:38:21] Loading VP021 from E:\kntu\Thesis\codes\DATA\VP021-EEG ...
+[20:40:32]   VP018 [C4_ssp_autoreject] done in 231.3s | band=(1.0, 30.0) | bads=['Fp2', 'POz', 'Cz', 'Fp1', 'O2'] | excluded=0 | still_bad_after=['Fp1', 'Fp2'] | known_persistent_still_present=[]
+[20:40:32] Loading VP005 from E:\kntu\Thesis\codes\DATA\VP005-EEG ...
+[20:42:31]   VP021 [C1_our_final_pipeline] done in 243.0s | band=(0.5, 50.0) | bads=['Fp1', 'CP1', 'Fp2', 'FC1', 'O2', 'CP2', 'FC5'] | excluded=2 | still_bad_after=[] | known_persistent_still_present=[]
+[20:44:41]   VP005 [C1_our_final_pipeline] done in 241.5s | band=(0.5, 50.0) | bads=['Fp2', 'CP1', 'P4', 'Fp1'] | excluded=4 | still_bad_after=[] | known_persistent_still_present=[]
+[20:46:38]   VP021 [C2_pyprep_filter_only] done in 241.1s | band=(1.0, 45.0) | bads=['Fp1', 'CP1', 'Fp2', 'FC1', 'O2', 'CP2', 'FC5'] | excluded=0 | still_bad_after=['Fp1', 'AFz', 'Fp2', 'AFF6h'] | known_persistent_still_present=[]
+[20:48:44]   VP005 [C2_pyprep_filter_only] done in 238.1s | band=(1.0, 45.0) | bads=['Fp2', 'P4', 'Fp1'] | excluded=0 | still_bad_after=['Fp1', 'AFz', 'Fp2', 'AFF6h'] | known_persistent_still_present=[]
+[20:51:19]   VP021 [C3_bemobil_keep_brain] done in 275.6s | band=(0.1, 30.0) | bads=['Fp1', 'CP1', 'Fp2', 'FC1', 'O2', 'CP2', 'FC5'] | excluded=5 | still_bad_after=[] | known_persistent_still_present=[]
+[20:51:30]   VP021: compute_proj_eog failed (compute_proj_eog() got an unexpected keyword argument 'n_eog'), skipping SSP.
+[20:53:00]   VP005 [C3_bemobil_keep_brain] done in 249.5s | band=(0.1, 30.0) | bads=['Fp2', 'P4', 'Fp1'] | excluded=5 | still_bad_after=[] | known_persistent_still_present=[]
+[20:53:11]   VP005: compute_proj_eog failed (compute_proj_eog() got an unexpected keyword argument 'n_eog'), skipping SSP.
+[20:55:38]   VP021 [C4_ssp_autoreject] done in 253.6s | band=(1.0, 30.0) | bads=['Fp1', 'CP1', 'Fp2', 'FC1', 'O2', 'CP2', 'FC5'] | excluded=0 | still_bad_after=['Fp1', 'AFz', 'Fp2', 'AFF6h'] | known_persistent_still_present=[]
+[20:57:08]   VP005 [C4_ssp_autoreject] done in 242.5s | band=(1.0, 30.0) | bads=['Fp2', 'T7', 'P4', 'Fp1'] | excluded=0 | still_bad_after=['Fp1', 'AFF5h', 'AFz', 'Fp2', 'AFF6h'] | known_persistent_still_present=[]
+[20:57:08] Saved combined metrics table: E:\kntu\Thesis\codes\HOPE-LAST-CODE-FILE\new-tsfnet\eeg10s\eeg10s+fnirs21segment\fnirs-nofilter\Results\EEG_METHOD_COMPARISON_ABLATION_TEST\all_metrics.csv
+[20:57:08] Saved ranking report: E:\kntu\Thesis\codes\HOPE-LAST-CODE-FILE\new-tsfnet\eeg10s\eeg10s+fnirs21segment\fnirs-nofilter\Results\EEG_METHOD_COMPARISON_ABLATION_TEST\ranking_report.txt
+[20:57:09] Saved ranking chart: E:\kntu\Thesis\codes\HOPE-LAST-CODE-FILE\new-tsfnet\eeg10s\eeg10s+fnirs21segment\fnirs-nofilter\Results\EEG_METHOD_COMPARISON_ABLATION_TEST\ranking_summary.png
+[20:57:09] ===== EEG METHOD COMPARISON ABLATION TEST FINISHED =====
+[21:09:12] ===== EEG METHOD COMPARISON ABLATION TEST STARTED =====
+[21:09:12] Test subjects: [25, 1, 15, 18, 21, 5] (VP025 first -- the targeted case)
+[21:09:12] Variants: ['C1_our_final_pipeline', 'C2_pyprep_filter_only', 'C3_bemobil_keep_brain', 'C4_ssp_autoreject']
+[21:09:12] Filter bands: {'C1_our_final_pipeline': (0.5, 50.0), 'C2_pyprep_filter_only': (1.0, 45.0), 'C3_bemobil_keep_brain': (0.1, 30.0), 'C4_ssp_autoreject': (1.0, 30.0)}
+[21:09:12] Output root: E:\kntu\Thesis\codes\HOPE-LAST-CODE-FILE\new-tsfnet\eeg10s\eeg10s+fnirs21segment\fnirs-nofilter\Results\EEG_METHOD_COMPARISON_ABLATION_TEST
+[21:09:13] Loading VP025 from E:\kntu\Thesis\codes\DATA\VP025-EEG ...
+[21:09:13] Loading VP001 from E:\kntu\Thesis\codes\DATA\VP001-EEG ...
+[21:14:56]   VP025 [C1_our_final_pipeline] done in 328.8s | band=(0.5, 50.0) | bads=['FC6', 'Fp2', 'AFF6h', 'Fp1', 'T8'] | excluded=2 | still_bad_after=['Fp1', 'Fp2'] | known_persistent_still_present=['Fp1', 'Fp2']
+[21:15:56]   VP001 [C1_our_final_pipeline] done in 389.4s | band=(0.5, 50.0) | bads=['T7', 'Fp2', 'T8', 'Fp1', 'AFF6h'] | excluded=2 | still_bad_after=[] | known_persistent_still_present=[]
+[21:22:25]   VP025 [C2_pyprep_filter_only] done in 435.8s | band=(1.0, 45.0) | bads=['FC6', 'Fp2', 'AFF6h', 'Fp1', 'T8'] | excluded=0 | still_bad_after=['Fp1', 'AFz', 'Fp2', 'AFF6h'] | known_persistent_still_present=['Fp1', 'Fp2']
+[21:23:38]   VP001 [C2_pyprep_filter_only] done in 450.3s | band=(1.0, 45.0) | bads=['T7', 'Fp2', 'T8', 'Fp1', 'AFF6h'] | excluded=0 | still_bad_after=['Fp1', 'AFF5h', 'AFz', 'Fp2'] | known_persistent_still_present=[]
+[21:30:04]   VP025 [C3_bemobil_keep_brain] done in 447.0s | band=(0.1, 30.0) | bads=['FC6', 'Fp2', 'AFF6h', 'Fp1', 'T8'] | excluded=6 | still_bad_after=[] | known_persistent_still_present=[]
+[21:32:45]   VP001 [C3_bemobil_keep_brain] done in 535.4s | band=(0.1, 30.0) | bads=['T7', 'Fp2', 'AFz', 'CP5', 'T8', 'Fp1', 'AFF5h', 'AFF6h'] | excluded=6 | still_bad_after=['Fp2', 'FC6', 'T8'] | known_persistent_still_present=[]
+[21:38:34]   VP025 [C4_ssp_autoreject] done in 496.6s | band=(1.0, 30.0) | bads=['FC6', 'Fp2', 'AFF6h', 'Fp1', 'T8'] | excluded=1 | still_bad_after=[] | known_persistent_still_present=[]
+[21:38:34] Loading VP015 from E:\kntu\Thesis\codes\DATA\VP015-EEG ...
+[21:41:11]   VP001 [C4_ssp_autoreject] done in 493.6s | band=(1.0, 30.0) | bads=['T7', 'Fp2', 'CP5', 'T8', 'Fp1', 'AFF6h'] | excluded=1 | still_bad_after=[] | known_persistent_still_present=[]
+[21:41:11] Loading VP018 from E:\kntu\Thesis\codes\DATA\VP018-EEG ...
+[21:46:12]   VP015 [C1_our_final_pipeline] done in 442.9s | band=(0.5, 50.0) | bads=['Cz', 'FC1', 'T7', 'CP1'] | excluded=3 | still_bad_after=[] | known_persistent_still_present=[]
+[21:50:44]   VP018 [C1_our_final_pipeline] done in 556.8s | band=(0.5, 50.0) | bads=['Fp2', 'POz', 'O2', 'Cz', 'Fp1'] | excluded=2 | still_bad_after=[] | known_persistent_still_present=[]
+[21:54:30]   VP015 [C2_pyprep_filter_only] done in 485.7s | band=(1.0, 45.0) | bads=['FC1', 'CP1', 'Fp2', 'Cz', 'Fp1', 'T7'] | excluded=0 | still_bad_after=['Fp1', 'AFF5h', 'AFz', 'Fp2', 'AFF6h'] | known_persistent_still_present=[]
+[21:57:50]   VP018 [C2_pyprep_filter_only] done in 420.8s | band=(1.0, 45.0) | bads=['Fp2', 'POz', 'O2', 'Cz', 'Fp1'] | excluded=0 | still_bad_after=['Fp1', 'Fp2'] | known_persistent_still_present=[]
+[22:00:24]   VP015 [C3_bemobil_keep_brain] done in 348.0s | band=(0.1, 30.0) | bads=['Cz', 'FC1', 'T7', 'CP1'] | excluded=6 | still_bad_after=[] | known_persistent_still_present=[]
+[22:02:35]   VP018 [C3_bemobil_keep_brain] done in 278.4s | band=(0.1, 30.0) | bads=['Fp2', 'POz', 'O2', 'Cz', 'Fp1'] | excluded=5 | still_bad_after=[] | known_persistent_still_present=[]
+[22:04:42]   VP015 [C4_ssp_autoreject] done in 252.4s | band=(1.0, 30.0) | bads=['FC1', 'CP1', 'Fp2', 'Cz', 'Fp1', 'T7'] | excluded=1 | still_bad_after=[] | known_persistent_still_present=[]
+[22:04:42] Loading VP021 from E:\kntu\Thesis\codes\DATA\VP021-EEG ...
+[22:06:43]   VP018 [C4_ssp_autoreject] done in 241.6s | band=(1.0, 30.0) | bads=['Fp2', 'POz', 'O2', 'Cz', 'Fp1'] | excluded=1 | still_bad_after=[] | known_persistent_still_present=[]
+[22:06:43] Loading VP005 from E:\kntu\Thesis\codes\DATA\VP005-EEG ...
+[22:08:50]   VP021 [C1_our_final_pipeline] done in 242.1s | band=(0.5, 50.0) | bads=['FC1', 'CP1', 'O2', 'Fp2', 'FC5', 'Fp1', 'CP2'] | excluded=2 | still_bad_after=[] | known_persistent_still_present=[]
+[22:10:46]   VP005 [C1_our_final_pipeline] done in 236.4s | band=(0.5, 50.0) | bads=['Fp1', 'Fp2', 'P4', 'CP1'] | excluded=4 | still_bad_after=[] | known_persistent_still_present=[]
+[22:12:56]   VP021 [C2_pyprep_filter_only] done in 240.5s | band=(1.0, 45.0) | bads=['FC1', 'CP1', 'Fp2', 'O2', 'FC5', 'Fp1', 'CP2'] | excluded=0 | still_bad_after=['Fp1', 'AFz', 'Fp2', 'AFF6h'] | known_persistent_still_present=[]
+[22:14:52]   VP005 [C2_pyprep_filter_only] done in 240.5s | band=(1.0, 45.0) | bads=['Fp1', 'Fp2', 'P4'] | excluded=0 | still_bad_after=['Fp1', 'AFz', 'Fp2', 'AFF6h'] | known_persistent_still_present=[]
+[22:17:41]   VP021 [C3_bemobil_keep_brain] done in 278.8s | band=(0.1, 30.0) | bads=['FC1', 'CP1', 'O2', 'Fp2', 'FC5', 'Fp1', 'CP2'] | excluded=5 | still_bad_after=[] | known_persistent_still_present=[]
+[22:19:11]   VP005 [C3_bemobil_keep_brain] done in 252.7s | band=(0.1, 30.0) | bads=['Fp1', 'Fp2', 'P4'] | excluded=5 | still_bad_after=[] | known_persistent_still_present=[]
+[22:22:04]   VP021 [C4_ssp_autoreject] done in 257.5s | band=(1.0, 30.0) | bads=['FC1', 'CP1', 'Fp2', 'O2', 'FC5', 'Fp1', 'CP2'] | excluded=1 | still_bad_after=[] | known_persistent_still_present=[]
+[22:23:21]   VP005 [C4_ssp_autoreject] done in 244.6s | band=(1.0, 30.0) | bads=['T7', 'Fp1', 'Fp2', 'P4'] | excluded=1 | still_bad_after=['AFF6h'] | known_persistent_still_present=[]
+[22:23:21] Saved combined metrics table: E:\kntu\Thesis\codes\HOPE-LAST-CODE-FILE\new-tsfnet\eeg10s\eeg10s+fnirs21segment\fnirs-nofilter\Results\EEG_METHOD_COMPARISON_ABLATION_TEST\all_metrics.csv
+[22:23:21] Saved ranking report: E:\kntu\Thesis\codes\HOPE-LAST-CODE-FILE\new-tsfnet\eeg10s\eeg10s+fnirs21segment\fnirs-nofilter\Results\EEG_METHOD_COMPARISON_ABLATION_TEST\ranking_report.txt
+[22:23:22] Saved ranking chart: E:\kntu\Thesis\codes\HOPE-LAST-CODE-FILE\new-tsfnet\eeg10s\eeg10s+fnirs21segment\fnirs-nofilter\Results\EEG_METHOD_COMPARISON_ABLATION_TEST\ranking_summary.png
+[22:23:22] ===== EEG METHOD COMPARISON ABLATION TEST FINISHED =====

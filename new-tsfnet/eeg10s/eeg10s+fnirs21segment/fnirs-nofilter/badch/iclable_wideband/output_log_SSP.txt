@@ -1,0 +1,1 @@
+C:\Users\SPACE\AppData\Local\Programs\Python\Python312\python.exe: can't open file 'E:\\kntu\\Thesis\\codes\\HOPE-LAST-CODE-FILE\\new-tsfnet\\eeg10s\\eeg10s+fnirs21segment\\fnirs-nofilter\\badch\\iclable_wideband\\Preproc': [Errno 2] No such file or directory

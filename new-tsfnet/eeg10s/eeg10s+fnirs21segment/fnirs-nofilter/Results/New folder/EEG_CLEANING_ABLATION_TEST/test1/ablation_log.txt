@@ -1,0 +1,71 @@
+[14:21:30] ===== EEG CLEANING ABLATION TEST STARTED =====
+[14:21:30] Test subjects: [1, 15, 18, 21, 5]
+[14:21:30] Variants: ['V0_baseline', 'V1_prep', 'V2_prep_autoreject', 'V3_prep_iclabel_all']
+[14:21:30] Output root: E:\kntu\Thesis\codes\HOPE-LAST-CODE-FILE\new-tsfnet\eeg10s\eeg10s+fnirs21segment\fnirs-nofilter\Results\EEG_CLEANING_ABLATION_TEST
+[14:21:32] Loading VP001 from E:\kntu\Thesis\codes\DATA\VP001-EEG ...
+[14:21:32] Loading VP015 from E:\kntu\Thesis\codes\DATA\VP015-EEG ...
+[14:21:54]   VP015 [V0_baseline] done in 13.8s | bads=[] | ICA excluded=2 | still_bad_after=['Fp1', 'Cz', 'Fp2']
+[14:21:59]   VP001 [V0_baseline] done in 18.5s | bads=[] | ICA excluded=4 | still_bad_after=[]
+[14:22:20]   VP015 [V1_prep] done in 18.7s | bads=['CP1', 'FC1', 'T7', 'Cz'] | ICA excluded=3 | still_bad_after=[]
+[14:22:31]   VP001 [V1_prep] done in 24.2s | bads=['T8', 'Fp2', 'AFF6h', 'Fp1', 'T7'] | ICA excluded=2 | still_bad_after=[]
+[14:27:23]   VP015 [V2_prep_autoreject] done in 295.0s | bads=['CP1', 'FC1', 'T7', 'Cz'] | ICA excluded=3 | still_bad_after=[]
+[14:27:50]   VP015 [V3_prep_iclabel_all] done in 19.0s | bads=['CP1', 'FC1', 'T7', 'Cz'] | ICA excluded=3 | still_bad_after=[]
+[14:27:50] Loading VP018 from E:\kntu\Thesis\codes\DATA\VP018-EEG ...
+[14:28:00]   VP001 [V2_prep_autoreject] done in 320.5s | bads=['T8', 'Fp2', 'AFF6h', 'Fp1', 'T7'] | ICA excluded=2 | still_bad_after=[]
+[14:28:35]   VP001 [V3_prep_iclabel_all] done in 26.1s | bads=['T8', 'Fp2', 'AFF6h', 'Fp1', 'T7'] | ICA excluded=2 | still_bad_after=[]
+[14:28:35] Loading VP021 from E:\kntu\Thesis\codes\DATA\VP021-EEG ...
+[14:28:47] FAILED variant V0_baseline for VP018: Object of type int64 is not JSON serializable
+[14:29:14]   VP021 [V0_baseline] done in 28.5s | bads=[] | ICA excluded=3 | still_bad_after=['CP1', 'CP2']
+[14:29:53]   VP018 [V1_prep] done in 57.3s | bads=['Cz', 'POz', 'Fp1', 'Fp2', 'O2'] | ICA excluded=2 | still_bad_after=[]
+[14:30:01]   VP021 [V1_prep] done in 39.3s | bads=['CP2', 'CP1', 'O2', 'Fp2', 'Fp1', 'FC5', 'FC1'] | ICA excluded=2 | still_bad_after=[]
+[14:35:15]   VP021 [V2_prep_autoreject] done in 306.4s | bads=['CP2', 'CP1', 'O2', 'Fp2', 'Fp1', 'FC5', 'FC1'] | ICA excluded=2 | still_bad_after=[]
+[14:35:45]   VP018 [V2_prep_autoreject] done in 343.4s | bads=['Cz', 'POz', 'Fp1', 'Fp2', 'O2'] | ICA excluded=2 | still_bad_after=[]
+[14:36:02]   VP021 [V3_prep_iclabel_all] done in 38.5s | bads=['CP2', 'CP1', 'O2', 'Fp2', 'Fp1', 'FC5', 'FC1'] | ICA excluded=2 | still_bad_after=[]
+[14:36:02] Loading VP005 from E:\kntu\Thesis\codes\DATA\VP005-EEG ...
+[14:36:42]   VP005 [V0_baseline] done in 29.4s | bads=[] | ICA excluded=5 | still_bad_after=['P4']
+[14:36:52]   VP018 [V3_prep_iclabel_all] done in 59.8s | bads=['Cz', 'POz', 'Fp1', 'Fp2', 'O2'] | ICA excluded=2 | still_bad_after=[]
+[14:37:21] FAILED variant V1_prep for VP005: Object of type int64 is not JSON serializable
+[14:41:43] FAILED variant V2_prep_autoreject for VP005: Object of type int64 is not JSON serializable
+[14:42:21] FAILED variant V3_prep_iclabel_all for VP005: Object of type int64 is not JSON serializable
+[14:42:21] Saved combined metrics table: E:\kntu\Thesis\codes\HOPE-LAST-CODE-FILE\new-tsfnet\eeg10s\eeg10s+fnirs21segment\fnirs-nofilter\Results\EEG_CLEANING_ABLATION_TEST\all_metrics.csv
+[14:42:21] Saved ranking report: E:\kntu\Thesis\codes\HOPE-LAST-CODE-FILE\new-tsfnet\eeg10s\eeg10s+fnirs21segment\fnirs-nofilter\Results\EEG_CLEANING_ABLATION_TEST\ranking_report.txt
+[14:42:21] Saved ranking chart: E:\kntu\Thesis\codes\HOPE-LAST-CODE-FILE\new-tsfnet\eeg10s\eeg10s+fnirs21segment\fnirs-nofilter\Results\EEG_CLEANING_ABLATION_TEST\ranking_summary.png
+[14:42:21] ===== EEG CLEANING ABLATION TEST FINISHED =====
+[14:58:00] ===== EEG CLEANING ABLATION TEST STARTED =====
+[14:58:00] Test subjects: [1, 15, 18, 21, 5, 25]
+[14:58:00] Variants: ['V0_baseline', 'V1_prep', 'V2_prep_autoreject', 'V3_prep_iclabel_all']
+[14:58:00] Output root: E:\kntu\Thesis\codes\HOPE-LAST-CODE-FILE\new-tsfnet\eeg10s\eeg10s+fnirs21segment\fnirs-nofilter\Results\EEG_CLEANING_ABLATION_TEST
+[14:58:01] Loading VP001 from E:\kntu\Thesis\codes\DATA\VP001-EEG ...
+[14:58:01] Loading VP015 from E:\kntu\Thesis\codes\DATA\VP015-EEG ...
+[14:58:20]   VP015 [V0_baseline] done in 11.0s | bads=[] | ICA excluded=2 | still_bad_after=['Fp1', 'Cz', 'Fp2']
+[14:58:26]   VP001 [V0_baseline] done in 16.9s | bads=[] | ICA excluded=4 | still_bad_after=[]
+[14:58:44]   VP015 [V1_prep] done in 17.5s | bads=['T7', 'Cz', 'FC1', 'CP1'] | ICA excluded=3 | still_bad_after=[]
+[14:58:56]   VP001 [V1_prep] done in 23.2s | bads=['Fp2', 'T8', 'T7', 'AFF6h', 'Fp1'] | ICA excluded=2 | still_bad_after=[]
+[15:03:31]   VP015 [V2_prep_autoreject] done in 279.1s | bads=['T7', 'Cz', 'FC1', 'CP1'] | ICA excluded=3 | still_bad_after=[]
+[15:03:59]   VP015 [V3_prep_iclabel_all] done in 20.4s | bads=['T7', 'Cz', 'FC1', 'CP1'] | ICA excluded=3 | still_bad_after=[]
+[15:03:59] Loading VP018 from E:\kntu\Thesis\codes\DATA\VP018-EEG ...
+[15:04:09]   VP001 [V2_prep_autoreject] done in 305.0s | bads=['Fp2', 'T8', 'T7', 'AFF6h', 'Fp1'] | ICA excluded=2 | still_bad_after=[]
+[15:04:44]   VP001 [V3_prep_iclabel_all] done in 26.3s | bads=['Fp2', 'T8', 'T7', 'AFF6h', 'Fp1'] | ICA excluded=2 | still_bad_after=[]
+[15:04:44] Loading VP021 from E:\kntu\Thesis\codes\DATA\VP021-EEG ...
+[15:04:56]   VP018 [V0_baseline] done in 47.2s | bads=[] | ICA excluded=3 | still_bad_after=['Cz', 'Fp2', 'O2']
+[15:05:22]   VP021 [V0_baseline] done in 28.5s | bads=[] | ICA excluded=3 | still_bad_after=['CP1', 'CP2']
+[15:06:01]   VP018 [V1_prep] done in 57.3s | bads=['POz', 'Fp1', 'O2', 'Cz', 'Fp2'] | ICA excluded=2 | still_bad_after=[]
+[15:06:09]   VP021 [V1_prep] done in 39.2s | bads=['CP2', 'O2', 'Fp2', 'CP1', 'FC1', 'FC5', 'Fp1'] | ICA excluded=2 | still_bad_after=[]
+[15:10:58]   VP021 [V2_prep_autoreject] done in 282.4s | bads=['CP2', 'O2', 'Fp2', 'CP1', 'FC1', 'FC5', 'Fp1'] | ICA excluded=2 | still_bad_after=[]
+[15:11:23]   VP018 [V2_prep_autoreject] done in 315.4s | bads=['POz', 'Fp1', 'O2', 'Cz', 'Fp2'] | ICA excluded=2 | still_bad_after=[]
+[15:11:34]   VP021 [V3_prep_iclabel_all] done in 30.2s | bads=['CP2', 'O2', 'Fp2', 'CP1', 'FC1', 'FC5', 'Fp1'] | ICA excluded=2 | still_bad_after=[]
+[15:11:34] Loading VP005 from E:\kntu\Thesis\codes\DATA\VP005-EEG ...
+[15:12:03]   VP005 [V0_baseline] done in 21.9s | bads=[] | ICA excluded=5 | still_bad_after=['P4']
+[15:12:14]   VP018 [V3_prep_iclabel_all] done in 44.3s | bads=['POz', 'Fp1', 'O2', 'Cz', 'Fp2'] | ICA excluded=2 | still_bad_after=[]
+[15:12:14] Loading VP025 from E:\kntu\Thesis\codes\DATA\VP025-EEG ...
+[15:12:34]   VP025 [V0_baseline] done in 12.8s | bads=[] | ICA excluded=3 | still_bad_after=['Fp2', 'FC6', 'T8']
+[15:12:39]   VP005 [V1_prep] done in 29.3s | bads=['Fp2', 'P4', 'CP1', 'Fp1'] | ICA excluded=4 | still_bad_after=[]
+[15:12:58]   VP025 [V1_prep] done in 18.1s | bads=['AFF6h', 'FC6', 'Fp1', 'T8', 'Fp2'] | ICA excluded=2 | still_bad_after=['Fp1', 'Fp2']
+[15:16:55]   VP005 [V2_prep_autoreject] done in 249.0s | bads=['Fp2', 'P4', 'CP1', 'Fp1'] | ICA excluded=4 | still_bad_after=[]
+[15:16:56]   VP025 [V2_prep_autoreject] done in 231.5s | bads=['AFF6h', 'FC6', 'Fp1', 'T8', 'Fp2'] | ICA excluded=2 | still_bad_after=['Fp1', 'Fp2']
+[15:17:20]   VP025 [V3_prep_iclabel_all] done in 17.7s | bads=['AFF6h', 'FC6', 'Fp1', 'T8', 'Fp2'] | ICA excluded=2 | still_bad_after=['Fp1', 'Fp2']
+[15:17:30]   VP005 [V3_prep_iclabel_all] done in 28.5s | bads=['Fp2', 'P4', 'CP1', 'Fp1'] | ICA excluded=7 | still_bad_after=[]
+[15:17:30] Saved combined metrics table: E:\kntu\Thesis\codes\HOPE-LAST-CODE-FILE\new-tsfnet\eeg10s\eeg10s+fnirs21segment\fnirs-nofilter\Results\EEG_CLEANING_ABLATION_TEST\all_metrics.csv
+[15:17:30] Saved ranking report: E:\kntu\Thesis\codes\HOPE-LAST-CODE-FILE\new-tsfnet\eeg10s\eeg10s+fnirs21segment\fnirs-nofilter\Results\EEG_CLEANING_ABLATION_TEST\ranking_report.txt
+[15:17:30] Saved ranking chart: E:\kntu\Thesis\codes\HOPE-LAST-CODE-FILE\new-tsfnet\eeg10s\eeg10s+fnirs21segment\fnirs-nofilter\Results\EEG_CLEANING_ABLATION_TEST\ranking_summary.png
+[15:17:30] ===== EEG CLEANING ABLATION TEST FINISHED =====

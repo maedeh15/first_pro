@@ -1,0 +1,40 @@
+{
+  "subject": "VP025",
+  "variant": "C4_ssp_autoreject",
+  "runtime_s": 496.6,
+  "n_channels_used": 28,
+  "bad_channels_detected": [
+    "AFF6h",
+    "FC6",
+    "Fp1",
+    "Fp2",
+    "T8"
+  ],
+  "n_bad_channels_detected": 5,
+  "n_ica_components_excluded": 1,
+  "ica_excluded_ids": [
+    0
+  ],
+  "still_bad_after_cleaning": [],
+  "known_persistent_noise_channels": [
+    "Fp1",
+    "Fp2"
+  ],
+  "known_persistent_still_present": [],
+  "target_channel_emg_band_power": {
+    "Fp2": 4.904599873428454e-15,
+    "Fp1": 6.394712524522489e-15
+  },
+  "median_variance_before": 1.713643995691352e-09,
+  "median_variance_after": 1.4244747137381742e-10,
+  "max_variance_ratio_after": 2.04924280223527,
+  "median_emg_band_power_after_30_49hz": 4.1025467777935515e-15,
+  "median_eeg_band_power_retention_ratio_4_30hz": 0.5073062945924134,
+  "filter_band_hz": [
+    1.0,
+    30.0
+  ],
+  "autoreject_epochs_rejected": 155,
+  "autoreject_epochs_total": 645,
+  "autoreject_reject_fraction": 0.24
+}
