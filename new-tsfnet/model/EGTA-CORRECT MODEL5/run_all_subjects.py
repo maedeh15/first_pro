@@ -315,6 +315,13 @@ _arg_parser.add_argument("--data-root", type=str, default=None,
                                "the baseline DATA_ROOT below, prior behavior. For the shared-"
                                "grid ablation pass the '..._fnirsbboxEEG' folder produced by "
                                "Preproc_tsfnet_nback_badch.py --fnirs-grid-bbox eeg.")
+_arg_parser.add_argument("--fusion-fnirs-inject", type=str, default="none",
+                          choices=["none", "stage1", "both"],
+                          help="priority-FNIRSINJECT isolated variable: add fNIRS FEATURE maps "
+                               "(segment/time-averaged, through a zero-initialized 1x1x1 conv) "
+                               "into the fusion stream after EFGF1 ('stage1') or after both "
+                               "EFGF1 and EFGF2 ('both'). Default 'none' = prior behavior "
+                               "bit-for-bit (the fusion branch sees fNIRS only via EFGF's alpha).")
 _arg_parser.add_argument("--efgf-lambda", type=float, default=1.0,
                           help="priority-PCCLAMBDA isolated variable: weight of the EFGF PCC "
                                "regularizer (Eq. 12, L_efgf = 1 - PCC(F_eeg, Phi)) in the total "
@@ -682,6 +689,7 @@ DROPOUT = SEED_ARGS.dropout
 CAFE_DROPOUT = SEED_ARGS.cafe_dropout
 CONV_DROPOUT = SEED_ARGS.conv_dropout
 CONV_DROPOUT_TYPE = SEED_ARGS.conv_dropout_type
+FUSION_FNIRS_INJECT = SEED_ARGS.fusion_fnirs_inject
 if CONV_DROPOUT is not None and not (0.0 <= CONV_DROPOUT < 1.0):
     raise ValueError(f"--conv-dropout must be in [0, 1), got {CONV_DROPOUT}")
 STAGE1_MAX_EPOCHS = SEED_ARGS.stage1_max_epochs
@@ -889,6 +897,7 @@ for _nm, _v, _dflt in (("lr", LR, 1e-3), ("wd", WEIGHT_DECAY, 1e-4),
 _G1_SUBTAG = ("_" + "_".join(_G1_PARTS)) if _G1_PARTS else ""
 _DATAROOT_SUBTAG = ("_data-" + os.path.basename(os.path.normpath(DATA_ROOT))
                     if os.path.normpath(DATA_ROOT) != os.path.normpath(_DEFAULT_DATA_ROOT) else "")
+_FNIRSINJECT_SUBTAG = f"_fninj{FUSION_FNIRS_INJECT}" if FUSION_FNIRS_INJECT != "none" else ""
 _CONVDROP_SUBTAG = ((f"_convdo{CONV_DROPOUT:g}" if CONV_DROPOUT is not None else "")
                     + ("_convdoElem" if CONV_DROPOUT_TYPE != "channel" else ""))
 # priority-noiseaware: MUST be in the tag. This is the project's recurring
@@ -915,7 +924,7 @@ else:
     _SWA_SUBTAG = ""
 import hashlib
 _VARIANT_TAG_FULL = (f"{FUSION_COMBINATION}_{_CLIP_SUBTAG}_{_CW_SUBTAG}_{_OS_SUBTAG}"
-                     f"_{_EEG_SUBTAG}_{_CAFE_SUBTAG}_{_ASYM_SUBTAG}{_LAMBDA_SUBTAG}{_CHROMA_SUBTAG}{_MHS_SUBTAG}{_LS_SUBTAG}{_DA_SUBTAG}{_FC_SUBTAG}{_ADABN_SUBTAG}{_TENT_SUBTAG}{_EGTA_SUBTAG}{_G1_SUBTAG}{_CHROMO_SUBTAG}{_ESP_SUBTAG}{_LABRAM_SUBTAG}{_BAND_SUBTAG}{_NORM_SUBTAG}{_EFGF_SUBTAG}{_YPREDNORM_SUBTAG}{_VALMODE_SUBTAG}{_NODECAY_SUBTAG}{_STAGE2_SUBTAG}{_EFGFINIT_SUBTAG}{_NOISEAWARE_SUBTAG}{_SWA_SUBTAG}{_PCCLAMBDA_SUBTAG}{_CONVDROP_SUBTAG}{_DATAROOT_SUBTAG}")
+                     f"_{_EEG_SUBTAG}_{_CAFE_SUBTAG}_{_ASYM_SUBTAG}{_LAMBDA_SUBTAG}{_CHROMA_SUBTAG}{_MHS_SUBTAG}{_LS_SUBTAG}{_DA_SUBTAG}{_FC_SUBTAG}{_ADABN_SUBTAG}{_TENT_SUBTAG}{_EGTA_SUBTAG}{_G1_SUBTAG}{_CHROMO_SUBTAG}{_ESP_SUBTAG}{_LABRAM_SUBTAG}{_BAND_SUBTAG}{_NORM_SUBTAG}{_EFGF_SUBTAG}{_YPREDNORM_SUBTAG}{_VALMODE_SUBTAG}{_NODECAY_SUBTAG}{_STAGE2_SUBTAG}{_EFGFINIT_SUBTAG}{_NOISEAWARE_SUBTAG}{_SWA_SUBTAG}{_PCCLAMBDA_SUBTAG}{_CONVDROP_SUBTAG}{_DATAROOT_SUBTAG}{_FNIRSINJECT_SUBTAG}")
 _VARIANT_HASH = hashlib.md5(_VARIANT_TAG_FULL.encode()).hexdigest()[:10]
 _VARIANT_TAG = _VARIANT_HASH
 RUN_TAG = datetime.datetime.now().strftime("%Y%m%d_%H%M%S") + f"_seed{SEED}_{_VARIANT_TAG}"   # unique per run+seed+variant, so a later comparison run never overwrites this baseline
@@ -1012,6 +1021,7 @@ with CrashSafeLogger(os.path.join(RESULTS_DIR_VARIANT, f"baseline_run_log_{RUN_T
           f"| adabn={ADABN} (priority-E4 isolated variable, TRANSDUCTIVE) "
           f"| [G1] lr={LR} wd={WEIGHT_DECAY} dropout={DROPOUT}/{CAFE_DROPOUT} "
           f"| conv_dropout={CONV_DROPOUT} type={CONV_DROPOUT_TYPE} (priority-CONVDROP) "
+          f"| fusion_fnirs_inject={FUSION_FNIRS_INJECT!r} (priority-FNIRSINJECT) "
           f"epochs={STAGE1_MAX_EPOCHS}/{STAGE1_PATIENCE}/{STAGE2_MAX_EPOCHS} "
           f"warmup={WARMUP_EPOCHS} min_lr_factor={MIN_LR_FACTOR} "
           f"| use_fc_features={USE_FC_FEATURES} (priority-E1 isolated variable, "
@@ -1119,6 +1129,7 @@ with CrashSafeLogger(os.path.join(RESULTS_DIR_VARIANT, f"baseline_run_log_{RUN_T
                 dropout=DROPOUT, cafe_dropout=CAFE_DROPOUT,
                 conv_dropout=CONV_DROPOUT,                # priority-CONVDROP: None (default) = use dropout
                 conv_dropout_type=CONV_DROPOUT_TYPE,      # priority-CONVDROP: "channel" (default) = Dropout3d
+                fusion_fnirs_inject=FUSION_FNIRS_INJECT,  # priority-FNIRSINJECT: "none" (default) = paper design
                 stage1_max_epochs=STAGE1_MAX_EPOCHS, stage1_patience=STAGE1_PATIENCE,
                 stage2_max_epochs=STAGE2_MAX_EPOCHS,
                 warmup_epochs=WARMUP_EPOCHS, min_lr_factor=MIN_LR_FACTOR,

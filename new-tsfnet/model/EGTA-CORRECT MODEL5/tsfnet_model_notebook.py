@@ -1167,8 +1167,13 @@ class TSFNet(nn.Module):
                  eeg_band_d_model=32, eeg_band_embed_dim=32,
                  norm_mode="batch", norm_groups=8,
                  efgf_gate_mode="clamp", efgf_gate_init=-6.0,
-                 conv_dropout=None, conv_dropout_type="channel"):
+                 conv_dropout=None, conv_dropout_type="channel",
+                 fusion_fnirs_inject="none"):
         super().__init__()
+        if fusion_fnirs_inject not in ("none", "stage1", "both"):
+            raise ValueError(f"fusion_fnirs_inject must be 'none', 'stage1' or 'both', "
+                             f"got {fusion_fnirs_inject!r}")
+        self.fusion_fnirs_inject = fusion_fnirs_inject
         if efgf_gate_mode not in ("clamp", "sigmoid"):
             raise ValueError(f"efgf_gate_mode must be 'clamp' or 'sigmoid', got {efgf_gate_mode!r}")
         if fusion_combination not in ("paper_mean", "wsum", "gated"):
@@ -1400,6 +1405,31 @@ class TSFNet(nn.Module):
         self.efgf1 = EFGFLayer(channels=16, eeg_kernel=(2, 2, 6), fnirs_kernel=(2, 2, 3), gate_mode=efgf_gate_mode, gate_init=efgf_gate_init)
         # EFGF stage 2: operates on conv2 outputs (channels=32, both kernels = 2x2x3 per Table1)
         self.efgf2 = EFGFLayer(channels=32, eeg_kernel=(2, 2, 3), fnirs_kernel=(2, 2, 3), gate_mode=efgf_gate_mode, gate_init=efgf_gate_init)
+        # priority-FNIRSINJECT: in the paper's design the fusion branch is fed
+        # by x_eeg ONLY; fNIRS reaches it solely through alpha * sigmoid(map)
+        # inside EFGF's attention Phi, and alpha converged to ~0.14 in run60,
+        # i.e. a very thin channel -- consistent with fusion (0.584) never
+        # beating fNIRS alone (0.596). This adds fNIRS FEATURES to the fusion
+        # stream: the fNIRS branch's stage-k map, averaged over segments and
+        # time (a spatial activation map, same C x H x W as the fusion map at
+        # that stage), passed through a 1x1x1 conv and ADDED after EFGF-k,
+        # broadcast over time.
+        # Zero-initialized weight AND bias: at step 0 the forward pass equals
+        # the baseline exactly, yet d(out)/d(W) = the fNIRS map != 0, so the
+        # model can learn to open this path (unlike zero-init x zero-gate,
+        # whose gradients are both zero). Built from a saved/restored RNG
+        # state so every module constructed later initializes exactly as in
+        # the baseline (rule 6). "none" (default) builds nothing.
+        if fusion_fnirs_inject != "none":
+            _rng_state = torch.get_rng_state()
+            try:
+                self.fnirs_inject1 = nn.Conv3d(16, 16, kernel_size=1)
+                nn.init.zeros_(self.fnirs_inject1.weight); nn.init.zeros_(self.fnirs_inject1.bias)
+                if fusion_fnirs_inject == "both":
+                    self.fnirs_inject2 = nn.Conv3d(32, 32, kernel_size=1)
+                    nn.init.zeros_(self.fnirs_inject2.weight); nn.init.zeros_(self.fnirs_inject2.bias)
+            finally:
+                torch.set_rng_state(_rng_state)
         # NOTE: efgf1/efgf2 consume eeg_s1/eeg_s2 (the pre-pooling conv feature
         # maps from self.eeg_branch), NEVER eeg_pooled -- see TSFNet.forward.
         # This is why eeg_temporal_mode is safe to change in isolation: it
@@ -1587,8 +1617,14 @@ class TSFNet(nn.Module):
         x_eeg_5d = x_eeg.unsqueeze(1)
         fus_s1 = self.fusion_branch.conv1(x_eeg_5d)                     # (B, 16, 8, 8, 100)
         fused1, eeg_pcc1, phi_pcc1 = self.efgf1(eeg_s1, fn_s1, fus_s1)
+        if self.fusion_fnirs_inject != "none":
+            # priority-FNIRSINJECT: fn_s1 (B, S, 16, 8, 8, Tf) -> mean over
+            # segments and time -> (B, 16, 8, 8, 1), broadcast over EEG time.
+            fused1 = fused1 + self.fnirs_inject1(fn_s1.mean(dim=(1, 5)).unsqueeze(-1))
         fus_s2 = self.fusion_branch.conv2(fused1)                       # (B, 32, 4, 4, 50)
         fused2, eeg_pcc2, phi_pcc2 = self.efgf2(eeg_s2, fn_s2, fus_s2)
+        if self.fusion_fnirs_inject == "both":
+            fused2 = fused2 + self.fnirs_inject2(fn_s2.mean(dim=(1, 5)).unsqueeze(-1))
         fusion_pooled_final = fused2.mean(dim=-1)                       # GAP over time -> (B, 32, 4, 4)
 
         enhanced_fusion, enhanced_fnirs, cafe_hsic_loss = self.cafe(fusion_pooled_final, fn_pooled)
@@ -3486,6 +3522,7 @@ def run_subject_cross_session(subject_dir, subject_id, device="cuda" if torch.cu
                                use_fc_features=False, fc_num_channels=28, fc_embed_dim=64,
                                adabn=False, dropout=0.5, cafe_dropout=0.3,
                                conv_dropout=None, conv_dropout_type="channel",
+                               fusion_fnirs_inject="none",
                                fnirs_num_chromophores=2, eeg_spatial_mode="none",
                                eeg_spatial_layers=2, eeg_spatial_heads=4,
                                eeg_spatial_d_model=64,
@@ -3901,6 +3938,7 @@ def run_subject_cross_session(subject_dir, subject_id, device="cuda" if torch.cu
                         fc_embed_dim=fc_embed_dim,
                         dropout=dropout, cafe_dropout=cafe_dropout,
                         conv_dropout=conv_dropout, conv_dropout_type=conv_dropout_type,
+                        fusion_fnirs_inject=fusion_fnirs_inject,
                         fnirs_num_chromophores=fnirs_num_chromophores,
                         eeg_spatial_mode=eeg_spatial_mode,
                         eeg_spatial_layers=eeg_spatial_layers,
