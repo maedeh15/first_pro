@@ -463,6 +463,7 @@ def main():
     rows = []
     # Pooled decisions across every subject and fold, for one grand estimate
     # that is not an average-of-averages over 9-trial folds.
+    trial_rows = []   # one row per block, final head -- consumed by capacity_ceiling_check.py
     pooled = {h: {"win_true": [], "win_pred": [], "tri_true": [], "tri_pred": [],
                   "tri_pred_vote": []} for h in HEADS}
 
@@ -532,6 +533,13 @@ def main():
                 pooled[h]["tri_pred_vote"].append(tri_pred_vote)
 
             rows.append(row)
+            fp = posteriors["final"]
+            for t in np.unique(tri_ids_win):
+                mp = fp[tri_ids_win == t].mean(axis=0)
+                trial_rows.append({"subject_id": subject_id, "test_session": int(test_session),
+                                   "trial_id": int(t), "label": int(y_true_win[tri_ids_win == t][0]),
+                                   "pred": int(mp.argmax()), "p0": float(mp[0]),
+                                   "p1": float(mp[1]), "p2": float(mp[2])})
             print(f"[{subject_id} s{test_session}] "
                   f"window acc={row['final_win_acc']:.4f} -> "
                   f"trial acc={row['final_trial_acc']:.4f} "
@@ -775,6 +783,12 @@ def main():
     print()
     print(f"[written] {csv_path}")
     print(f"[written] {json_path}")
+    trials_path = os.path.join(results_dir, f"{out_prefix}_trials.csv")
+    with open(trials_path, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=list(trial_rows[0]))
+        w.writeheader()
+        w.writerows(trial_rows)
+    print(f"[written] {trials_path}")
 
 
 if __name__ == "__main__":
