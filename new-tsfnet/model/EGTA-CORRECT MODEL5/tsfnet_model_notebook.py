@@ -1128,6 +1128,47 @@ class ConnectivityBranch(nn.Module):
         return self.net(flat)
 
 
+class ERPBranch(nn.Module):
+    """priority-ERP: digit-locked ERP pathway.
+
+    Input: (B, 28, 200) -- per window, the average of the ~4-5 digit-locked
+    epochs [-0.2, +0.8) s that fit inside it (built by build_erp_windows.py
+    from the SAVED channel-space window, so normalization matches the model's
+    input). The main EEG branch convolves the raw window with stride 6 and
+    averages over time, which mixes ~5 P300s at different phases; this branch
+    sees them aligned to stimulus onset, where the only visible 2-back vs
+    3-back difference in this dataset lives (Pz/Cz, 0.3-0.5 s;
+    Test2-5band-feq/run_d01b_stimulus_locked_erp.png).
+
+    xDAWN-style and deliberately small (~2.9K parameters before the
+    projections): a 1x1 spatial filter to a few virtual channels, one 125 ms
+    temporal convolution, BatchNorm (adapted by AdaBN like the rest), then
+    average pooling into 10 bins of 100 ms -- coarse enough to regularize,
+    fine enough to keep P300 LATENCY, which a global average would destroy.
+    """
+
+    def __init__(self, n_channels=28, n_times=200, n_spatial=4, n_temporal=8,
+                 n_bins=10, embed_dim=32, dropout=0.3):
+        super().__init__()
+        self.n_channels, self.n_times = n_channels, n_times
+        self.spatial = nn.Conv1d(n_channels, n_spatial, kernel_size=1, bias=False)
+        self.temporal = nn.Conv1d(n_spatial, n_temporal, kernel_size=25, padding=12)
+        self.bn = nn.BatchNorm1d(n_temporal)
+        self.act = nn.ELU()
+        self.pool = nn.AdaptiveAvgPool1d(n_bins)
+        self.embed = nn.Sequential(nn.Flatten(), nn.Linear(n_temporal * n_bins, embed_dim),
+                                   nn.ELU(), nn.Dropout(dropout))
+        self.embed_dim = embed_dim
+
+    def forward(self, x_erp):
+        if x_erp.dim() != 3 or x_erp.shape[1:] != (self.n_channels, self.n_times):
+            raise ValueError(f"ERPBranch expects (B, {self.n_channels}, {self.n_times}), got "
+                             f"{tuple(x_erp.shape)} -- is the dataset built with load_erp=True "
+                             f"and were the ERP files made by build_erp_windows.py?")
+        h = self.act(self.bn(self.temporal(self.spatial(x_erp))))
+        return self.embed(self.pool(h))
+
+
 class TSFNet(nn.Module):
     """
     num_classes=3 (0-/2-/3-back) -- the paper's original tasks (MI, MA, WG)
@@ -1168,8 +1209,20 @@ class TSFNet(nn.Module):
                  norm_mode="batch", norm_groups=8,
                  efgf_gate_mode="clamp", efgf_gate_init=-6.0,
                  conv_dropout=None, conv_dropout_type="channel",
-                 fusion_fnirs_inject="none"):
+                 fusion_fnirs_inject="none", erp_branch="none"):
         super().__init__()
+        # priority-ERP: "eeg" feeds the ERP embedding into the EEG classifier's
+        # input, "eeg_fusion" into both the EEG and the fusion classifiers'.
+        # The ERP tensor travels in the x_chan batch slot (see NBackDataset
+        # load_erp), which only the mhsa / band / LaBraM modes otherwise read --
+        # hence the exclusivity check.
+        if erp_branch not in ("none", "eeg", "eeg_fusion"):
+            raise ValueError(f"erp_branch must be 'none', 'eeg' or 'eeg_fusion', got {erp_branch!r}")
+        if erp_branch != "none" and (eeg_spatial_mode != "none" or eeg_band_mode != "none"
+                                     or eeg_backbone_mode != "native"):
+            raise ValueError("erp_branch uses the x_chan slot and cannot be combined with "
+                             "eeg_spatial_mode / eeg_band_mode / a LaBraM eeg_backbone_mode")
+        self.erp_mode = erp_branch
         if fusion_fnirs_inject not in ("none", "stage1", "both"):
             raise ValueError(f"fusion_fnirs_inject must be 'none', 'stage1' or 'both', "
                              f"got {fusion_fnirs_inject!r}")
@@ -1495,6 +1548,23 @@ class TSFNet(nn.Module):
         clf_fusion_in_dim = feat_dim + (fc_embed_dim if use_fc_features else 0)
         self.clf_fusion = BranchClassifier(clf_fusion_in_dim, num_classes, dropout=dropout)
         self.clf_fnirs = BranchClassifier(feat_dim, num_classes, dropout=dropout)
+        if erp_branch != "none":
+            # Zero-initialized projections: the ERP embedding is ADDED to the
+            # classifier inputs, so at step 0 every output equals the
+            # baseline's; the projection weights still get a non-zero
+            # gradient (the embedding), so the path opens after the first
+            # step. Saved/restored RNG: all baseline modules initialize as in
+            # run60 (rule 6).
+            _rng_state = torch.get_rng_state()
+            try:
+                self.erp_branch = ERPBranch(dropout=cafe_dropout)
+                self.erp_to_eeg = nn.Linear(self.erp_branch.embed_dim, clf_eeg_in_dim)
+                nn.init.zeros_(self.erp_to_eeg.weight); nn.init.zeros_(self.erp_to_eeg.bias)
+                if erp_branch == "eeg_fusion":
+                    self.erp_to_fusion = nn.Linear(self.erp_branch.embed_dim, clf_fusion_in_dim)
+                    nn.init.zeros_(self.erp_to_fusion.weight); nn.init.zeros_(self.erp_to_fusion.bias)
+            finally:
+                torch.set_rng_state(_rng_state)
 
         # Decision-level fusion weights w1 (eeg), w2 (fusion), w3 (fnirs) -- Eq. 4,
         # obtained via sigmoid of trainable raw parameters.
@@ -1667,6 +1737,9 @@ class TSFNet(nn.Module):
                     "Re-run preprocessing with ENABLE_EEG_CHANNEL_SPACE=True.")
             band_embed, band_gate_value = self.eeg_band_branch(x_chan)
             eeg_flat = torch.cat([eeg_flat, band_embed], dim=-1)
+        erp_embed = self.erp_branch(x_chan) if self.erp_mode != "none" else None   # priority-ERP
+        if erp_embed is not None:
+            eeg_flat = eeg_flat + self.erp_to_eeg(erp_embed)
         y_eeg_native = self.clf_eeg(eeg_flat)
 
         y_labram = None
@@ -1710,6 +1783,8 @@ class TSFNet(nn.Module):
             fusion_clf_input = torch.cat([enhanced_fusion, conn_embed], dim=-1)
         else:
             fusion_clf_input = enhanced_fusion
+        if self.erp_mode == "eeg_fusion":
+            fusion_clf_input = fusion_clf_input + self.erp_to_fusion(erp_embed)
         y_fusion = self.clf_fusion(fusion_clf_input)
         y_fnirs = self.clf_fnirs(enhanced_fnirs)
 
@@ -2308,7 +2383,7 @@ class NBackDataset(Dataset):
     evaluate's core loops were updated (via _unpack_batch below) to
     additionally accept the 4-tuple form."""
 
-    def __init__(self, subject_dir, subject_id, indices=None):
+    def __init__(self, subject_dir, subject_id, indices=None, load_erp=False):
         eeg = np.load(os.path.join(subject_dir, f"{subject_id}_eeg_windows.npy"))
         fnirs = np.load(os.path.join(subject_dir, f"{subject_id}_fnirs_windows.npy"))
         labels = np.load(os.path.join(subject_dir, f"{subject_id}_labels.npy"))
@@ -2318,7 +2393,29 @@ class NBackDataset(Dataset):
         conn_path = os.path.join(subject_dir, f"{subject_id}_eeg_connectivity.npy")
         connectivity = np.load(conn_path) if os.path.exists(conn_path) else None
         chan_path = os.path.join(subject_dir, f"{subject_id}_eeg_channel_windows.npy")
-        channels = np.load(chan_path) if os.path.exists(chan_path) else None
+        if load_erp:
+            # priority-ERP: the (N, 28, 200) ERP tensor takes the x_chan slot
+            # (see TSFNet's erp_branch). Refuse an ERP file that was not built
+            # for exactly this window set -- a silent misalignment would pair
+            # every window with another window's ERP.
+            import hashlib, json as _json
+            erp_path = os.path.join(subject_dir, f"{subject_id}_erp_windows.npy")
+            meta_path = os.path.join(subject_dir, f"{subject_id}_erp_meta.json")
+            if not (os.path.exists(erp_path) and os.path.exists(meta_path)):
+                raise FileNotFoundError(f"{erp_path} (or its _erp_meta.json) is missing -- run "
+                                        f"build_erp_windows.py first")
+            with open(meta_path, encoding="utf-8") as _f:
+                _meta = _json.load(_f)
+            _h = hashlib.sha1()
+            for _a in (labels, trial_ids, session_ids):
+                _h.update(np.ascontiguousarray(_a).astype(np.int64).tobytes())
+            if _meta.get("fingerprint") != _h.hexdigest():
+                raise ValueError(f"{erp_path} was built for a different window set than "
+                                 f"{subject_id}'s current .npy files -- rerun build_erp_windows.py "
+                                 f"--overwrite")
+            channels = np.load(erp_path)
+        else:
+            channels = np.load(chan_path) if os.path.exists(chan_path) else None
 
         if indices is not None:
             eeg, fnirs, labels = eeg[indices], fnirs[indices], labels[indices]
@@ -3522,7 +3619,7 @@ def run_subject_cross_session(subject_dir, subject_id, device="cuda" if torch.cu
                                use_fc_features=False, fc_num_channels=28, fc_embed_dim=64,
                                adabn=False, dropout=0.5, cafe_dropout=0.3,
                                conv_dropout=None, conv_dropout_type="channel",
-                               fusion_fnirs_inject="none",
+                               fusion_fnirs_inject="none", erp_branch="none",
                                fnirs_num_chromophores=2, eeg_spatial_mode="none",
                                eeg_spatial_layers=2, eeg_spatial_heads=4,
                                eeg_spatial_d_model=64,
@@ -3713,7 +3810,7 @@ def run_subject_cross_session(subject_dir, subject_id, device="cuda" if torch.cu
         if not (isinstance(_lam, (int, float)) and _lam >= 0.0 and _lam == _lam):
             raise ValueError(f"{_name} must be a finite number >= 0, got {_lam!r} "
                              f"(priority-PCCLAMBDA; 1.0 = paper Eq. 5, 0.0 = term disabled)")
-    full = NBackDataset(subject_dir, subject_id)
+    full = NBackDataset(subject_dir, subject_id, load_erp=(erp_branch != "none"))
     session_ids = full.session_ids
     labels_np = full.labels.numpy()
     trial_ids = full.trial_ids
@@ -3939,7 +4036,7 @@ def run_subject_cross_session(subject_dir, subject_id, device="cuda" if torch.cu
                         fc_embed_dim=fc_embed_dim,
                         dropout=dropout, cafe_dropout=cafe_dropout,
                         conv_dropout=conv_dropout, conv_dropout_type=conv_dropout_type,
-                        fusion_fnirs_inject=fusion_fnirs_inject,
+                        fusion_fnirs_inject=fusion_fnirs_inject, erp_branch=erp_branch,
                         fnirs_num_chromophores=fnirs_num_chromophores,
                         eeg_spatial_mode=eeg_spatial_mode,
                         eeg_spatial_layers=eeg_spatial_layers,

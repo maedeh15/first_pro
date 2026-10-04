@@ -169,6 +169,7 @@ p.add_argument("--dropout", type=float, default=0.5)
 p.add_argument("--cafe-dropout", type=float, default=0.3)
 p.add_argument("--eeg-temporal-mode", type=str, default="gap", choices=["gap", "gap_logvar", "bilstm"])
 p.add_argument("--fusion-fnirs-inject", type=str, default="none", choices=["none", "stage1", "both"])
+p.add_argument("--erp-branch", type=str, default="none", choices=["none", "eeg", "eeg_fusion"])
 p.add_argument("--eeg-lstm-hidden", type=int, default=64)
 p.add_argument("--eeg-readout-mode", type=str, default="h_n",
                choices=["h_n", "last_step", "mean_pool"])
@@ -299,6 +300,7 @@ def collect_fold_posteriors(full, test_idx, ckpt_path, device, batch_size, adabn
         efgf_gate_mode=ARGS.efgf_gate_mode,
         efgf_gate_init=ARGS.efgf_gate_init,
         fusion_fnirs_inject=ARGS.fusion_fnirs_inject,
+        erp_branch=ARGS.erp_branch,
     ).to(device)
 
     state = torch.load(ckpt_path, map_location=device)
@@ -471,7 +473,7 @@ def main():
             continue
 
         try:
-            full = NBackDataset(subject_dir, subject_id)
+            full = NBackDataset(subject_dir, subject_id, load_erp=(ARGS.erp_branch != "none"))
         except Exception as exc:
             print(f"[{subject_id}] SKIP -- could not load dataset: {exc}")
             continue
