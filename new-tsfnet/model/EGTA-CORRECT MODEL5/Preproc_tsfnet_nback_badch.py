@@ -130,6 +130,13 @@ _arg_parser.add_argument("--fnirs-grid-bbox", type=str, default="own", choices=[
                                "so the same scalp point lands in the same (h,w) cell in both "
                                "modalities. 'eeg' writes to a SEPARATE output folder "
                                "(<OUTPUT_PATH>_fnirsbboxEEG) and never touches the baseline data.")
+_arg_parser.add_argument("--fnirs-seg-start", type=float, default=0.0,
+                          help="priority-FNIRSSHIFT: start of the fNIRS segment coverage relative to "
+                               "the EEG window start, in seconds. 0.0 (default) = prior behavior "
+                               "bit-for-bit (21 segments covering [t, t+23] s). Negative values move "
+                               "the coverage earlier: less post-task recovery in late windows, more "
+                               "pre-task time in early windows. Must be a multiple of the 1 s step. "
+                               "A non-zero value writes to a SEPARATE output folder.")
 _cli_args, _ = _arg_parser.parse_known_args()
 
 # ============================================================================
@@ -188,6 +195,11 @@ BASELINE_OUTPUT_PATH = OUTPUT_PATH
 FNIRS_GRID_BBOX = _cli_args.fnirs_grid_bbox
 if FNIRS_GRID_BBOX != "own":
     OUTPUT_PATH = OUTPUT_PATH + "_fnirsbbox" + FNIRS_GRID_BBOX.upper()
+FNIRS_SEG_START = float(_cli_args.fnirs_seg_start)
+if abs(FNIRS_SEG_START - round(FNIRS_SEG_START)) > 1e-9:
+    raise ValueError(f"--fnirs-seg-start must be a whole number of seconds, got {FNIRS_SEG_START}")
+if FNIRS_SEG_START != 0.0:
+    OUTPUT_PATH = OUTPUT_PATH + f"_fnirsshift{FNIRS_SEG_START:+g}"
 
 # NOTE (confirmed from Dataset_description_MATLAB.pdf / Shin et al. 2018, Sci Data): 26 subjects,
 # 3 sessions/subject, 9 trials/session (3 repeats x 0-/2-/3-back, counterbalanced order) -> 27
@@ -1574,7 +1586,7 @@ def extract_windows(eeg_raw_filtered, eeg_pos_3d, events, fnirs_grid, fnirs_ev_t
 
             fnirs_segments, valid = [], True
             for seg_idx in range(FNIRS_NUM_SEGMENTS):
-                seg_offset = offset + seg_idx * WINDOW_STEP
+                seg_offset = offset + FNIRS_SEG_START + seg_idx * WINDOW_STEP   # priority-FNIRSSHIFT (0.0 = prior)
                 w_start_f = int(np.round((fnirs_event_time + seg_offset) * SFREQ_FNIRS))
                 w_end_f = w_start_f + win_samp_fnirs
                 if w_start_f < 0 or w_end_f > fnirs_grid.shape[0]:
@@ -2078,6 +2090,7 @@ def process_subject(subject_id):
             "labels_distribution": np.bincount(labels).tolist(),
             "window_len_eeg_s": WINDOW_LEN_EEG,
             "fnirs_grid_bbox": FNIRS_GRID_BBOX,                   # priority-GRIDALIGN
+            "fnirs_seg_start_s": FNIRS_SEG_START,                 # priority-FNIRSSHIFT
             "window_len_fnirs_segment_s": WINDOW_LEN_FNIRS_SEGMENT,
             "autoreject_windows_enabled": ENABLE_AUTOREJECT_WINDOWS,
             "autoreject_min_windows_threshold": AUTOREJECT_MIN_WINDOWS,
