@@ -315,6 +315,12 @@ _arg_parser.add_argument("--data-root", type=str, default=None,
                                "the baseline DATA_ROOT below, prior behavior. For the shared-"
                                "grid ablation pass the '..._fnirsbboxEEG' folder produced by "
                                "Preproc_tsfnet_nback_badch.py --fnirs-grid-bbox eeg.")
+_arg_parser.add_argument("--pretrained-dir", type=str, default=None,
+                          help="priority-XSUBJ: folder written by pretrain_cross_subject.py "
+                               "(contains pretrain_manifest.json). Each subject's three folds then "
+                               "start from the pretrained model of the subject group that EXCLUDES "
+                               "it, instead of from random weights. Default None = random init, "
+                               "prior behavior. The manifest's seed must equal --seed.")
 _arg_parser.add_argument("--fusion-fnirs-inject", type=str, default="none",
                           choices=["none", "stage1", "both"],
                           help="priority-FNIRSINJECT isolated variable: add fNIRS FEATURE maps "
@@ -804,6 +810,47 @@ DATA_ROOT = SEED_ARGS.data_root or _DEFAULT_DATA_ROOT
 if not os.path.isdir(DATA_ROOT):
     raise FileNotFoundError(f"--data-root does not exist: {DATA_ROOT}")
 SUBJECTS = [f"VP{i:03d}" for i in range(1, 27)]     # VP001..VP026
+
+# priority-XSUBJ: resolve, per subject, the pretrained checkpoint whose
+# pretraining pool did NOT contain that subject. Every leakage-relevant fact
+# is re-checked here rather than trusted from the manifest's file layout.
+PRETRAINED_DIR = SEED_ARGS.pretrained_dir
+PRETRAIN_CKPT = {}
+_PRETRAIN_SUBTAG = ""
+if PRETRAINED_DIR:
+    _man_path = os.path.join(PRETRAINED_DIR, "pretrain_manifest.json")
+    if not os.path.isfile(_man_path):
+        raise FileNotFoundError(f"--pretrained-dir has no pretrain_manifest.json: {_man_path}")
+    with open(_man_path, encoding="utf-8") as _f:
+        _man = json.load(_f)
+    if int(_man["seed"]) != SEED:
+        raise ValueError(f"pretrained models were trained with seed {_man['seed']} but this run "
+                         f"uses --seed {SEED}. Pretrain once per seed so the three seeds stay "
+                         f"independent replicates.")
+    if os.path.normpath(_man["data_root"]) != os.path.normpath(DATA_ROOT):
+        print(f"[pretrained] WARNING: pretraining used data_root={_man['data_root']} but this run "
+              f"uses {DATA_ROOT}")
+    for _g, _info in _man["groups"].items():
+        _pool = set(_info["pool_train"]) | set(_info["pool_val"])
+        for _sid in _info["targets"]:
+            if _sid in _pool:
+                raise ValueError(f"LEAKAGE: {_sid} is a target of group {_g} but is in its "
+                                 f"pretraining pool")
+            if _sid in PRETRAIN_CKPT:
+                raise ValueError(f"{_sid} is a target of more than one group")
+            _ck = os.path.join(PRETRAINED_DIR, _info["checkpoint"])
+            if not os.path.isfile(_ck):
+                raise FileNotFoundError(f"group {_g} checkpoint missing: {_ck} "
+                                        f"(pretraining not finished?)")
+            PRETRAIN_CKPT[_sid] = _ck
+    _missing = [s for s in SUBJECTS if s not in PRETRAIN_CKPT
+                and os.path.isdir(os.path.join(DATA_ROOT, s))]
+    if _missing:
+        raise ValueError(f"no pretrained model covers {_missing} -- rerun pretraining for "
+                         f"their group(s)")
+    _PRETRAIN_SUBTAG = "_pt-" + _man["id"]
+    print(f"[pretrained] {len(PRETRAIN_CKPT)} subjects mapped to {len(_man['groups'])} "
+          f"pretrained models from {PRETRAINED_DIR} (id {_man['id']})")
 RUN_DIAGNOSTICS = SEED_ARGS.run_diagnostics          # True = also make PCA/t-SNE/saliency plots per subject (SLOW: 26 subjects x 3 sessions = 78 diagnostic runs). Off by default; pass --diagnostics to enable.
 # Variant tag distinguishes this isolated ablation (fusion combination formula,
 # plus the now-accepted no-clip setting from priority-1) from any other
@@ -924,7 +971,7 @@ else:
     _SWA_SUBTAG = ""
 import hashlib
 _VARIANT_TAG_FULL = (f"{FUSION_COMBINATION}_{_CLIP_SUBTAG}_{_CW_SUBTAG}_{_OS_SUBTAG}"
-                     f"_{_EEG_SUBTAG}_{_CAFE_SUBTAG}_{_ASYM_SUBTAG}{_LAMBDA_SUBTAG}{_CHROMA_SUBTAG}{_MHS_SUBTAG}{_LS_SUBTAG}{_DA_SUBTAG}{_FC_SUBTAG}{_ADABN_SUBTAG}{_TENT_SUBTAG}{_EGTA_SUBTAG}{_G1_SUBTAG}{_CHROMO_SUBTAG}{_ESP_SUBTAG}{_LABRAM_SUBTAG}{_BAND_SUBTAG}{_NORM_SUBTAG}{_EFGF_SUBTAG}{_YPREDNORM_SUBTAG}{_VALMODE_SUBTAG}{_NODECAY_SUBTAG}{_STAGE2_SUBTAG}{_EFGFINIT_SUBTAG}{_NOISEAWARE_SUBTAG}{_SWA_SUBTAG}{_PCCLAMBDA_SUBTAG}{_CONVDROP_SUBTAG}{_DATAROOT_SUBTAG}{_FNIRSINJECT_SUBTAG}")
+                     f"_{_EEG_SUBTAG}_{_CAFE_SUBTAG}_{_ASYM_SUBTAG}{_LAMBDA_SUBTAG}{_CHROMA_SUBTAG}{_MHS_SUBTAG}{_LS_SUBTAG}{_DA_SUBTAG}{_FC_SUBTAG}{_ADABN_SUBTAG}{_TENT_SUBTAG}{_EGTA_SUBTAG}{_G1_SUBTAG}{_CHROMO_SUBTAG}{_ESP_SUBTAG}{_LABRAM_SUBTAG}{_BAND_SUBTAG}{_NORM_SUBTAG}{_EFGF_SUBTAG}{_YPREDNORM_SUBTAG}{_VALMODE_SUBTAG}{_NODECAY_SUBTAG}{_STAGE2_SUBTAG}{_EFGFINIT_SUBTAG}{_NOISEAWARE_SUBTAG}{_SWA_SUBTAG}{_PCCLAMBDA_SUBTAG}{_CONVDROP_SUBTAG}{_DATAROOT_SUBTAG}{_FNIRSINJECT_SUBTAG}{_PRETRAIN_SUBTAG}")
 _VARIANT_HASH = hashlib.md5(_VARIANT_TAG_FULL.encode()).hexdigest()[:10]
 _VARIANT_TAG = _VARIANT_HASH
 RUN_TAG = datetime.datetime.now().strftime("%Y%m%d_%H%M%S") + f"_seed{SEED}_{_VARIANT_TAG}"   # unique per run+seed+variant, so a later comparison run never overwrites this baseline
@@ -1130,6 +1177,7 @@ with CrashSafeLogger(os.path.join(RESULTS_DIR_VARIANT, f"baseline_run_log_{RUN_T
                 conv_dropout=CONV_DROPOUT,                # priority-CONVDROP: None (default) = use dropout
                 conv_dropout_type=CONV_DROPOUT_TYPE,      # priority-CONVDROP: "channel" (default) = Dropout3d
                 fusion_fnirs_inject=FUSION_FNIRS_INJECT,  # priority-FNIRSINJECT: "none" (default) = paper design
+                init_checkpoint=PRETRAIN_CKPT.get(subject_id),  # priority-XSUBJ: None (default) = random init
                 stage1_max_epochs=STAGE1_MAX_EPOCHS, stage1_patience=STAGE1_PATIENCE,
                 stage2_max_epochs=STAGE2_MAX_EPOCHS,
                 warmup_epochs=WARMUP_EPOCHS, min_lr_factor=MIN_LR_FACTOR,

@@ -3537,6 +3537,7 @@ def run_subject_cross_session(subject_dir, subject_id, device="cuda" if torch.cu
                                val_mode="trial",
                                no_decay_scalars=False,
                                stage2_stop_mode="loss", efgf_gate_init=-6.0,
+                               init_checkpoint=None,
                                **train_kwargs):
     """Sec. 3.6: Hold-Out over all 3 sessions, average of test accuracy/kappa
 
@@ -3951,6 +3952,18 @@ def run_subject_cross_session(subject_dir, subject_id, device="cuda" if torch.cu
                         norm_mode=norm_mode, norm_groups=norm_groups,
                         efgf_gate_mode=efgf_gate_mode,
                         efgf_gate_init=efgf_gate_init).to(device)
+        if init_checkpoint is not None:
+            # priority-XSUBJ: start every fold of this subject from the SAME
+            # cross-subject pretrained weights (a model that never saw this
+            # subject -- enforced by pretrain_cross_subject.py's manifest and
+            # re-checked in run_all_subjects.py). strict=True: a missing or
+            # unexpected key means the architecture flags differ from the
+            # pretraining run, and silently fine-tuning a partly random model
+            # would be worse than failing. None (default) = random init, the
+            # prior behavior.
+            model.load_state_dict(torch.load(init_checkpoint, map_location=device), strict=True)
+            if test_session == sorted(np.unique(session_ids))[0]:
+                print(f"  [pretrained] {subject_id}: every fold starts from {init_checkpoint}")
         ckpt_path = os.path.join(results_dir, f"{subject_id}_session{test_session}_best.pt")
         active_focal_gamma = focal_gamma if class_weighting_scheme == "focal" else None
         if fnirs_chroma_mode != "both" and test_session == sorted(np.unique(session_ids))[0]:
