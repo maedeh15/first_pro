@@ -152,12 +152,25 @@ def convert_batchnorm_to_groupnorm(module, num_groups=8):
 class ConvBlock3D(nn.Module):
     """One 3D-conv layer as specified in Sec. 3.1: Conv3dSame -> ELU -> BN -> Dropout."""
 
-    def __init__(self, in_ch, out_ch, kernel, stride, dropout):
+    def __init__(self, in_ch, out_ch, kernel, stride, dropout, dropout_type="channel"):
         super().__init__()
         self.conv = Conv3dSame(in_ch, out_ch, kernel, stride)
         self.act = nn.ELU()
         self.bn = nn.BatchNorm3d(out_ch)
-        self.drop = nn.Dropout3d(dropout)
+        # priority-CONVDROP: dropout_type="channel" (default) is the original
+        # nn.Dropout3d, which zeroes WHOLE feature channels. With only 16
+        # (conv1) / 32 (conv2) channels and p=0.5, half of every block's
+        # channels are deleted at each step -- very aggressive for a ~415K
+        # model that already hits train_acc=1.0 by epoch 4. "element" uses
+        # nn.Dropout (independent per activation) instead. Neither module
+        # owns parameters, so construction consumes no RNG and every weight
+        # initializes identically either way (rule 6).
+        if dropout_type == "channel":
+            self.drop = nn.Dropout3d(dropout)
+        elif dropout_type == "element":
+            self.drop = nn.Dropout(dropout)
+        else:
+            raise ValueError(f"dropout_type must be 'channel' or 'element', got {dropout_type!r}")
 
     def forward(self, x):
         return self.drop(self.bn(self.act(self.conv(x))))
@@ -170,7 +183,8 @@ class ConvBlock3D(nn.Module):
 # the same convolutional kernel parameters as in the EEG branch are adopted").
 # ----------------------------------------------------------------------------
 class EEGLikeBranch(nn.Module):
-    def __init__(self, dropout=0.5, temporal_mode="gap", lstm_hidden=64, readout_mode="h_n"):
+    def __init__(self, dropout=0.5, temporal_mode="gap", lstm_hidden=64, readout_mode="h_n",
+                 dropout_type="channel"):
         """
         temporal_mode: ISOLATED ABLATION PARAMETER (priority-5, the project's
         largest and most consequential architecture change -- documented as
@@ -243,8 +257,10 @@ class EEGLikeBranch(nn.Module):
         super().__init__()
         self.temporal_mode = temporal_mode
         self.readout_mode = readout_mode
-        self.conv1 = ConvBlock3D(1, 16, kernel=(4, 4, 12), stride=(2, 2, 6), dropout=dropout)
-        self.conv2 = ConvBlock3D(16, 32, kernel=(2, 2, 6), stride=(2, 2, 2), dropout=dropout)
+        self.conv1 = ConvBlock3D(1, 16, kernel=(4, 4, 12), stride=(2, 2, 6), dropout=dropout,
+                                 dropout_type=dropout_type)
+        self.conv2 = ConvBlock3D(16, 32, kernel=(2, 2, 6), stride=(2, 2, 2), dropout=dropout,
+                                 dropout_type=dropout_type)
         if temporal_mode == "bilstm":
             # s2 is (B, 32, 4, 4, 50) -> per-timestep flattened input size is 32*4*4=512
             self.eeg_lstm = nn.LSTM(input_size=32 * 4 * 4, hidden_size=lstm_hidden,
@@ -291,15 +307,17 @@ class EEGLikeBranch(nn.Module):
 # n_segments (which fixes the pos_embed parameter's shape) needed updating.
 # ----------------------------------------------------------------------------
 class FNIRSBranch(nn.Module):
-    def __init__(self, dropout=0.5, n_chromophores=2):
+    def __init__(self, dropout=0.5, n_chromophores=2, dropout_type="channel"):
         super().__init__()
         # priority-G2a: n_chromophores is 2 (HbO, HbR -- the original and
         # default) or 3 (HbO, HbR, HbT). It only changes conv1's in_channels;
         # every downstream shape is identical, so nothing else in the network
         # needs to know about it.
         self.n_chromophores = n_chromophores
-        self.conv1 = ConvBlock3D(n_chromophores, 16, kernel=(4, 4, 6), stride=(2, 2, 2), dropout=dropout)
-        self.conv2 = ConvBlock3D(16, 32, kernel=(2, 2, 3), stride=(2, 2, 2), dropout=dropout)
+        self.conv1 = ConvBlock3D(n_chromophores, 16, kernel=(4, 4, 6), stride=(2, 2, 2), dropout=dropout,
+                                 dropout_type=dropout_type)
+        self.conv2 = ConvBlock3D(16, 32, kernel=(2, 2, 3), stride=(2, 2, 2), dropout=dropout,
+                                 dropout_type=dropout_type)
 
     def forward(self, x_fnirs):
         # x_fnirs: (B, 11, 16, 16, 30, 2) -> (B, Seg, H, W, T, Chrom)
@@ -1121,7 +1139,8 @@ class TSFNet(nn.Module):
                  eeg_band_mode="none", eeg_band_channels=28,
                  eeg_band_d_model=32, eeg_band_embed_dim=32,
                  norm_mode="batch", norm_groups=8,
-                 efgf_gate_mode="clamp", efgf_gate_init=-6.0):
+                 efgf_gate_mode="clamp", efgf_gate_init=-6.0,
+                 conv_dropout=None, conv_dropout_type="channel"):
         super().__init__()
         if efgf_gate_mode not in ("clamp", "sigmoid"):
             raise ValueError(f"efgf_gate_mode must be 'clamp' or 'sigmoid', got {efgf_gate_mode!r}")
@@ -1332,10 +1351,22 @@ class TSFNet(nn.Module):
         # ONLY the EEG branch; fNIRS, Fusion, EFGF, CAFE all remain
         # untouched" -- the fusion branch keeps plain GAP regardless of
         # eeg_temporal_mode.
-        self.eeg_branch = EEGLikeBranch(dropout=dropout, temporal_mode=eeg_temporal_mode,
-                                         lstm_hidden=eeg_lstm_hidden, readout_mode=eeg_readout_mode)
-        self.fusion_branch = EEGLikeBranch(dropout=dropout, temporal_mode="gap")   # always GAP -- separate weights, same architecture (Sec. 3.1)
-        self.fnirs_branch = FNIRSBranch(dropout=dropout, n_chromophores=fnirs_num_chromophores)
+        # priority-CONVDROP: conv_dropout=None (default) means the conv blocks
+        # use `dropout`, exactly as before, so `dropout` keeps its old meaning
+        # (conv blocks + branch classifiers) unless conv_dropout is given. When
+        # it is given, it applies ONLY to the 3D-conv blocks of the EEG,
+        # fusion and fNIRS branches; the branch classifiers below keep
+        # `dropout`. Separating the two is the point: Dropout3d(0.5) on 16
+        # channels is a very different regularizer from Dropout(0.5) on a
+        # 128-unit dense layer, and they should be tunable independently.
+        _conv_p = dropout if conv_dropout is None else conv_dropout
+        self.eeg_branch = EEGLikeBranch(dropout=_conv_p, temporal_mode=eeg_temporal_mode,
+                                         lstm_hidden=eeg_lstm_hidden, readout_mode=eeg_readout_mode,
+                                         dropout_type=conv_dropout_type)
+        self.fusion_branch = EEGLikeBranch(dropout=_conv_p, temporal_mode="gap",
+                                           dropout_type=conv_dropout_type)   # always GAP -- separate weights, same architecture (Sec. 3.1)
+        self.fnirs_branch = FNIRSBranch(dropout=_conv_p, n_chromophores=fnirs_num_chromophores,
+                                        dropout_type=conv_dropout_type)
 
         # EFGF stage 1: operates on conv1 outputs (channels=16, EEG kernel matches Table1
         # "EFGF1 Conv1" = 2x2x6, fNIRS kernel matches "EFGF1 Conv2" = 2x2x3)
@@ -3410,6 +3441,7 @@ def run_subject_cross_session(subject_dir, subject_id, device="cuda" if torch.cu
                                domain_adapt_lambda=0.0,
                                use_fc_features=False, fc_num_channels=28, fc_embed_dim=64,
                                adabn=False, dropout=0.5, cafe_dropout=0.3,
+                               conv_dropout=None, conv_dropout_type="channel",
                                fnirs_num_chromophores=2, eeg_spatial_mode="none",
                                eeg_spatial_layers=2, eeg_spatial_heads=4,
                                eeg_spatial_d_model=64,
@@ -3824,6 +3856,7 @@ def run_subject_cross_session(subject_dir, subject_id, device="cuda" if torch.cu
                         use_fc_features=use_fc_features, fc_num_channels=fc_num_channels,
                         fc_embed_dim=fc_embed_dim,
                         dropout=dropout, cafe_dropout=cafe_dropout,
+                        conv_dropout=conv_dropout, conv_dropout_type=conv_dropout_type,
                         fnirs_num_chromophores=fnirs_num_chromophores,
                         eeg_spatial_mode=eeg_spatial_mode,
                         eeg_spatial_layers=eeg_spatial_layers,

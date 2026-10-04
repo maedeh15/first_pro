@@ -424,6 +424,16 @@ _arg_parser.add_argument("--weight-decay", type=float, default=1e-4,
 _arg_parser.add_argument("--dropout", type=float, default=0.5,
                           help="priority-G1: dropout in the EEG/Fusion/fNIRS branches and branch "
                                "classifiers. Default 0.5 = prior behavior (MSTFDN uses 0.4).")
+_arg_parser.add_argument("--conv-dropout", type=float, default=None,
+                          help="priority-CONVDROP isolated variable: dropout rate for the 3D-conv "
+                               "blocks of the EEG/Fusion/fNIRS branches ONLY (branch classifiers "
+                               "keep --dropout). Default None = use --dropout, i.e. prior behavior "
+                               "bit-for-bit. Sweep candidates: 0.1, 0.2, 0.3.")
+_arg_parser.add_argument("--conv-dropout-type", type=str, default="channel",
+                          choices=["channel", "element"],
+                          help="priority-CONVDROP: 'channel' (default, prior behavior) = "
+                               "nn.Dropout3d, zeroes whole feature channels (16 in conv1, 32 in "
+                               "conv2). 'element' = nn.Dropout, zeroes individual activations.")
 _arg_parser.add_argument("--cafe-dropout", type=float, default=0.3,
                           help="priority-G1: dropout inside CAFE. Default 0.3 = prior behavior.")
 _arg_parser.add_argument("--stage1-max-epochs", type=int, default=100,
@@ -662,6 +672,10 @@ LR = SEED_ARGS.lr
 WEIGHT_DECAY = SEED_ARGS.weight_decay
 DROPOUT = SEED_ARGS.dropout
 CAFE_DROPOUT = SEED_ARGS.cafe_dropout
+CONV_DROPOUT = SEED_ARGS.conv_dropout
+CONV_DROPOUT_TYPE = SEED_ARGS.conv_dropout_type
+if CONV_DROPOUT is not None and not (0.0 <= CONV_DROPOUT < 1.0):
+    raise ValueError(f"--conv-dropout must be in [0, 1), got {CONV_DROPOUT}")
 STAGE1_MAX_EPOCHS = SEED_ARGS.stage1_max_epochs
 STAGE1_PATIENCE = SEED_ARGS.stage1_patience
 STAGE2_MAX_EPOCHS = SEED_ARGS.stage2_max_epochs
@@ -860,6 +874,8 @@ for _nm, _v, _dflt in (("lr", LR, 1e-3), ("wd", WEIGHT_DECAY, 1e-4),
     if _v != _dflt:
         _G1_PARTS.append(f"{_nm}{_v}")
 _G1_SUBTAG = ("_" + "_".join(_G1_PARTS)) if _G1_PARTS else ""
+_CONVDROP_SUBTAG = ((f"_convdo{CONV_DROPOUT:g}" if CONV_DROPOUT is not None else "")
+                    + ("_convdoElem" if CONV_DROPOUT_TYPE != "channel" else ""))
 # priority-noiseaware: MUST be in the tag. This is the project's recurring
 # bug #5 (a new flag not reflected in the results tag, risking silent
 # overwrite of reference checkpoints). Both the probability AND the SNR set
@@ -884,7 +900,7 @@ else:
     _SWA_SUBTAG = ""
 import hashlib
 _VARIANT_TAG_FULL = (f"{FUSION_COMBINATION}_{_CLIP_SUBTAG}_{_CW_SUBTAG}_{_OS_SUBTAG}"
-                     f"_{_EEG_SUBTAG}_{_CAFE_SUBTAG}_{_ASYM_SUBTAG}{_LAMBDA_SUBTAG}{_CHROMA_SUBTAG}{_MHS_SUBTAG}{_LS_SUBTAG}{_DA_SUBTAG}{_FC_SUBTAG}{_ADABN_SUBTAG}{_TENT_SUBTAG}{_EGTA_SUBTAG}{_G1_SUBTAG}{_CHROMO_SUBTAG}{_ESP_SUBTAG}{_LABRAM_SUBTAG}{_BAND_SUBTAG}{_NORM_SUBTAG}{_EFGF_SUBTAG}{_YPREDNORM_SUBTAG}{_VALMODE_SUBTAG}{_NODECAY_SUBTAG}{_STAGE2_SUBTAG}{_EFGFINIT_SUBTAG}{_NOISEAWARE_SUBTAG}{_SWA_SUBTAG}{_PCCLAMBDA_SUBTAG}")
+                     f"_{_EEG_SUBTAG}_{_CAFE_SUBTAG}_{_ASYM_SUBTAG}{_LAMBDA_SUBTAG}{_CHROMA_SUBTAG}{_MHS_SUBTAG}{_LS_SUBTAG}{_DA_SUBTAG}{_FC_SUBTAG}{_ADABN_SUBTAG}{_TENT_SUBTAG}{_EGTA_SUBTAG}{_G1_SUBTAG}{_CHROMO_SUBTAG}{_ESP_SUBTAG}{_LABRAM_SUBTAG}{_BAND_SUBTAG}{_NORM_SUBTAG}{_EFGF_SUBTAG}{_YPREDNORM_SUBTAG}{_VALMODE_SUBTAG}{_NODECAY_SUBTAG}{_STAGE2_SUBTAG}{_EFGFINIT_SUBTAG}{_NOISEAWARE_SUBTAG}{_SWA_SUBTAG}{_PCCLAMBDA_SUBTAG}{_CONVDROP_SUBTAG}")
 _VARIANT_HASH = hashlib.md5(_VARIANT_TAG_FULL.encode()).hexdigest()[:10]
 _VARIANT_TAG = _VARIANT_HASH
 RUN_TAG = datetime.datetime.now().strftime("%Y%m%d_%H%M%S") + f"_seed{SEED}_{_VARIANT_TAG}"   # unique per run+seed+variant, so a later comparison run never overwrites this baseline
@@ -980,6 +996,7 @@ with CrashSafeLogger(os.path.join(RESULTS_DIR_VARIANT, f"baseline_run_log_{RUN_T
           f"| domain_adapt_lambda={DOMAIN_ADAPT_LAMBDA} (priority-C1 isolated variable) "
           f"| adabn={ADABN} (priority-E4 isolated variable, TRANSDUCTIVE) "
           f"| [G1] lr={LR} wd={WEIGHT_DECAY} dropout={DROPOUT}/{CAFE_DROPOUT} "
+          f"| conv_dropout={CONV_DROPOUT} type={CONV_DROPOUT_TYPE} (priority-CONVDROP) "
           f"epochs={STAGE1_MAX_EPOCHS}/{STAGE1_PATIENCE}/{STAGE2_MAX_EPOCHS} "
           f"warmup={WARMUP_EPOCHS} min_lr_factor={MIN_LR_FACTOR} "
           f"| use_fc_features={USE_FC_FEATURES} (priority-E1 isolated variable, "
@@ -1085,6 +1102,8 @@ with CrashSafeLogger(os.path.join(RESULTS_DIR_VARIANT, f"baseline_run_log_{RUN_T
                 efgf_gate_init=EFGF_GATE_INIT,                 # priority-efgfinit  # ISOLATED ABLATION (roadmap priority-1): "egta" = STA-Net EGTA pooling, "none" (default) disables
                 lr=LR, weight_decay=WEIGHT_DECAY,         # priority-G1 (defaults = prior behavior)
                 dropout=DROPOUT, cafe_dropout=CAFE_DROPOUT,
+                conv_dropout=CONV_DROPOUT,                # priority-CONVDROP: None (default) = use dropout
+                conv_dropout_type=CONV_DROPOUT_TYPE,      # priority-CONVDROP: "channel" (default) = Dropout3d
                 stage1_max_epochs=STAGE1_MAX_EPOCHS, stage1_patience=STAGE1_PATIENCE,
                 stage2_max_epochs=STAGE2_MAX_EPOCHS,
                 warmup_epochs=WARMUP_EPOCHS, min_lr_factor=MIN_LR_FACTOR,
