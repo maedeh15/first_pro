@@ -353,13 +353,97 @@ def parse_subjects(spec):
     return [f"VP{i:03d}" for i in ids]
 
 
+def locate_results_dir(folder_name, search_roots, max_depth=4):
+    """Breadth-limited search for a results folder that was moved or renamed.
+
+    Results folders are named results_<hash>_seed<N> by run_all_subjects.py, so
+    the folder NAME is a reliable fingerprint even when the parent path has
+    changed (e.g. the code tree was copied somewhere new). Returns every match,
+    so an ambiguous situation is reported instead of silently picking one.
+    """
+    matches, seen = [], set()
+    for root in search_roots:
+        root = os.path.abspath(root)
+        if not os.path.isdir(root) or root in seen:
+            continue
+        seen.add(root)
+        base_depth = root.rstrip(os.sep).count(os.sep)
+        for dirpath, dirnames, _files in os.walk(root):
+            if dirpath.count(os.sep) - base_depth >= max_depth:
+                dirnames[:] = []                     # stop descending
+                continue
+            if folder_name in dirnames:
+                matches.append(os.path.join(dirpath, folder_name))
+            # skip heavy/irrelevant trees
+            dirnames[:] = [d for d in dirnames
+                           if not d.startswith(".") and d not in ("__pycache__", "visualizations")]
+    return sorted(set(matches))
+
+
 def main():
     device = torch.device(ARGS.device)
-    results_dir = ARGS.results_dir or os.path.join(
-        ARGS.data_root, f"results_{ARGS.variant_hash}_seed{ARGS.seed}")
+    folder_name = f"results_{ARGS.variant_hash}_seed{ARGS.seed}"
+    results_dir = ARGS.results_dir or os.path.join(ARGS.data_root, folder_name)
+
     if not os.path.isdir(results_dir):
-        sys.exit(f"ERROR: results dir not found: {results_dir}\n"
-                 f"Pass --results-dir explicitly, or check --variant-hash/--seed.")
+        print(f"[locate] not found at: {results_dir}")
+        if ARGS.results_dir:
+            sys.exit("ERROR: the --results-dir you passed does not exist.")
+        # The default path is derived from --data-root. When the code tree has
+        # been moved, look for the folder by name around the most likely roots:
+        # the configured data root's ancestors and this script's own ancestors.
+        roots = []
+        for start in (ARGS.data_root, _this_dir):
+            p = os.path.abspath(start)
+            for _ in range(4):                       # p, parent, grandparent, ...
+                roots.append(p)
+                p = os.path.dirname(p)
+        print(f"[locate] searching for '{folder_name}' near the data root and this "
+              f"script (this can take a few seconds) ...")
+        found = locate_results_dir(folder_name, roots)
+        if len(found) == 1:
+            results_dir = found[0]
+            print(f"[locate] FOUND: {results_dir}")
+            # The per-subject .npy folders normally sit next to the results folder.
+            # Only follow it automatically if --data-root itself is missing.
+            if not os.path.isdir(ARGS.data_root):
+                ARGS.data_root = os.path.dirname(results_dir)
+                print(f"[locate] --data-root did not exist; using the results folder's "
+                      f"parent instead: {ARGS.data_root}")
+        elif len(found) > 1:
+            print("[locate] the folder exists in MORE THAN ONE place:")
+            for f in found:
+                print(f"           {f}")
+            sys.exit("ERROR: ambiguous -- pass the right one with --results-dir \"...\"")
+        else:
+            msg = [f"ERROR: could not find '{folder_name}' anywhere near:",
+                   f"         {ARGS.data_root}",
+                   f"         {_this_dir}"]
+            if os.path.isdir(ARGS.data_root):
+                existing = sorted(d for d in os.listdir(ARGS.data_root)
+                                  if d.startswith("results_"))
+                if existing:
+                    msg.append(f"  results_* folders that DO exist in --data-root "
+                               f"({len(existing)}):")
+                    msg += [f"         {d}" for d in existing[:30]]
+                    same_seed = [d for d in existing if d.endswith(f"_seed{ARGS.seed}")]
+                    if same_seed:
+                        msg.append(f"  For seed {ARGS.seed}, candidates are: "
+                                   f"{', '.join(same_seed)} -- check --variant-hash.")
+                else:
+                    msg.append("  --data-root exists but contains no results_* folders.")
+            else:
+                msg.append(f"  --data-root itself does not exist: {ARGS.data_root}")
+            msg.append("  Fix: find the folder in Explorer and pass it with "
+                       "--results-dir \"<full path>\" (and --data-root \"<folder holding "
+                       "VP001..VP026>\" if that moved too).")
+            sys.exit("\n".join(msg))
+
+    # The checkpoints alone are not enough: the per-subject .npy inputs are read
+    # from --data-root/VPxxx. Check up front instead of skipping all 26 subjects.
+    if not os.path.isdir(os.path.join(ARGS.data_root, "VP001")):
+        sys.exit(f"ERROR: --data-root has no VP001 folder: {ARGS.data_root}\n"
+                 f"  Pass --data-root \"<folder that contains VP001..VP026>\".")
 
     out_prefix = ARGS.out_prefix or f"trial_level_eval_seed{ARGS.seed}"
     subjects = parse_subjects(ARGS.subjects)
