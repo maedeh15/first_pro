@@ -167,7 +167,7 @@ p.add_argument("--fnirs-num-segments", type=int, default=21)
 p.add_argument("--cafe-d-model", type=int, default=64)
 p.add_argument("--dropout", type=float, default=0.5)
 p.add_argument("--cafe-dropout", type=float, default=0.3)
-p.add_argument("--eeg-temporal-mode", type=str, default="gap", choices=["gap", "bilstm"])
+p.add_argument("--eeg-temporal-mode", type=str, default="gap", choices=["gap", "gap_logvar", "bilstm"])
 p.add_argument("--eeg-lstm-hidden", type=int, default=64)
 p.add_argument("--eeg-readout-mode", type=str, default="h_n",
                choices=["h_n", "last_step", "mean_pool"])

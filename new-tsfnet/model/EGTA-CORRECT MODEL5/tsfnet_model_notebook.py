@@ -268,8 +268,9 @@ class EEGLikeBranch(nn.Module):
             if readout_mode not in ("h_n", "last_step", "mean_pool"):
                 raise ValueError(f"Unknown readout_mode: {readout_mode!r} "
                                   f"(expected 'h_n', 'last_step', or 'mean_pool')")
-        elif temporal_mode != "gap":
-            raise ValueError(f"Unknown temporal_mode: {temporal_mode!r} (expected 'gap' or 'bilstm')")
+        elif temporal_mode not in ("gap", "gap_logvar"):
+            raise ValueError(f"Unknown temporal_mode: {temporal_mode!r} "
+                             f"(expected 'gap', 'gap_logvar' or 'bilstm')")
 
     def forward(self, x_eeg):
         # x_eeg: (B, 16, 16, 600) -> add channel dim -> (B, 1, 16, 16, 600)
@@ -277,7 +278,15 @@ class EEGLikeBranch(nn.Module):
         # consistently across the whole model, purely a labeling convention.
         x = x_eeg.unsqueeze(1)
         s1 = self.conv1(x)                 # (B, 16, 8, 8, 100)
-        s2 = self.conv2(s1)                # (B, 32, 4, 4, 50)
+        if self.temporal_mode == "gap_logvar":
+            # priority-LOGVAR: identical ops to self.conv2(s1) (conv -> ELU ->
+            # BN -> drop), unrolled only so the PRE-dropout activation is
+            # available. s2 itself -- and therefore EFGF, which consumes it --
+            # is computed exactly as in "gap" mode.
+            s2_pre = self.conv2.bn(self.conv2.act(self.conv2.conv(s1)))
+            s2 = self.conv2.drop(s2_pre)
+        else:
+            s2 = self.conv2(s1)            # (B, 32, 4, 4, 50)
         if self.temporal_mode == "bilstm":
             B, C, H, W, T = s2.shape
             seq = s2.permute(0, 4, 1, 2, 3).reshape(B, T, C * H * W)  # (B, T=50, 512)
@@ -291,6 +300,24 @@ class EEGLikeBranch(nn.Module):
                 pooled = lstm_out[:, -1, :]                           # BUGGY (kept for A/B only) -> (B, 2*hidden)
             else:  # "mean_pool"
                 pooled = lstm_out.mean(dim=1)                         # (B, 2*hidden)
+        elif self.temporal_mode == "gap_logvar":
+            # priority-LOGVAR: the n-back load markers in EEG are BAND POWER
+            # (frontal-midline theta up, parietal alpha down with load), i.e.
+            # signal VARIANCE over time. Plain GAP -- mean(ELU(.)) over time --
+            # is a weak, poorly conditioned proxy for that, and nothing else in
+            # this model squares or log-transforms anything. This adds the
+            # ShallowConvNet/FBCSP-style log-variance next to the paper's GAP.
+            #
+            # Variance is taken on the PRE-dropout activation on purpose:
+            # Dropout3d zeroes whole channels, and a zeroed channel has
+            # variance 0 -> log(1e-6) = -13.8, a large train-time-only outlier
+            # that never occurs at eval (kept channels are also rescaled by
+            # 1/(1-p), inflating their variance by 1/(1-p)^2). The classifier
+            # still has its own dropout. The mean half uses post-dropout s2,
+            # exactly as "gap" does.
+            gap = s2.mean(dim=-1)                                            # (B, 32, 4, 4)
+            logvar = torch.log(torch.clamp(s2_pre.var(dim=-1, unbiased=False), min=1e-6))
+            pooled = torch.cat([gap, logvar], dim=1)                         # (B, 64, 4, 4)
         else:
             pooled = s2.mean(dim=-1)       # GAP over TIME only (Sec. 3.1) -> (B, 32, 4, 4)
         return s1, s2, pooled              # stage1/stage2 maps (for EFGF) + final F_eeg/F_fusion
@@ -1404,6 +1431,8 @@ class TSFNet(nn.Module):
         # the conv feature map's spatial size.
         if eeg_temporal_mode == "bilstm":
             eeg_feat_dim = 2 * eeg_lstm_hidden  # bidirectional -> 2x hidden_size (128 for default hidden=64)
+        elif eeg_temporal_mode == "gap_logvar":
+            eeg_feat_dim = 2 * 4 * 4 * 32  # priority-LOGVAR: [GAP | log-var] -> 1024
         else:
             eeg_feat_dim = 4 * 4 * 32  # F_eeg_flatten (GAP path, unchanged)
         # priority-G4: clf_eeg's input grows by the spatial embedding only when
@@ -1412,7 +1441,22 @@ class TSFNet(nn.Module):
                                           if eeg_spatial_mode == "mhsa" else 0) \
                                        + (eeg_band_embed_dim
                                           if eeg_band_mode == "safe" else 0)
-        self.clf_eeg = BranchClassifier(clf_eeg_in_dim, num_classes, dropout=dropout)
+        if eeg_temporal_mode == "gap_logvar":
+            # priority-LOGVAR, rule 6: a 1024-input Linear draws more random
+            # numbers than the 512-input one, which would shift the init of
+            # EVERY module built after this line (clf_fusion, clf_fnirs, ...)
+            # and confound the comparison. Advance the global RNG exactly as
+            # the baseline would (by building -- and discarding -- the
+            # baseline-sized classifier), then build the real one from the
+            # pre-construction state and restore the post-baseline state.
+            _rng_before = torch.get_rng_state()
+            BranchClassifier(clf_eeg_in_dim - 4 * 4 * 32, num_classes, dropout=dropout)
+            _rng_after_baseline = torch.get_rng_state()
+            torch.set_rng_state(_rng_before)
+            self.clf_eeg = BranchClassifier(clf_eeg_in_dim, num_classes, dropout=dropout)
+            torch.set_rng_state(_rng_after_baseline)
+        else:
+            self.clf_eeg = BranchClassifier(clf_eeg_in_dim, num_classes, dropout=dropout)
         # priority-E1: when use_fc_features=True, clf_fusion's input is
         # [enhanced_fusion ; connectivity_embedding] concatenated (see
         # forward()), so its input dim grows by fc_embed_dim. When False

@@ -182,12 +182,14 @@ _arg_parser.add_argument("--smote-k-neighbors", type=int, default=5,
 # BiLSTM-based replacement, isolated to the EEG-only classification branch
 # alone (see EEGLikeBranch's docstring in the notebook for the full design).
 _arg_parser.add_argument("--eeg-temporal-mode", type=str, default="gap",
-                          choices=["gap", "bilstm"],
+                          choices=["gap", "gap_logvar", "bilstm"],
                           help="EEG branch's temporal pooling for its OWN classifier (y_eeg) "
                                "only -- never affects EFGF/Fusion/CAFE. 'gap' (default): "
                                "paper-exact Global Average Pooling over time. 'bilstm': "
                                "priority-5, replace GAP with a bidirectional LSTM's last "
-                               "time-step output.")
+                               "time-step output. 'gap_logvar': priority-LOGVAR, GAP plus "
+                               "ShallowConvNet-style log-variance over time (band-power proxy), "
+                               "concatenated -> 1024-dim input to the EEG classifier.")
 _arg_parser.add_argument("--eeg-lstm-hidden", type=int, default=64,
                           help="hidden_size for --eeg-temporal-mode bilstm's LSTM (bidirectional, "
                                "so output dim = 2x this). Ignored for 'gap'. Default 64.")
@@ -797,7 +799,9 @@ if CLASS_WEIGHTING_SCHEME == "effective_number":
 elif CLASS_WEIGHTING_SCHEME == "focal":
     _CW_SUBTAG += f"gamma{FOCAL_GAMMA}"
 _OS_SUBTAG = "smoteK" + str(SMOTE_K_NEIGHBORS) if OVERSAMPLING_SCHEME == "smote" else "nosmote"
-_EEG_SUBTAG = f"bilstmH{EEG_LSTM_HIDDEN}{EEG_READOUT_MODE}" if EEG_TEMPORAL_MODE == "bilstm" else "gap"
+_EEG_SUBTAG = (f"bilstmH{EEG_LSTM_HIDDEN}{EEG_READOUT_MODE}" if EEG_TEMPORAL_MODE == "bilstm"
+               else "gaplogvar" if EEG_TEMPORAL_MODE == "gap_logvar"   # priority-LOGVAR: own folder, never "gap"'s
+               else "gap")
 _CAFE_SUBTAG = f"cafe{CAFE_D_MODEL}"
 if ASYMMETRIC_PAIRS:
     _pair_str = "-".join(f"{i}{j}" for i, j in ASYMMETRIC_PAIRS)
