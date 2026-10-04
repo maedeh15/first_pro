@@ -307,6 +307,18 @@ _arg_parser.add_argument("--mhs-lambda", type=float, default=0.0,
                                "treat as a starting point, not a transferred optimum). Default "
                                "0.0 disables it and reproduces prior behavior bit-for-bit "
                                "(see tsfnet_loss's mhs_lambda docstring for why).")
+_arg_parser.add_argument("--efgf-lambda", type=float, default=1.0,
+                          help="priority-PCCLAMBDA isolated variable: weight of the EFGF PCC "
+                               "regularizer (Eq. 12, L_efgf = 1 - PCC(F_eeg, Phi)) in the total "
+                               "loss. The paper's Eq. 5 adds it unweighted, i.e. 1.0, which is "
+                               "the default and reproduces prior behavior bit-for-bit. 0.0 "
+                               "removes the term entirely. Sweep candidates: 0.0, 0.01, 0.1.")
+_arg_parser.add_argument("--cafe-lambda", type=float, default=1.0,
+                          help="priority-PCCLAMBDA isolated variable: weight of the CAFE PCC "
+                               "regularizer (Eq. 13, L_cafe = 1 - PCC(Fe_fnirs, Fe_fusion)) in "
+                               "the total loss. That term pushes the two modality "
+                               "representations toward being correlated (redundant). Default "
+                               "1.0 = paper Eq. 5, bit-exact prior behavior. 0.0 removes it.")
 _arg_parser.add_argument("--label-smoothing", type=float, default=0.0,
                           help="priority-B4 isolated variable: label smoothing strength applied "
                                "to all four loss terms (l_eeg, l_fnirs, l_fusion, l_pred), "
@@ -629,6 +641,8 @@ FNIRS_NUM_SEGMENTS = SEED_ARGS.fnirs_num_segments
 CLASS_COUNT_LEVEL = SEED_ARGS.class_count_level
 FNIRS_CHROMA_MODE = SEED_ARGS.fnirs_chroma_mode
 MHS_LAMBDA = SEED_ARGS.mhs_lambda
+EFGF_LAMBDA = SEED_ARGS.efgf_lambda
+CAFE_LAMBDA = SEED_ARGS.cafe_lambda
 LABEL_SMOOTHING = SEED_ARGS.label_smoothing
 DOMAIN_ADAPT_LAMBDA = SEED_ARGS.domain_adapt_lambda
 USE_FC_FEATURES = SEED_ARGS.use_fc_features
@@ -792,6 +806,8 @@ _CHROMO_SUBTAG = f"_chr{FNIRS_NUM_CHROMOPHORES}" if FNIRS_NUM_CHROMOPHORES != 2 
 _ESP_SUBTAG = (f"_esp{EEG_SPATIAL_MODE}L{EEG_SPATIAL_LAYERS}H{EEG_SPATIAL_HEADS}"
                if EEG_SPATIAL_MODE != "none" else "")
 _MHS_SUBTAG = f"_mhs{MHS_LAMBDA}" if MHS_LAMBDA > 0.0 else ""
+_PCCLAMBDA_SUBTAG = ((f"_efgfL{EFGF_LAMBDA:g}" if EFGF_LAMBDA != 1.0 else "")
+                     + (f"_cafeL{CAFE_LAMBDA:g}" if CAFE_LAMBDA != 1.0 else ""))
 _LS_SUBTAG = f"_ls{LABEL_SMOOTHING}" if LABEL_SMOOTHING > 0.0 else ""
 _DA_SUBTAG = f"_da{DOMAIN_ADAPT_LAMBDA}" if DOMAIN_ADAPT_LAMBDA > 0.0 else ""
 _FC_SUBTAG = "_fc" if USE_FC_FEATURES else ""
@@ -868,7 +884,7 @@ else:
     _SWA_SUBTAG = ""
 import hashlib
 _VARIANT_TAG_FULL = (f"{FUSION_COMBINATION}_{_CLIP_SUBTAG}_{_CW_SUBTAG}_{_OS_SUBTAG}"
-                     f"_{_EEG_SUBTAG}_{_CAFE_SUBTAG}_{_ASYM_SUBTAG}{_LAMBDA_SUBTAG}{_CHROMA_SUBTAG}{_MHS_SUBTAG}{_LS_SUBTAG}{_DA_SUBTAG}{_FC_SUBTAG}{_ADABN_SUBTAG}{_TENT_SUBTAG}{_EGTA_SUBTAG}{_G1_SUBTAG}{_CHROMO_SUBTAG}{_ESP_SUBTAG}{_LABRAM_SUBTAG}{_BAND_SUBTAG}{_NORM_SUBTAG}{_EFGF_SUBTAG}{_YPREDNORM_SUBTAG}{_VALMODE_SUBTAG}{_NODECAY_SUBTAG}{_STAGE2_SUBTAG}{_EFGFINIT_SUBTAG}{_NOISEAWARE_SUBTAG}{_SWA_SUBTAG}")
+                     f"_{_EEG_SUBTAG}_{_CAFE_SUBTAG}_{_ASYM_SUBTAG}{_LAMBDA_SUBTAG}{_CHROMA_SUBTAG}{_MHS_SUBTAG}{_LS_SUBTAG}{_DA_SUBTAG}{_FC_SUBTAG}{_ADABN_SUBTAG}{_TENT_SUBTAG}{_EGTA_SUBTAG}{_G1_SUBTAG}{_CHROMO_SUBTAG}{_ESP_SUBTAG}{_LABRAM_SUBTAG}{_BAND_SUBTAG}{_NORM_SUBTAG}{_EFGF_SUBTAG}{_YPREDNORM_SUBTAG}{_VALMODE_SUBTAG}{_NODECAY_SUBTAG}{_STAGE2_SUBTAG}{_EFGFINIT_SUBTAG}{_NOISEAWARE_SUBTAG}{_SWA_SUBTAG}{_PCCLAMBDA_SUBTAG}")
 _VARIANT_HASH = hashlib.md5(_VARIANT_TAG_FULL.encode()).hexdigest()[:10]
 _VARIANT_TAG = _VARIANT_HASH
 RUN_TAG = datetime.datetime.now().strftime("%Y%m%d_%H%M%S") + f"_seed{SEED}_{_VARIANT_TAG}"   # unique per run+seed+variant, so a later comparison run never overwrites this baseline
@@ -959,6 +975,7 @@ with CrashSafeLogger(os.path.join(RESULTS_DIR_VARIANT, f"baseline_run_log_{RUN_T
           f"| stage2_stop_mode={STAGE2_STOP_MODE!r} (priority-stage2fix) "
           f"| efgf_gate_init={EFGF_GATE_INIT!r} (priority-efgfinit) "
           f"| mhs_lambda={MHS_LAMBDA} (priority-B1 isolated variable, MSTFDN-inspired) "
+          f"| efgf_lambda={EFGF_LAMBDA} cafe_lambda={CAFE_LAMBDA} (priority-PCCLAMBDA isolated variable) "
           f"| label_smoothing={LABEL_SMOOTHING} (priority-B4 isolated variable) "
           f"| domain_adapt_lambda={DOMAIN_ADAPT_LAMBDA} (priority-C1 isolated variable) "
           f"| adabn={ADABN} (priority-E4 isolated variable, TRANSDUCTIVE) "
@@ -1029,6 +1046,8 @@ with CrashSafeLogger(os.path.join(RESULTS_DIR_VARIANT, f"baseline_run_log_{RUN_T
                 lambda_fnirs=LAMBDA_FNIRS,                # paper default 0.2
                 fnirs_chroma_mode=FNIRS_CHROMA_MODE,      # ISOLATED ABLATION (priority-A4): "both" (default)/"hbo_only"/"hbr_only"
                 mhs_lambda=MHS_LAMBDA,                    # ISOLATED ABLATION (priority-B1): CAFE multi-head HSIC diversity term, 0.0 (default) disables
+                efgf_lambda=EFGF_LAMBDA,                  # ISOLATED ABLATION (priority-PCCLAMBDA): 1.0 (default) = paper Eq. 5
+                cafe_lambda=CAFE_LAMBDA,                  # ISOLATED ABLATION (priority-PCCLAMBDA): 1.0 (default) = paper Eq. 5
                 label_smoothing=LABEL_SMOOTHING,          # ISOLATED ABLATION (priority-B4): 0.0 (default) disables
                 domain_adapt_lambda=DOMAIN_ADAPT_LAMBDA,  # ISOLATED ABLATION (priority-C1): 0.0 (default) disables
                 use_fc_features=USE_FC_FEATURES,          # ISOLATED ABLATION (priority-E1): EEG functional-connectivity (PLV) embedding, False (default) disables

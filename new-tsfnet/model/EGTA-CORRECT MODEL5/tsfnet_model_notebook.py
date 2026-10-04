@@ -1877,7 +1877,7 @@ def tsfnet_loss(y_eeg, y_fusion, y_fnirs, y_pred, labels, aux,
                  lambda_eeg=0.2, lambda_fnirs=0.2, class_weight=None, focal_gamma=None,
                  asymmetric_cost=None, asymmetric_mode="cost_matrix",
                  ordinal_reg_lambda=0.0, mhs_lambda=0.0, label_smoothing=0.0,
-                 normalize_ypred=False):
+                 normalize_ypred=False, efgf_lambda=1.0, cafe_lambda=1.0):
     """
     Full loss L = L_class + L_efgf + L_cafe (Eq. 5-6).
     y_*: softmax probabilities (B, num_classes) from the model's forward().
@@ -1972,6 +1972,31 @@ def tsfnet_loss(y_eeg, y_fusion, y_fnirs, y_pred, labels, aux,
                                        aux["eeg_pcc2"], aux["phi_pcc2"])
     l_cafe = cafe_regularization_loss(aux["enhanced_fnirs"], aux["enhanced_fusion"])
 
+    # priority-PCCLAMBDA: Eq. 5 adds L_efgf and L_cafe to L_class with NO
+    # weight. Each is 1 - PCC in [0, 2], so together they can contribute up to
+    # 4.0 -- measured on a freshly initialized run60 model they are 2.02 of a
+    # 4.70 total, i.e. 43% of the loss before training has even begun, on par
+    # with the entire classification objective. On top of that, L_cafe drives
+    # PCC(enhanced_fnirs, enhanced_fusion) toward 1, i.e. it actively pushes
+    # the two modality representations toward REDUNDANCY, which works against
+    # a fusion design whose value is complementarity. efgf_lambda/cafe_lambda
+    # scale each term independently so that can be measured.
+    # 1.0 (default) leaves both terms untouched -- bit-exact prior behavior
+    # (rule 5): the multiply is skipped entirely, not merely multiplied by 1.
+    # 0.0 replaces the term with an exact zero (not 0 * term), so a NaN in a
+    # disabled regularizer can never leak into the total via 0 * NaN = NaN.
+    # The breakdown below keeps the UNWEIGHTED values under the existing keys
+    # "l_efgf"/"l_cafe" (rule 7: an existing key never changes meaning) and
+    # reports the weighted contributions under new keys.
+    def _weighted(term, lam):
+        if lam == 1.0:
+            return term
+        if lam == 0.0:
+            return torch.zeros((), device=term.device, dtype=term.dtype)
+        return lam * term
+    l_efgf_w = _weighted(l_efgf, efgf_lambda)
+    l_cafe_w = _weighted(l_cafe, cafe_lambda)
+
     # priority-A1: TAFN Eq. 14 regularization term (see ordinal_smoothness_loss
     # for the paper-vs-code axis discrepancy). Reference uses lambda = 1e-4;
     # 0.0 here disables it so it can be ablated separately from the
@@ -1993,11 +2018,12 @@ def tsfnet_loss(y_eeg, y_fusion, y_fnirs, y_pred, labels, aux,
     else:
         l_mhs = torch.zeros((), device=y_pred.device)
 
-    total = l_class + l_efgf + l_cafe + l_ord + l_mhs
+    total = l_class + l_efgf_w + l_cafe_w + l_ord + l_mhs
     breakdown = {
         "total": total.item(), "l_class": l_class.item(), "l_pred": l_pred.item(),
         "l_eeg": l_eeg.item(), "l_fnirs": l_fnirs.item(), "l_fusion": l_fusion.item(),
         "l_efgf": l_efgf.item(), "l_cafe": l_cafe.item(), "l_ord": float(l_ord),
+        "l_efgf_weighted": float(l_efgf_w), "l_cafe_weighted": float(l_cafe_w),
         "l_mhs": float(l_mhs), "cafe_hsic_raw": aux["cafe_hsic_loss"].item(),
     }
     return total, breakdown
@@ -2464,7 +2490,8 @@ def adapt_batchnorm_to_target(model, target_loader, device, log_fn=print):
 
 def evaluate(model, loader, device, lambda_eeg, lambda_fnirs, class_weight=None,
              focal_gamma=None, asymmetric_cost=None, ordinal_reg_lambda=0.0,
-             mhs_lambda=0.0, label_smoothing=0.0, normalize_ypred=False):
+             mhs_lambda=0.0, label_smoothing=0.0, normalize_ypred=False,
+             efgf_lambda=1.0, cafe_lambda=1.0):
     """
     BUGFIX (2026-09-01): previously this function had no class_weight/
     focal_gamma/asymmetric_cost/ordinal_reg_lambda parameters at all, so
@@ -2508,7 +2535,7 @@ def evaluate(model, loader, device, lambda_eeg, lambda_fnirs, class_weight=None,
             loss, _ = tsfnet_loss(y_eeg, y_fusion, y_fnirs, y_pred, y, aux,
                                    lambda_eeg, lambda_fnirs, class_weight=class_weight,
                                    focal_gamma=focal_gamma, asymmetric_cost=asymmetric_cost,
-                                   ordinal_reg_lambda=ordinal_reg_lambda, mhs_lambda=mhs_lambda,
+                                   ordinal_reg_lambda=ordinal_reg_lambda, mhs_lambda=mhs_lambda, efgf_lambda=efgf_lambda, cafe_lambda=cafe_lambda,
                                    normalize_ypred=normalize_ypred,
                                    label_smoothing=label_smoothing)
             total_loss += loss.item() * y.size(0)
@@ -2837,7 +2864,8 @@ def train_one_fold(model, train_loader, val_loader, test_loader, device,
                     tent_lr=1e-3, tent_steps=1, eeg_band_weight_decay=1e-2,
                     no_decay_scalars=False, stage2_stop_mode="loss",
                     noise_aware_snr_db=None, noise_aware_prob=0.0,
-                    swa_enabled=False, swa_start_epoch=None, swa_lr=None):
+                    swa_enabled=False, swa_start_epoch=None, swa_lr=None,
+                    efgf_lambda=1.0, cafe_lambda=1.0):
     """
     swa_enabled: ISOLATED ABLATION PARAMETER (priority-SWA). Stochastic Weight
     Averaging (Izmailov et al. 2018) -- averages model weights over the TAIL of
@@ -3079,7 +3107,7 @@ def train_one_fold(model, train_loader, val_loader, test_loader, device,
             loss, _ = tsfnet_loss(y_eeg, y_fusion, y_fnirs, y_pred, y, aux,
                                    lambda_eeg, lambda_fnirs, class_weight=class_weight, focal_gamma=focal_gamma,
                                    asymmetric_cost=asymmetric_cost,
-                                   ordinal_reg_lambda=ordinal_reg_lambda, mhs_lambda=mhs_lambda, label_smoothing=label_smoothing,
+                                   ordinal_reg_lambda=ordinal_reg_lambda, mhs_lambda=mhs_lambda, efgf_lambda=efgf_lambda, cafe_lambda=cafe_lambda, label_smoothing=label_smoothing,
                                    normalize_ypred=normalize_ypred)
             loss.backward()
             if grad_clip_norm is not None:
@@ -3095,7 +3123,7 @@ def train_one_fold(model, train_loader, val_loader, test_loader, device,
         val_loss, val_acc, val_kappa = evaluate(model, val_loader, device, lambda_eeg, lambda_fnirs,
                                                  class_weight=class_weight, focal_gamma=focal_gamma,
                                                  asymmetric_cost=asymmetric_cost,
-                                                 ordinal_reg_lambda=ordinal_reg_lambda, mhs_lambda=mhs_lambda, label_smoothing=label_smoothing,
+                                                 ordinal_reg_lambda=ordinal_reg_lambda, mhs_lambda=mhs_lambda, efgf_lambda=efgf_lambda, cafe_lambda=cafe_lambda, label_smoothing=label_smoothing,
                                                  normalize_ypred=normalize_ypred)
         log_fn(f"  [stage1] epoch {epoch:3d} | train_loss={train_loss:.4f} train_acc={train_acc:.4f} | "
                f"val_loss={val_loss:.4f} val_acc={val_acc:.4f} val_kappa={val_kappa:.4f}")
@@ -3137,7 +3165,7 @@ def train_one_fold(model, train_loader, val_loader, test_loader, device,
             model, train_loader, device, lambda_eeg, lambda_fnirs,
             class_weight=class_weight, focal_gamma=focal_gamma,
             asymmetric_cost=asymmetric_cost, ordinal_reg_lambda=ordinal_reg_lambda,
-            mhs_lambda=mhs_lambda, label_smoothing=label_smoothing,
+            mhs_lambda=mhs_lambda, efgf_lambda=efgf_lambda, cafe_lambda=cafe_lambda, label_smoothing=label_smoothing,
             normalize_ypred=normalize_ypred)[0]
 
     # priority-SWA finalization: `model` above now holds stage 1's ORIGINAL
@@ -3153,7 +3181,7 @@ def train_one_fold(model, train_loader, val_loader, test_loader, device,
             swa_model, val_loader, device, lambda_eeg, lambda_fnirs,
             class_weight=class_weight, focal_gamma=focal_gamma,
             asymmetric_cost=asymmetric_cost, ordinal_reg_lambda=ordinal_reg_lambda,
-            mhs_lambda=mhs_lambda, label_smoothing=label_smoothing,
+            mhs_lambda=mhs_lambda, efgf_lambda=efgf_lambda, cafe_lambda=cafe_lambda, label_smoothing=label_smoothing,
             normalize_ypred=normalize_ypred)
         log_fn(f"  [SWA] averaged-model val_acc={swa_val_acc:.4f} val_kappa={swa_val_kappa:.4f} "
                f"vs. original best_val_acc={best_val_acc:.4f}")
@@ -3169,7 +3197,7 @@ def train_one_fold(model, train_loader, val_loader, test_loader, device,
                 model, train_loader, device, lambda_eeg, lambda_fnirs,
                 class_weight=class_weight, focal_gamma=focal_gamma,
                 asymmetric_cost=asymmetric_cost, ordinal_reg_lambda=ordinal_reg_lambda,
-                mhs_lambda=mhs_lambda, label_smoothing=label_smoothing,
+                mhs_lambda=mhs_lambda, efgf_lambda=efgf_lambda, cafe_lambda=cafe_lambda, label_smoothing=label_smoothing,
                 normalize_ypred=normalize_ypred)[0]
         else:
             log_fn(f"  [SWA] original checkpoint is better -- SWA weights discarded, "
@@ -3273,7 +3301,7 @@ def train_one_fold(model, train_loader, val_loader, test_loader, device,
             loss, _ = tsfnet_loss(y_eeg, y_fusion, y_fnirs, y_pred, y, aux,
                                    lambda_eeg, lambda_fnirs, class_weight=class_weight, focal_gamma=focal_gamma,
                                    asymmetric_cost=asymmetric_cost,
-                                   ordinal_reg_lambda=ordinal_reg_lambda, mhs_lambda=mhs_lambda, label_smoothing=label_smoothing,
+                                   ordinal_reg_lambda=ordinal_reg_lambda, mhs_lambda=mhs_lambda, efgf_lambda=efgf_lambda, cafe_lambda=cafe_lambda, label_smoothing=label_smoothing,
                                    normalize_ypred=normalize_ypred)
             if domain_adapt_lambda > 0.0:
                 # ISOLATED ABLATION (priority-C1): one extra forward pass on an
@@ -3378,6 +3406,7 @@ def run_subject_cross_session(subject_dir, subject_id, device="cuda" if torch.cu
                                asymmetric_hard_pairs=None, asymmetric_hard_weight=2.0,
                                ordinal_reg_lambda=0.0, class_count_level="window",
                                fnirs_chroma_mode="both", mhs_lambda=0.0, label_smoothing=0.0,
+                               efgf_lambda=1.0, cafe_lambda=1.0,
                                domain_adapt_lambda=0.0,
                                use_fc_features=False, fc_num_channels=28, fc_embed_dim=64,
                                adabn=False, dropout=0.5, cafe_dropout=0.3,
@@ -3566,6 +3595,10 @@ def run_subject_cross_session(subject_dir, subject_id, device="cuda" if torch.cu
         raise ValueError(
             "norm_mode='group' and tta_mode='tent' cannot be combined: TENT adapts only "
             "BatchNorm affine parameters, and GroupNorm leaves none.")
+    for _name, _lam in (("efgf_lambda", efgf_lambda), ("cafe_lambda", cafe_lambda)):
+        if not (isinstance(_lam, (int, float)) and _lam >= 0.0 and _lam == _lam):
+            raise ValueError(f"{_name} must be a finite number >= 0, got {_lam!r} "
+                             f"(priority-PCCLAMBDA; 1.0 = paper Eq. 5, 0.0 = term disabled)")
     full = NBackDataset(subject_dir, subject_id)
     session_ids = full.session_ids
     labels_np = full.labels.numpy()
@@ -3864,7 +3897,7 @@ def run_subject_cross_session(subject_dir, subject_id, device="cuda" if torch.cu
             model, train_loader, val_loader, test_loader, device,
             ckpt_path=ckpt_path, class_weight=class_weight,
             focal_gamma=active_focal_gamma, asymmetric_cost=_asym_cost,
-            ordinal_reg_lambda=ordinal_reg_lambda, mhs_lambda=mhs_lambda,
+            ordinal_reg_lambda=ordinal_reg_lambda, mhs_lambda=mhs_lambda, efgf_lambda=efgf_lambda, cafe_lambda=cafe_lambda,
             label_smoothing=label_smoothing,
             domain_adapt_lambda=domain_adapt_lambda, target_loader=test_loader,
             adabn=adabn, tta_mode=tta_mode, tent_lr=tent_lr, tent_steps=tent_steps,
