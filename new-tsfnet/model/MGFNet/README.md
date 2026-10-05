@@ -9,7 +9,7 @@ paper's within-subject 80/20 trial split.
 
 | file | role |
 |---|---|
-| `Preproc_mgfnet_nback.py` | Sec. 2.2 preprocessing: EEG 30×1000, HbO/HbR 36×50, 5 s / 1 s windows |
+| `Preproc_mgfnet_nback.py` | Sec. 2.2 preprocessing: EEG 28×1000 (30 with `--include-eog`), HbO/HbR 36×50, 5 s / 1 s windows |
 | `mgfnet_dataset.py` | Dataset, trial-level 5-fold split, train-only channel normaliser |
 | `mgfnet_model.py` | Sec. 3.1–3.4: intra-modal encoders, DilatedConvNet, CGSCR, deep supervision |
 | `mgfnet_train.py` | training (paper Sec. 3.5), 5-fold CV epoch selection, LOSO loop, metrics |
@@ -28,7 +28,7 @@ python Preproc_mgfnet_nback.py --subjects 1 --data-root fixture_data --out fixtu
 python verify_mgfnet_preproc.py fixture_out fixture_data
 
 # 1) preprocessing on the real dataset
-python Preproc_mgfnet_nback.py --data-root "E:\kntu\Thesis\codes\DATA" --out "E:\kntu\Thesis\codes\Results\MGFNET_PAPER_EXACT_nback"
+python Preproc_mgfnet_nback.py --data-root "E:\kntu\Thesis\codes\DATA" --out "E:\kntu\Thesis\codes\Results\MGFNET_PAPER_EXACT_nback_28ch"
 #    -> check the log: every subject must report fnirs_clock_sync=True and
 #       marker-onset check [ok]. If the onset check says MISMATCH, rerun with --task-tmin.
 
@@ -60,7 +60,7 @@ Reported metrics: accuracy, macro precision/recall/F1, Cohen's κ, ITR (paper Eq
 
 These are listed in `MGFNET_AMBIGUITIES` (model) and `MGFNET_PREPROC_AMBIGUITIES` (preprocessing). The main ones:
 
-- **EEG channels:** the 30 `cnt.clab` channels are used (28 scalp + HEOG + VEOG). The paper's dims, 120 = 4×30 and 264 = 4×66, imply a 30-channel input. Set `EEG_INCLUDE_EOG_CHANNELS=False` in the preprocessing for 28 channels; the model adapts automatically.
+- **EEG channels: 28 scalp channels (default).** The paper's dims, 120 = 4×30 and 264 = 4×66, imply that HEOG/VEOG were also fed to the network (30 channels). n-back load modulates blinks and eye movements, so EOG inputs could let the model decode ocular rather than cortical activity. The default is therefore scalp-only. `--include-eog` in the preprocessing reproduces the paper's 30-channel input; it writes to a separate `_30ch` folder, and the model adapts to the channel count automatically.
 - **Normalisation:** not in the paper. A per-channel z-score is fitted on training windows only, inside each LOSO fold, so it is not transductive.
 - **CGSCR tokens:** `token_ij = 3·C_ij · LayerNorm(E_i + F_j)`, using a pre-norm Transformer. C is applied *after* the LayerNorm, because LN(c·x) = LN(x) would otherwise erase the coupling.
 - **Gumbel-Softmax:** standard `softmax((s+g)/τ)`, hard straight-through in training and one-hot `argmax(s)` at inference.

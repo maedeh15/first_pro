@@ -41,13 +41,14 @@ def rec(name, ok, detail=""):
     print(f"[{'PASS' if ok else 'FAIL'}] {name}  {detail}")
 
 
-# --- 1. tensor shapes match MGFNet Sec. 2.2 (30 x 1000 / 36 x 50) ---------
+# --- 1. tensor shapes (28 scalp channels by default, 30 with --include-eog) --
 n = E.shape[0]
-rec("shapes", E.shape == (n, 30, 1000) and O.shape == (n, 36, 50) and R.shape == (n, 36, 50),
+C_EEG = 30 if meta["eeg_includes_eog"] else 28
+rec("shapes", E.shape == (n, C_EEG, 1000) and O.shape == (n, 36, 50) and R.shape == (n, 36, 50),
     f"EEG{E.shape} HbO{O.shape} HbR{R.shape}")
-rec("channel list", len(meta["eeg_channels"]) == 30
-    and meta["eeg_channels"][-2:] == ["HEOG", "VEOG"],
-    f"28 scalp + {meta['eeg_channels'][-2:]}")
+rec("channel list", len(meta["eeg_channels"]) == C_EEG
+    and (("HEOG" in meta["eeg_channels"]) == meta["eeg_includes_eog"]),
+    f"{len(meta['eeg_channels'])} channels, EOG included={meta['eeg_includes_eog']}")
 
 # --- 2. window count is exactly what the sliding rule predicts -------------
 rec("window count", n == 27 * len(OFFS), f"N={n} = 27 trials x {len(OFFS)} offsets")

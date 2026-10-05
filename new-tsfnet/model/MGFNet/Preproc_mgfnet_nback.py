@@ -14,7 +14,8 @@
 #   EEG -> 200 Hz                               cnt.fs is already 200 Hz
 #   EEG 1-40 Hz band-pass                       zero-phase Butterworth, 1-40 Hz
 #   EOG "standard correction algorithm"         ICA + automatic EOG detection
-#   X_EEG in R^{30 x 1000}                      30 = 28 scalp + HEOG + VEOG
+#   X_EEG in R^{30 x 1000}                      28 scalp channels (default);
+#                                               --include-eog gives the paper's 30
 #   fNIRS MBLL -> HbO/HbR                       dataset ships them converted
 #   fNIRS -> 10 Hz, low-pass                    10 Hz, 0.2 Hz low-pass
 #   X_HbO/HbR in R^{36 x 50}                    36 x 50
@@ -29,7 +30,7 @@
 # here -- NOT the paper's within-subject 80/20 trial split.
 #
 # OUTPUTS (per subject)
-#   {subject}_mgf_eeg.npy      (N, 30, 1000)  float32   EEG   @200 Hz, 5 s, volts
+#   {subject}_mgf_eeg.npy      (N, 28, 1000)  float32   EEG   @200 Hz, 5 s, volts
 #   {subject}_mgf_hbo.npy      (N, 36,   50)  float32   HbO   @10  Hz, 5 s
 #   {subject}_mgf_hbr.npy      (N, 36,   50)  float32   HbR   @10  Hz, 5 s
 #   {subject}_labels.npy       (N,)  int64    0/1/2  (0-back / 2-back / 3-back)
@@ -59,7 +60,8 @@ mne.set_log_level("ERROR")
 # CONFIGURATION
 # ============================================================================
 BASE_DATASET_PATH = r"E:\kntu\Thesis\codes\DATA"
-OUTPUT_PATH = r"E:\kntu\Thesis\codes\Results\MGFNET_PAPER_EXACT_nback"
+OUTPUT_PATH = r"E:\kntu\Thesis\codes\Results\MGFNET_PAPER_EXACT_nback_28ch"
+OUTPUT_PATH_WITH_EOG = r"E:\kntu\Thesis\codes\Results\MGFNET_PAPER_EXACT_nback_30ch"
 
 SUBJECTS = list(range(1, 27))
 
@@ -81,7 +83,7 @@ EEG_BP_EFFECTIVE_ORDER = EEG_BP_DESIGN_ORDER * 2 * 2
 # i.e. the EOG channels were fed to the network. They are kept here (after
 # the same 1-40 Hz band-pass; ICA is applied to the scalp channels only).
 # Set False for the 28-channel scalp-only variant. # AMBIGUITY-P5
-EEG_INCLUDE_EOG_CHANNELS = True
+EEG_INCLUDE_EOG_CHANNELS = False
 
 # --- fNIRS -------------------------------------------------------------------
 SFREQ_FNIRS = 10.0
@@ -462,16 +464,23 @@ def process_subject(subject_num):
 
 
 def main():
-    global _LOG_PATH, SUBJECTS, BASE_DATASET_PATH, OUTPUT_PATH, TASK_TMIN
+    global _LOG_PATH, SUBJECTS, BASE_DATASET_PATH, OUTPUT_PATH, TASK_TMIN, EEG_INCLUDE_EOG_CHANNELS
     ap = argparse.ArgumentParser()
     ap.add_argument("--subjects", type=str, default=None,
                     help="comma-separated subject numbers, e.g. 1 or 1,2,3")
     ap.add_argument("--data-root", type=str, default=None)
     ap.add_argument("--out", type=str, default=None)
+    ap.add_argument("--include-eog", action="store_true",
+                    help="keep HEOG/VEOG as network inputs (30 channels, the paper's "
+                         "literal setting). Default: 28 scalp channels only.")
     ap.add_argument("--task-tmin", type=float, default=None,
                     help="seconds from trial marker to task onset (default 2.0)")
     args = ap.parse_args()
 
+    if args.include_eog:
+        EEG_INCLUDE_EOG_CHANNELS = True
+        if not args.out:
+            OUTPUT_PATH = OUTPUT_PATH_WITH_EOG
     if args.data_root:
         BASE_DATASET_PATH = args.data_root
     if args.out:
@@ -523,7 +532,10 @@ MGFNET_PREPROC_AMBIGUITIES = {
           "LOSO fold only (no statistics from the held-out session).",
     "P5": "The paper's EEG tensor is 30 x 1000 and its feature dims are "
           "4 x 30 / 4 x 66, so the 30 cnt.clab channels (28 scalp + HEOG + "
-          "VEOG) are used. EEG_INCLUDE_EOG_CHANNELS=False gives 28.",
+          "VEOG) were fed to the network. DEFAULT HERE: 28 scalp channels, because "
+          "n-back load modulates blinks/eye movements and EOG inputs would let "
+          "the model decode ocular rather than cortical activity. --include-eog "
+          "reproduces the paper's 30-channel input.",
     "P6": "'Standard correction algorithm' for EOG is not named. ICA + "
           "automatic EOG-component detection from VEOG/HEOG is used.",
     "P7": "'Task periods' read as trial onset + 2 s .. + 42 s (instruction "

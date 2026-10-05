@@ -37,7 +37,7 @@ from mgfnet_train import run_subject_loso_mgfnet
 # ============================================================================
 # CONFIG
 # ============================================================================
-DATA_ROOT = r"E:\kntu\Thesis\codes\Results\MGFNET_PAPER_EXACT_nback"
+DATA_ROOT = r"E:\kntu\Thesis\codes\Results\MGFNET_PAPER_EXACT_nback_28ch"
 ALL_SUBJECTS = [f"VP{n:03d}" for n in range(1, 27)]
 
 PAPER_DEFAULTS = dict(lr=1e-3, weight_decay=1e-3, max_epochs=60, batch_size=64,
