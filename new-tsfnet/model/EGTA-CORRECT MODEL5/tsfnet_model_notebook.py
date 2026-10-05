@@ -667,6 +667,9 @@ class CAFELayer(nn.Module):
         self.n_segments = n_segments
         self.n_heads = n_heads
         self._last_egta_weights = None
+        # priority-EGTAPCC: (fusion_flat, EGTA-pooled fNIRS) of the last forward,
+        # WITH grad, for STA-Net's L_egta. None unless fnirs_temporal_align='egta'.
+        self._last_egta_pair = None
 
         self.fusion_proj = nn.Linear(fusion_dim, d_model)
         self.fnirs_proj = nn.Linear(fnirs_dim, d_model)
@@ -743,6 +746,7 @@ class CAFELayer(nn.Module):
         g_fnirs = torch.sigmoid(self.gate_fnirs)
         if self.fnirs_temporal_align == "egta":
             fnirs_flat_pooled = self._egta_pool(fusion_tok, fnirs_tok, fnirs_flat)
+            self._last_egta_pair = (fusion_flat, fnirs_flat_pooled)   # priority-EGTAPCC
         else:
             fnirs_flat_pooled = fnirs_flat.mean(dim=1)                 # original, pooled -> (B, 512)
 
@@ -1209,8 +1213,18 @@ class TSFNet(nn.Module):
                  norm_mode="batch", norm_groups=8,
                  efgf_gate_mode="clamp", efgf_gate_init=-6.0,
                  conv_dropout=None, conv_dropout_type="channel",
-                 fusion_fnirs_inject="none", erp_branch="none"):
+                 fusion_fnirs_inject="none", erp_branch="none",
+                 egta_pcc_lambda=0.0):
         super().__init__()
+        # priority-EGTAPCC: STA-Net Eq. 11, L_egta = 1 - mean|PCC(F_fusion, F_fnirs(ta))|,
+        # on the PURE EGTA output (the existing L_cafe correlates the gated
+        # CAFE+EGTA mixture instead, without |.|). 0.0 (default) = term not
+        # computed at all -> bit-exact prior behavior. Requires egta.
+        if egta_pcc_lambda < 0.0:
+            raise ValueError(f"egta_pcc_lambda must be >= 0, got {egta_pcc_lambda}")
+        if egta_pcc_lambda > 0.0 and fnirs_temporal_align != "egta":
+            raise ValueError("egta_pcc_lambda > 0 requires fnirs_temporal_align='egta'")
+        self.egta_pcc_lambda = float(egta_pcc_lambda)
         # priority-ERP: "eeg" feeds the ERP embedding into the EEG classifier's
         # input, "eeg_fusion" into both the EEG and the fusion classifiers'.
         # The ERP tensor travels in the x_chan batch slot (see NBackDataset
@@ -1698,6 +1712,10 @@ class TSFNet(nn.Module):
         fusion_pooled_final = fused2.mean(dim=-1)                       # GAP over time -> (B, 32, 4, 4)
 
         enhanced_fusion, enhanced_fnirs, cafe_hsic_loss = self.cafe(fusion_pooled_final, fn_pooled)
+        egta_pcc_loss = None                                            # priority-EGTAPCC
+        if self.egta_pcc_lambda > 0.0:
+            _fu, _fn = self.cafe._last_egta_pair
+            egta_pcc_loss = 1.0 - pearson_corrcoef(_fu, _fn).abs().mean()
 
         # priority-C2 / C-2c. Two distinct LaBraM modes, deliberately kept
         # separate because they are NOT the same experiment:
@@ -1873,6 +1891,8 @@ class TSFNet(nn.Module):
             "eeg_pcc2": eeg_pcc2, "phi_pcc2": phi_pcc2,
             "enhanced_fusion": enhanced_fusion, "enhanced_fnirs": enhanced_fnirs,
             "cafe_hsic_loss": cafe_hsic_loss,   # priority-B1, see CAFELayer.forward
+            "egta_pcc_loss": egta_pcc_loss,     # priority-EGTAPCC: unweighted, None when off
+            "egta_pcc_lambda": self.egta_pcc_lambda,
             "eeg_band_gate": (band_gate_value.detach()
                               if band_gate_value is not None else None),  # priority-D-1-safe
         }
@@ -2205,6 +2225,11 @@ def tsfnet_loss(y_eeg, y_fusion, y_fnirs, y_pred, labels, aux,
         l_mhs = torch.zeros((), device=y_pred.device)
 
     total = l_class + l_efgf_w + l_cafe_w + l_ord + l_mhs
+    # priority-EGTAPCC: added only when the model computed it (lambda > 0), so
+    # the default path's `total` is the exact same tensor expression as before.
+    _l_egta = aux.get("egta_pcc_loss")
+    if _l_egta is not None:
+        total = total + aux["egta_pcc_lambda"] * _l_egta
     breakdown = {
         "total": total.item(), "l_class": l_class.item(), "l_pred": l_pred.item(),
         "l_eeg": l_eeg.item(), "l_fnirs": l_fnirs.item(), "l_fusion": l_fusion.item(),
@@ -2212,6 +2237,8 @@ def tsfnet_loss(y_eeg, y_fusion, y_fnirs, y_pred, labels, aux,
         "l_efgf_weighted": float(l_efgf_w), "l_cafe_weighted": float(l_cafe_w),
         "l_mhs": float(l_mhs), "cafe_hsic_raw": aux["cafe_hsic_loss"].item(),
     }
+    if _l_egta is not None:
+        breakdown["l_egta"] = _l_egta.item()
     return total, breakdown
 
 
@@ -3620,6 +3647,7 @@ def run_subject_cross_session(subject_dir, subject_id, device="cuda" if torch.cu
                                adabn=False, dropout=0.5, cafe_dropout=0.3,
                                conv_dropout=None, conv_dropout_type="channel",
                                fusion_fnirs_inject="none", erp_branch="none",
+                               egta_pcc_lambda=0.0,
                                fnirs_num_chromophores=2, eeg_spatial_mode="none",
                                eeg_spatial_layers=2, eeg_spatial_heads=4,
                                eeg_spatial_d_model=64,
@@ -4037,6 +4065,7 @@ def run_subject_cross_session(subject_dir, subject_id, device="cuda" if torch.cu
                         dropout=dropout, cafe_dropout=cafe_dropout,
                         conv_dropout=conv_dropout, conv_dropout_type=conv_dropout_type,
                         fusion_fnirs_inject=fusion_fnirs_inject, erp_branch=erp_branch,
+                        egta_pcc_lambda=egta_pcc_lambda,
                         fnirs_num_chromophores=fnirs_num_chromophores,
                         eeg_spatial_mode=eeg_spatial_mode,
                         eeg_spatial_layers=eeg_spatial_layers,

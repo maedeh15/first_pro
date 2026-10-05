@@ -346,6 +346,12 @@ _arg_parser.add_argument("--cafe-lambda", type=float, default=1.0,
                                "the total loss. That term pushes the two modality "
                                "representations toward being correlated (redundant). Default "
                                "1.0 = paper Eq. 5, bit-exact prior behavior. 0.0 removes it.")
+_arg_parser.add_argument("--egta-pcc-lambda", type=float, default=0.0,
+                          help="priority-EGTAPCC: weight of STA-Net's L_egta = 1 - mean|PCC("
+                               "F_fusion, F_fnirs(ta))| on the PURE EGTA-pooled fNIRS feature "
+                               "(Liu et al. 2025, Eq. 11). Requires --fnirs-temporal-align egta. "
+                               "Default 0.0 = term not computed, bit-exact prior behavior. "
+                               "Sweep candidates: 0.1, 0.5, 1.0.")
 _arg_parser.add_argument("--label-smoothing", type=float, default=0.0,
                           help="priority-B4 isolated variable: label smoothing strength applied "
                                "to all four loss terms (l_eeg, l_fnirs, l_fusion, l_pred), "
@@ -703,6 +709,11 @@ CONV_DROPOUT = SEED_ARGS.conv_dropout
 CONV_DROPOUT_TYPE = SEED_ARGS.conv_dropout_type
 FUSION_FNIRS_INJECT = SEED_ARGS.fusion_fnirs_inject
 ERP_BRANCH = SEED_ARGS.erp_branch
+EGTA_PCC_LAMBDA = SEED_ARGS.egta_pcc_lambda
+if EGTA_PCC_LAMBDA < 0.0:
+    raise ValueError(f"--egta-pcc-lambda must be >= 0, got {EGTA_PCC_LAMBDA}")
+if EGTA_PCC_LAMBDA > 0.0 and SEED_ARGS.fnirs_temporal_align != "egta":
+    raise ValueError("--egta-pcc-lambda > 0 requires --fnirs-temporal-align egta")
 if CONV_DROPOUT is not None and not (0.0 <= CONV_DROPOUT < 1.0):
     raise ValueError(f"--conv-dropout must be in [0, 1), got {CONV_DROPOUT}")
 STAGE1_MAX_EPOCHS = SEED_ARGS.stage1_max_epochs
@@ -952,6 +963,7 @@ _G1_SUBTAG = ("_" + "_".join(_G1_PARTS)) if _G1_PARTS else ""
 _DATAROOT_SUBTAG = ("_data-" + os.path.basename(os.path.normpath(DATA_ROOT))
                     if os.path.normpath(DATA_ROOT) != os.path.normpath(_DEFAULT_DATA_ROOT) else "")
 _ERP_SUBTAG = f"_erp{ERP_BRANCH}" if ERP_BRANCH != "none" else ""
+_ERP_SUBTAG += f"_egtapcc{EGTA_PCC_LAMBDA:g}" if EGTA_PCC_LAMBDA > 0.0 else ""   # priority-EGTAPCC
 _FNIRSINJECT_SUBTAG = f"_fninj{FUSION_FNIRS_INJECT}" if FUSION_FNIRS_INJECT != "none" else ""
 _CONVDROP_SUBTAG = ((f"_convdo{CONV_DROPOUT:g}" if CONV_DROPOUT is not None else "")
                     + ("_convdoElem" if CONV_DROPOUT_TYPE != "channel" else ""))
@@ -1188,6 +1200,7 @@ with CrashSafeLogger(os.path.join(RESULTS_DIR_VARIANT, f"baseline_run_log_{RUN_T
                 fusion_fnirs_inject=FUSION_FNIRS_INJECT,  # priority-FNIRSINJECT: "none" (default) = paper design
                 init_checkpoint=PRETRAIN_CKPT.get(subject_id),  # priority-XSUBJ: None (default) = random init
                 erp_branch=ERP_BRANCH,                    # priority-ERP: "none" (default) = no ERP pathway
+                egta_pcc_lambda=EGTA_PCC_LAMBDA,          # priority-EGTAPCC: 0.0 (default) = term off
                 stage1_max_epochs=STAGE1_MAX_EPOCHS, stage1_patience=STAGE1_PATIENCE,
                 stage2_max_epochs=STAGE2_MAX_EPOCHS,
                 warmup_epochs=WARMUP_EPOCHS, min_lr_factor=MIN_LR_FACTOR,
