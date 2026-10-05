@@ -47,6 +47,11 @@ from mgfnet_model import MGFNet, mgfnet_deep_supervision_loss
 from mgfnet_dataset import (MGFNBackDataset, ChannelNormalizer, _unpack_mgf_batch,
                             session_holdout_split, stratified_trial_kfold)
 
+try:
+    import mgfnet_diagnostics as _diagnostics
+except ImportError:          # optional companion file
+    _diagnostics = None
+
 BRANCH_KEYS = ("1", "2", "3", "12", "13", "23")
 CLASS_NAMES = ("0-back", "2-back", "3-back")
 
@@ -376,6 +381,19 @@ def run_subject_loso_mgfnet(subject_dir, subject_id, device, batch_size=64,
         report["test_session"] = int(test_session)
         report["train_sessions"] = [s for s in sessions if s != test_session]
         report["n_train_windows"] = int(len(train_idx))
+
+        # Behavioural / representational diagnostics for whitelisted subjects
+        # (mgfnet_diagnostics.DIAGNOSTIC_SUBJECTS). Optional companion file;
+        # it never raises, so a plotting failure cannot stop the sweep.
+        if _diagnostics is not None and _diagnostics.should_run(subject_id):
+            norm = ChannelNormalizer.fit(full, train_idx)      # same stats as the final model
+            diag = _diagnostics.run_fold_diagnostics_mgfnet(
+                model, _make_loader(full, train_idx, batch_size, False, 0),
+                _make_loader(full, test_idx, batch_size, False, 0), device, norm,
+                subject_id=subject_id, fold_idx=int(test_session), out_dir=results_dir)
+            if diag is not None:
+                report["diagnostics"] = diag
+
         log_fn(f"  -> session {test_session}: acc={report['test_accuracy_final']:.4f} "
                f"P={report['precision_macro']:.4f} R={report['recall_macro']:.4f} "
                f"F1={report['f1_macro']:.4f} kappa={report['kappa_final']:.4f} "

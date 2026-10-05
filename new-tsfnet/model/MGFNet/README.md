@@ -14,6 +14,8 @@ paper's within-subject 80/20 trial split.
 | `mgfnet_model.py` | Sec. 3.1–3.4: intra-modal encoders, DilatedConvNet, CGSCR, deep supervision |
 | `mgfnet_train.py` | training (paper Sec. 3.5), 5-fold CV epoch selection, LOSO loop, metrics |
 | `run_all_subjects_MGFNET.py` | 26-subject sweep, CSV/JSON reports |
+| `mgfnet_diagnostics.py` | per-fold diagnostics, run automatically for the subjects in `DIAGNOSTIC_SUBJECTS`: t-SNE train vs test, confusion, calibration/ECE, branch agreement, CGSCR gate / coupling C / token selection / learned Morlet bands |
+| `mgfnet_xai.py` | post-hoc XAI from checkpoints: SHAP (EEG topomap, fNIRS channels, temporal), SHAP of the CGSCR gate, 1-D Grad-CAM per branch, modality occlusion, EEG-noise robustness (paper Sec. 4.3 / Fig. 6), single-subject and group t-SNE |
 | `crash_safe_logger.py` | same logger as the TSFNet runs |
 | `make_mgfnet_fixture.py`, `verify_mgfnet_preproc.py`, `test_clocksync_unit.py`, `test_mgfnet_numerical.py` | tests |
 
@@ -38,7 +40,12 @@ python run_all_subjects_MGFNET.py --seed 42
 python run_all_subjects_MGFNET.py --seed 999
 python run_all_subjects_MGFNET.py --seed 2024
 
-# 3) Table 4 ablations
+# 3) XAI after training (pip install shap scikit-learn)
+python mgfnet_xai.py --results-dir <results_mgf_...> --data-root <..._28ch> --subject VP001 --session 1
+python mgfnet_xai.py --results-dir <results_mgf_...> --data-root <..._28ch> --group
+python mgfnet_xai.py --data-root <..._28ch> --compare-noise "MGFNet=<full dir>" "w/o CGSCR=<noCGSCR dir>"
+
+# 4) Table 4 ablations
 python run_all_subjects_MGFNET.py --use-cgscr 0
 python run_all_subjects_MGFNET.py --use-cross-modal 0
 python run_all_subjects_MGFNET.py --use-intra-modal 0
