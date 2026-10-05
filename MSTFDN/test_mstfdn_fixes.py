@@ -190,3 +190,27 @@ print("  [PASS] 'train_fold(..., train_loader, test_loader, ...)' no longer appe
 print("[PASS] the test set is no longer used for model selection anywhere.")
 
 print("\nALL MSTFDN FIX TESTS PASSED against the real source file.")
+
+# ---------------------------------------------------------------------------
+banner("FIX 7: best checkpoint is saved as a dict and loaded via ['model_state']")
+assert "ckpt['model_state']" in src_text and "weights_only=False" in src_text, \
+    "checkpoint must be loaded with ckpt['model_state'] and weights_only=False"
+assert "model.load_state_dict(torch.load(ckpt_path" not in src_text, \
+    "the old broken load (whole dict passed to load_state_dict) is still present"
+try:
+    import tempfile
+    import torch
+    m = torch.nn.Linear(3, 2)
+    with tempfile.TemporaryDirectory() as d:
+        p = os.path.join(d, "ck.pt")
+        torch.save({'epoch': 5, 'model_state': m.state_dict(),
+                    'val_metrics': {'acc': np.float64(0.5), 'preds': [0, 1]}}, p)
+        m2 = torch.nn.Linear(3, 2)
+        ck = torch.load(p, map_location='cpu', weights_only=False)
+        m2.load_state_dict(ck['model_state'])
+        assert torch.equal(m.weight, m2.weight)
+    print("[PASS] checkpoint round-trip works.")
+except ImportError:
+    print("  [SKIP] torch not available for round-trip test")
+
+print("\nALL CHECKPOINT TESTS PASSED.")

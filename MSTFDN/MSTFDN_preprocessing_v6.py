@@ -45,7 +45,7 @@ Saved outputs per subject (in OUTPUT_PATH/VPxxx/):
   - {id}_fnirs_windows.npy   shape (N, 3, 36, 100)    float32
   - {id}_labels.npy          shape (N,)  int  [0=0back,1=2back,2=3back,3=rest]
   - {id}_session_ids.npy     shape (N,)  int  [1,2,3]
-  - {id}_trial_ids.npy       shape (N,)  int  trial index 0..8 within session
+  - {id}_trial_ids.npy       shape (N,)  int  global trial index 0..26 (unique across sessions)
   - {id}_eeg_clean_raw.fif   cleaned continuous EEG (MNE Raw, for QC)
   - {id}_fnirs_before_after.png              fNIRS QC (raw vs preprocessed, 1 channel)
   - {id}_eeg_before_allchannels.png          EEG QC before (full duration, all channels)
@@ -69,7 +69,6 @@ import scipy.io as sio
 from scipy.signal import resample
 import matplotlib.pyplot as plt
 import mne
-import mne_icalabel
 
 warnings.filterwarnings('ignore')
 
@@ -109,7 +108,16 @@ REST_LABEL = 3   # 4th class: rest
 
 TRIALS_PER_SESSION = 9
 
-AMPLITUDE_REJECT_THRESH = 120e-6   # V, EEG artifact rejection
+AMPLITUDE_REJECT_THRESH = 120e-6   # V, EEG artifact rejection (only if PAPER_EXACT=False)
+
+# PAPER_EXACT=True reproduces paper Sec 3.1.2 for the MBI dataset exactly:
+#   downsample to 200 Hz -> zero-phase FIR 5-band filtering -> segment
+#   extraction -> z-score. NO notch, NO broadband filter, NO bad-channel
+#   interpolation, NO ICA, NO re-referencing (MBI is already referenced to
+#   TP9), and NO amplitude-based window rejection (the paper reports exactly
+#   1188 class-balanced samples per subject).
+# Set False to use the extended cleaning pipeline (deviates from the paper).
+PAPER_EXACT = True
 
 # ============================================================
 #  LOGGING
@@ -231,8 +239,24 @@ def load_fnirs_data(subject_id):
 #  EEG PREPROCESSING (cleaning: notch, bandpass, bad-ch, ICA, CAR)
 #  -- unchanged from v2, this part of the pipeline was correct --
 # ============================================================
+def _drop_non_eeg_channels(raw_f):
+    drop_ch = [ch for ch in raw_f.ch_names if ch.upper() in ('VEOG', 'HEOG', 'TP9', 'TP10')]
+    if drop_ch:
+        raw_f.drop_channels(drop_ch)
+    return raw_f
+
+
 def preprocess_eeg(raw, events):
     raw_before_qc = raw.copy()
+
+    if PAPER_EXACT:
+        # Paper Sec 3.1.2: the only EEG operation before band extraction is
+        # downsampling to 200 Hz (done in load_eeg_data). Just keep the 28
+        # real electrodes.
+        raw_f = _drop_non_eeg_channels(raw.copy())
+        _save_eeg_qc_plots(raw_before_qc, raw_f)
+        del raw_before_qc
+        return raw_f
 
     raw_f = raw.copy().notch_filter(freqs=50.0, picks='eeg', verbose=False)
     # Fix: widened from (1.0, 40.0) to (0.5, 50.0) -- the narrower range was
@@ -284,10 +308,11 @@ def preprocess_eeg(raw, events):
         random_state=42, verbose=False)
     ica.fit(raw_f, picks=picks_ica)
 
+    import mne_icalabel
     ic_labels = mne_icalabel.label_components(raw_f, ica, method='iclabel')
     ARTIFACT_CLASSES = {'brain': 0, 'muscle artifact': 1, 'eye blink': 2,
                         'heart beat': 3, 'line noise': 4, 'channel noise': 5, 'other': 6}
-    ARTIFACT_TARGETS = ['eye blink', 'eye movement', 'muscle artifact', 'line noise']
+    ARTIFACT_TARGETS = ['eye blink', 'muscle artifact', 'line noise']   # ICLabel has no 'eye movement' class
     PROB_THRESH = 0.30
     BRAIN_CEIL  = 0.50
 
@@ -326,9 +351,7 @@ def preprocess_eeg(raw, events):
     # real EEG signal channel. Dropping only TP9 leaves 29 channels instead
     # of the paper's 28 (Sec 3.1.2 channel list has exactly 28 real
     # electrodes; TP9=reference, TP10=ground are separate from those 28).
-    drop_ch = [ch for ch in raw_f.ch_names if ch.upper() in ('VEOG', 'HEOG', 'TP9', 'TP10')]
-    if drop_ch:
-        raw_f.drop_channels(drop_ch)
+    _drop_non_eeg_channels(raw_f)
 
     _save_eeg_qc_plots(raw_before_qc, raw_f)
     del raw_before_qc
@@ -519,16 +542,18 @@ def extract_windows_for_subject(eeg_band_data, raw_eeg_clean,
                 offset += WINDOW_STEP
                 continue
 
-            # Amplitude-based artifact rejection on the ORIGINAL (non
-            # band-filtered, non z-scored) cleaned signal, same as before
-            w0_abs = eeg_t0_samp + w0_eeg_local
-            w1_abs = eeg_t0_samp + w1_eeg_local
-            raw_slice = raw_eeg_clean.get_data(start=w0_abs, stop=w1_abs)
-            reject = np.max(np.abs(raw_slice)) > AMPLITUDE_REJECT_THRESH
-            del raw_slice
-            if reject:
-                offset += WINDOW_STEP
-                continue
+            # Amplitude-based artifact rejection -- NOT in the paper (it
+            # would break the 1188 class-balanced samples), so only applied
+            # when PAPER_EXACT is False.
+            if not PAPER_EXACT:
+                w0_abs = eeg_t0_samp + w0_eeg_local
+                w1_abs = eeg_t0_samp + w1_eeg_local
+                raw_slice = raw_eeg_clean.get_data(start=w0_abs, stop=w1_abs)
+                reject = np.max(np.abs(raw_slice)) > AMPLITUDE_REJECT_THRESH
+                del raw_slice
+                if reject:
+                    offset += WINDOW_STEP
+                    continue
 
             eeg_slice = eeg_seg[:, :, w0_eeg_local:w1_eeg_local].astype(np.float16)
 
@@ -545,6 +570,12 @@ def extract_windows_for_subject(eeg_band_data, raw_eeg_clean,
             session_ids.append(session_id)
             trial_ids.append(trial_idx)
             offset += WINDOW_STEP
+
+    n_expected = 3 * TRIALS_PER_SESSION
+    if len(target_ev) != n_expected:
+        print(f"  WARNING: found {len(target_ev)} task markers, expected {n_expected} "
+              f"(3 sessions x {TRIALS_PER_SESSION}); session_id = trial_idx // "
+              f"{TRIALS_PER_SESSION} may be wrong for this subject.")
 
     for trial_idx, ev in enumerate(target_ev):
         ev_samp_eeg = ev[0]
@@ -722,6 +753,7 @@ def process_subject(subject_id):
             'sfreq_eeg':           SFREQ_EEG,
             'sfreq_fnirs':         SFREQ_FNIRS,
             'spatial_mapping_in_preprocessing': False,
+        'paper_exact_preprocessing': PAPER_EXACT,
             'note': 'Matches paper Sec 3.2 exactly: 4-class N-back, '
                     'channel-space samples (no 16x16 grid stored), '
                     'fNIRS=HbO/HbR/HbT single 10s window (not 21-segment stack).',

@@ -497,7 +497,12 @@ def run_loso_subject(subject_id: str, cfg: MSTFDNConfig,
         # Model selection uses VALIDATION only...
         train_fold(model, cfg, train_loader, val_loader, ckpt_path, device)
         # ...then the best checkpoint is scored ONCE on the untouched test set.
-        model.load_state_dict(torch.load(ckpt_path, map_location=device))
+        # The checkpoint is a dict {'epoch','model_state','val_metrics'};
+        # weights_only=False because val_metrics holds numpy scalars
+        # (PyTorch >= 2.6 defaults to weights_only=True).
+        ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
+        model.load_state_dict(ckpt['model_state'])
+        log(f"  Loaded best checkpoint from epoch {ckpt['epoch']}")
         best_metrics = evaluate(model, test_loader, MSTFDNLoss(cfg, model), device)
         elapsed = (time.time() - t0) / 60
 
@@ -521,7 +526,8 @@ def run_loso_subject(subject_id: str, cfg: MSTFDNConfig,
             'fold':      fold_idx,
             'test_session': test_session,
             'train_sessions': str([s for s in sessions if s != test_session]),
-            'n_train':   len(train_idx),
+            'n_train':   len(fit_idx),
+            'n_val':     len(val_idx),
             'n_test':    len(test_idx),
             'accuracy':  round(best_metrics.get('acc', 0) * 100, 2),
             'kappa':     round(best_metrics.get('kappa', 0), 4),   # FIX 2
