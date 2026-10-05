@@ -162,7 +162,7 @@ p.add_argument("--fnirs-temporal-align", type=str, default="egta", choices=["non
 p.add_argument("--efgf-gate-mode", type=str, default="sigmoid", choices=["clamp", "sigmoid"])
 p.add_argument("--efgf-gate-init", type=float, default=-2.0)
 p.add_argument("--fusion-combination", type=str, default="paper_mean",
-               choices=["paper_mean", "wsum", "gated"])
+               choices=["paper_mean", "wsum", "gated", "stanet2", "stanet3"])
 p.add_argument("--fnirs-num-segments", type=int, default=21)
 p.add_argument("--cafe-d-model", type=int, default=64)
 p.add_argument("--dropout", type=float, default=0.5)

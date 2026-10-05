@@ -1363,7 +1363,7 @@ class TSFNet(nn.Module):
         self.fusion_fnirs_inject = fusion_fnirs_inject
         if efgf_gate_mode not in ("clamp", "sigmoid"):
             raise ValueError(f"efgf_gate_mode must be 'clamp' or 'sigmoid', got {efgf_gate_mode!r}")
-        if fusion_combination not in ("paper_mean", "wsum", "gated"):
+        if fusion_combination not in ("paper_mean", "wsum", "gated", "stanet2", "stanet3"):
             raise ValueError(
                 f"fusion_combination must be 'paper_mean', 'wsum' or 'gated', "
                 f"got {fusion_combination!r}")
@@ -1743,6 +1743,29 @@ class TSFNet(nn.Module):
             nn.init.zeros_(self.gate_fc.weight)
             nn.init.zeros_(self.gate_fc.bias)
 
+        # priority-DECFUSION: STA-Net Eq. 5-6 (Liu et al. 2025). Per-sample
+        # weights kappa = softmax(fc1([h_fusion, h_fnirs(, h_eeg)])) where h_* is
+        # the OUTPUT OF THE FIRST FC LAYER of each branch classifier (post-ELU),
+        # i.e. the weights come from the branch FEATURES, not from the branch
+        # predictions as in "gated".
+        #   "stanet2": y_pred = k_fus*y_fusion + k_fnirs*y_fnirs (EEG left out of
+        #              the final decision, as in STA-Net; y_eeg is still trained
+        #              through lambda_eeg*L_eeg).
+        #   "stanet3": the same with all three branches.
+        # Zero-init => uniform weights at step 0. Built under a saved/restored
+        # RNG state, so no other module's init moves (rule 6); other modes do
+        # not build it at all.
+        if fusion_combination in ("stanet2", "stanet3"):
+            _n_br = 2 if fusion_combination == "stanet2" else 3
+            _hid = self.clf_fusion.net[0].out_features
+            _rng = torch.get_rng_state()
+            try:
+                self.kappa_fc = nn.Linear(_n_br * _hid, _n_br)
+            finally:
+                torch.set_rng_state(_rng)
+            nn.init.zeros_(self.kappa_fc.weight)
+            nn.init.zeros_(self.kappa_fc.bias)
+
         # priority-D-1-safe: constructed LAST, after every pre-existing module,
         # and with NO torch.get/set_rng_state manipulation anywhere.
         #   * "none" (default): nothing below runs -> zero RNG draws consumed
@@ -2000,6 +2023,24 @@ class TSFNet(nn.Module):
                       + gate_weights[:, 1:2] * y_fusion
                       + gate_weights[:, 2:3] * y_fnirs)
             y_pred = y_pred + 0.0 * (w1 + w2 + w3)
+        elif self.fusion_combination in ("stanet2", "stanet3"):
+            # priority-DECFUSION. h = ELU(first Linear) of each classifier --
+            # recomputed here (deterministic, no dropout before it), so the
+            # branch predictions above are computed exactly as in every mode.
+            def _hidden(clf, x):
+                return clf.net[1](clf.net[0](x))
+            hs = [_hidden(self.clf_fusion, fusion_clf_input), _hidden(self.clf_fnirs, enhanced_fnirs)]
+            if self.fusion_combination == "stanet3":
+                hs.append(_hidden(self.clf_eeg, eeg_flat))
+            kappa = torch.softmax(self.kappa_fc(torch.cat(hs, dim=-1)), dim=-1)   # (B, 2|3)
+            y_pred = kappa[:, 0:1] * y_fusion + kappa[:, 1:2] * y_fnirs
+            if self.fusion_combination == "stanet3":
+                y_pred = y_pred + kappa[:, 2:3] * y_eeg
+                gate_weights = torch.stack([kappa[:, 2], kappa[:, 0], kappa[:, 1]], dim=-1)
+            else:
+                gate_weights = torch.cat([torch.zeros_like(kappa[:, :1]), kappa], dim=-1)
+            # [w_eeg, w_fusion, w_fnirs] order, reported like "gated"
+            y_pred = y_pred + 0.0 * (w1 + w2 + w3)   # same orphan-parameter fix as "gated"
         else:
             raise ValueError(f"Unknown fusion_combination: {self.fusion_combination!r} "
                               f"(expected 'paper_mean', 'wsum' or 'gated')")
@@ -2007,7 +2048,8 @@ class TSFNet(nn.Module):
         aux = {
             "y_labram": y_labram,          # None unless a LaBraM mode is active
             "gate_weights": (gate_weights.detach()
-                              if self.fusion_combination == "gated" else None),
+                              if self.fusion_combination in ("gated", "stanet2", "stanet3")
+                              else None),
             # (B,3) per-sample [w_eeg, w_fusion, w_fnirs], sums to 1 per row.
             # None in "paper_mean"/"wsum" modes -- new key, does not remove
             # or rename anything existing (rule 7).

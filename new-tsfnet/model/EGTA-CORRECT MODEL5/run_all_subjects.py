@@ -122,14 +122,18 @@ _arg_parser.add_argument("--noise-aware-snr-db", type=float, nargs="+",
                                "--noise-aware-prob > 0. Default matches MGFNet.")
 
 _arg_parser.add_argument("--fusion-combination", type=str, default="paper_mean",
-                          choices=["paper_mean", "wsum", "gated"],
+                          choices=["paper_mean", "wsum", "gated", "stanet2", "stanet3"],
                           help="Final decision-level combination formula for y_eeg/y_fusion/"
                                "y_fnirs. 'paper_mean' (default): Eq.4 as written, sigmoid+mean/3. "
                                "'wsum': prior renormalized-by-sum behavior, for comparison only. "
                                "'gated': priority-gating experiment -- per-sample softmax weights "
                                "from a small linear layer over the concatenated branch logits "
                                "(mixture-of-experts style; see test_gating_numerical.py), instead "
-                               "of the three global scalars w_eeg/w_fusion/w_fnirs.")
+                               "of the three global scalars w_eeg/w_fusion/w_fnirs. "
+                               "'stanet2' / 'stanet3': priority-DECFUSION, STA-Net Eq. 5-6 -- "
+                               "per-sample softmax weights from the branch classifiers' hidden "
+                               "FEATURES; stanet2 = fusion + fNIRS only (EEG out of the final "
+                               "decision, as in STA-Net), stanet3 = all three branches.")
 
 # ISOLATED ABLATION FLAG (priority-3 family: class weighting). Default
 # "none" so a plain `python run_all_subjects.py --seed X` still reproduces
