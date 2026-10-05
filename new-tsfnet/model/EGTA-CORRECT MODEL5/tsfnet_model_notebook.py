@@ -177,6 +177,100 @@ class ConvBlock3D(nn.Module):
 
 
 # ----------------------------------------------------------------------------
+# priority-FILTERBANK: 5-band filter bank applied to the EEG GRID inside the
+# forward pass (MSTFDN, Ding et al. 2026, Sec. 2.1 / 3.1.1 feed delta..gamma
+# as 5 input channels). Nothing is stored on disk.
+#
+# WHY ON THE GRID: conv1 of EEGLikeBranch has a 12-sample (60 ms) temporal
+# kernel and stride 6. A 60 ms kernel has ~17 Hz frequency resolution, so it
+# cannot separate theta (4-8) from alpha (8-13), and stride 6 (-> 33 Hz)
+# aliases beta/gamma. Giving conv1 the bands as separate input channels
+# removes both problems without changing anything downstream.
+# Filtering is linear in time and spatial_mapping is a fixed spatial
+# interpolation, so filtering the stored grid == gridding the filtered
+# channels -- no re-preprocessing is needed.
+# ----------------------------------------------------------------------------
+class GridFilterBank(nn.Module):
+    """
+    (B, H, W, T) EEG grid -> (B, 5, H, W, T) band-limited grids.
+      mode="fixed":     windowed-sinc (Hamming) linear-phase FIR, buffers only,
+                        zero trainable parameters.
+      mode="learnable": SincNet-style (Ravanelli & Bengio 2018): the SAME
+                        filter shape, but each band's two edge frequencies are
+                        parameters (10 in total), initialised at the fixed
+                        bands. Stored divided by hz_scale so Adam's ~lr-sized
+                        steps move an edge by ~lr*hz_scale Hz (1e-3 * 10 =
+                        0.01 Hz/step) instead of 0.001 Hz/step, which would
+                        leave the edges effectively frozen. They are 1-D, so
+                        --no-decay-scalars excludes them from weight decay
+                        (otherwise decay would drag every edge toward 0 Hz).
+    Bands (Hz): delta is a LOW-PASS < 4 Hz (a 0.5 Hz lower edge is not
+    resolvable with a 2 s filter and the input is already high-passed at
+    0.5 Hz); theta 4-8, alpha 8-13, beta 13-30, gamma 30-50.
+    n_taps=401 (2 s): transition width ~3.3/2 s = 1.65 Hz, enough to keep
+    theta and alpha apart. Edges: reflect padding, so the output keeps the
+    input length and its alignment (odd taps = integer group delay).
+    Constructor consumes NO random draws (deterministic init) -- rule 6.
+    """
+    BANDS = ((0.0, 4.0), (4.0, 8.0), (8.0, 13.0), (13.0, 30.0), (30.0, 50.0))
+
+    def __init__(self, mode="fixed", sfreq=200.0, n_taps=401, hz_scale=10.0):
+        super().__init__()
+        if mode not in ("fixed", "learnable"):
+            raise ValueError(f"GridFilterBank mode must be 'fixed' or 'learnable', got {mode!r}")
+        if n_taps % 2 == 0:
+            n_taps += 1
+        self.mode, self.sfreq, self.n_taps, self.hz_scale = mode, float(sfreq), n_taps, float(hz_scale)
+        self.n_bands = len(self.BANDS)
+        self.pad = n_taps // 2
+        self.register_buffer("_n", torch.arange(n_taps, dtype=torch.float32) - (n_taps - 1) / 2.0)
+        self.register_buffer("_window", torch.hamming_window(n_taps, periodic=False))
+        lows = torch.tensor([b[0] for b in self.BANDS], dtype=torch.float32)
+        highs = torch.tensor([b[1] for b in self.BANDS], dtype=torch.float32)
+        if mode == "fixed":
+            self.register_buffer("_kernels", self._design(lows, highs).detach())
+        else:
+            self.low_raw = nn.Parameter(lows / self.hz_scale)
+            self.band_raw = nn.Parameter((highs - lows) / self.hz_scale)
+
+    def _design(self, low_hz, high_hz):
+        """Differentiable bandpass = LP(high) - LP(low), Hamming-windowed,
+        unity gain at the band centre. low_hz/high_hz: (n_bands,)."""
+        n = self._n.unsqueeze(0)                                    # (1, taps)
+        fl = (low_hz / self.sfreq).unsqueeze(1)                     # cycles/sample
+        fh = (high_hz / self.sfreq).unsqueeze(1)
+        h = 2 * fh * torch.sinc(2 * fh * n) - 2 * fl * torch.sinc(2 * fl * n)
+        h = h * self._window
+        fc = (fl + fh) / 2
+        re = (h * torch.cos(2 * math.pi * fc * n)).sum(dim=1, keepdim=True)
+        im = (h * torch.sin(2 * math.pi * fc * n)).sum(dim=1, keepdim=True)
+        return h / (torch.sqrt(re ** 2 + im ** 2) + 1e-8)          # (n_bands, taps)
+
+    def band_edges_hz(self):
+        if self.mode == "fixed":
+            return [list(b) for b in self.BANDS]
+        nyq = self.sfreq / 2.0
+        lo = (self.low_raw * self.hz_scale).abs().clamp(max=nyq - 1.0)
+        hi = torch.maximum(lo + (self.band_raw * self.hz_scale).abs(), lo + 0.5)   # >= 0.5 Hz wide
+        hi = torch.minimum(hi, torch.full_like(lo, nyq))
+        return lo, hi
+
+    def kernels(self):
+        if self.mode == "fixed":
+            return self._kernels
+        lo, hi = self.band_edges_hz()
+        return self._design(lo, hi)
+
+    def forward(self, x_eeg):
+        # x_eeg: (B, H, W, T) -> (B, n_bands, H, W, T)
+        B, H, W, T = x_eeg.shape
+        k = self.kernels().unsqueeze(1).to(x_eeg.dtype)             # (n_bands, 1, taps)
+        y = F.pad(x_eeg.reshape(B * H * W, 1, T), (self.pad, self.pad), mode="reflect")
+        y = F.conv1d(y, k)                                          # (BHW, n_bands, T)
+        return y.view(B, H, W, self.n_bands, T).permute(0, 3, 1, 2, 4)
+
+
+# ----------------------------------------------------------------------------
 # EEG / Fusion branch (Table 1 "EEG" row; the Fusion branch reuses this exact
 # architecture on the SAME input tensor X_eeg with its own separate weights,
 # per Sec. 3.1: "since its input is entirely derived from the 3D EEG tensor,
@@ -184,7 +278,7 @@ class ConvBlock3D(nn.Module):
 # ----------------------------------------------------------------------------
 class EEGLikeBranch(nn.Module):
     def __init__(self, dropout=0.5, temporal_mode="gap", lstm_hidden=64, readout_mode="h_n",
-                 dropout_type="channel"):
+                 dropout_type="channel", in_bands=1):
         """
         temporal_mode: ISOLATED ABLATION PARAMETER (priority-5, the project's
         largest and most consequential architecture change -- documented as
@@ -261,6 +355,24 @@ class EEGLikeBranch(nn.Module):
                                  dropout_type=dropout_type)
         self.conv2 = ConvBlock3D(16, 32, kernel=(2, 2, 6), stride=(2, 2, 2), dropout=dropout,
                                  dropout_type=dropout_type)
+        if in_bands != 1:
+            # priority-FILTERBANK: conv1 takes in_bands input channels. The new
+            # Conv3d is built under a saved/restored RNG state (rule 6) and
+            # then overwritten with the ORIGINAL 1-channel weights replicated
+            # across bands: since the 5 bands sum to ~the 0.5-50 Hz input, the
+            # branch starts as ~the baseline conv1 applied to broadband EEG,
+            # and every other module's init is unchanged.
+            _old = self.conv1.conv.conv
+            _rng = torch.get_rng_state()
+            try:
+                _new = nn.Conv3d(in_bands, _old.out_channels, _old.kernel_size,
+                                 stride=_old.stride, padding=0)
+            finally:
+                torch.set_rng_state(_rng)
+            with torch.no_grad():
+                _new.weight.copy_(_old.weight.repeat(1, in_bands, 1, 1, 1))
+                _new.bias.copy_(_old.bias)
+            self.conv1.conv.conv = _new
         if temporal_mode == "bilstm":
             # s2 is (B, 32, 4, 4, 50) -> per-timestep flattened input size is 32*4*4=512
             self.eeg_lstm = nn.LSTM(input_size=32 * 4 * 4, hidden_size=lstm_hidden,
@@ -276,7 +388,8 @@ class EEGLikeBranch(nn.Module):
         # x_eeg: (B, 16, 16, 600) -> add channel dim -> (B, 1, 16, 16, 600)
         # Conv3d expects (B, C, D, H, W); we map (H, W, T) -> (D=H, H=W, W=T)
         # consistently across the whole model, purely a labeling convention.
-        x = x_eeg.unsqueeze(1)
+        # priority-FILTERBANK: a 5-D input is an already band-split grid (B, 5, H, W, T)
+        x = x_eeg.unsqueeze(1) if x_eeg.dim() == 4 else x_eeg
         s1 = self.conv1(x)                 # (B, 16, 8, 8, 100)
         if self.temporal_mode == "gap_logvar":
             # priority-LOGVAR: identical ops to self.conv2(s1) (conv -> ELU ->
@@ -1214,8 +1327,15 @@ class TSFNet(nn.Module):
                  efgf_gate_mode="clamp", efgf_gate_init=-6.0,
                  conv_dropout=None, conv_dropout_type="channel",
                  fusion_fnirs_inject="none", erp_branch="none",
-                 egta_pcc_lambda=0.0):
+                 egta_pcc_lambda=0.0, eeg_filterbank="none", eeg_filterbank_scope="both"):
         super().__init__()
+        # priority-FILTERBANK: "none" (default) = no filter bank, bit-exact prior.
+        if eeg_filterbank not in ("none", "fixed", "learnable"):
+            raise ValueError(f"eeg_filterbank must be 'none', 'fixed' or 'learnable', got {eeg_filterbank!r}")
+        if eeg_filterbank_scope not in ("both", "eeg"):
+            raise ValueError(f"eeg_filterbank_scope must be 'both' or 'eeg', got {eeg_filterbank_scope!r}")
+        self.eeg_filterbank_mode = eeg_filterbank
+        self.eeg_filterbank_scope = eeg_filterbank_scope
         # priority-EGTAPCC: STA-Net Eq. 11, L_egta = 1 - mean|PCC(F_fusion, F_fnirs(ta))|,
         # on the PURE EGTA output (the existing L_cafe correlates the gated
         # CAFE+EGTA mixture instead, without |.|). 0.0 (default) = term not
@@ -1459,11 +1579,16 @@ class TSFNet(nn.Module):
         # channels is a very different regularizer from Dropout(0.5) on a
         # 128-unit dense layer, and they should be tunable independently.
         _conv_p = dropout if conv_dropout is None else conv_dropout
+        _nb = len(GridFilterBank.BANDS) if eeg_filterbank != "none" else 1
         self.eeg_branch = EEGLikeBranch(dropout=_conv_p, temporal_mode=eeg_temporal_mode,
                                          lstm_hidden=eeg_lstm_hidden, readout_mode=eeg_readout_mode,
-                                         dropout_type=conv_dropout_type)
+                                         dropout_type=conv_dropout_type, in_bands=_nb)
         self.fusion_branch = EEGLikeBranch(dropout=_conv_p, temporal_mode="gap",
-                                           dropout_type=conv_dropout_type)   # always GAP -- separate weights, same architecture (Sec. 3.1)
+                                           dropout_type=conv_dropout_type,
+                                           in_bands=_nb if eeg_filterbank_scope == "both" else 1)
+        if eeg_filterbank != "none":
+            # one bank shared by both branches (no RNG draws, see GridFilterBank)
+            self.eeg_filterbank = GridFilterBank(mode=eeg_filterbank)   # always GAP -- separate weights, same architecture (Sec. 3.1)
         self.fnirs_branch = FNIRSBranch(dropout=_conv_p, n_chromophores=fnirs_num_chromophores,
                                         dropout_type=conv_dropout_type)
 
@@ -1662,7 +1787,9 @@ class TSFNet(nn.Module):
                  x_conn=None) raises immediately rather than silently
                  training on garbage/zeros.
         """
-        eeg_s1, eeg_s2, eeg_pooled = self.eeg_branch(x_eeg)
+        x_eeg_fb = (self.eeg_filterbank(x_eeg) if self.eeg_filterbank_mode != "none"
+                    else None)                                    # priority-FILTERBANK
+        eeg_s1, eeg_s2, eeg_pooled = self.eeg_branch(x_eeg if x_eeg_fb is None else x_eeg_fb)
         # priority-A4 chroma ablation: mask is all-ones (mathematical no-op)
         # when fnirs_chroma_mode == "both", so this line changes nothing for
         # the default/accepted configuration.
@@ -1698,7 +1825,8 @@ class TSFNet(nn.Module):
         # (staged, deep fusion -- Sec. 3.1: "Aside from the feature-level fusion performed
         # through the EFGF layer after each convolutional layer, the rest of the processing
         # pipeline remains consistent with the EEG branch").
-        x_eeg_5d = x_eeg.unsqueeze(1)
+        x_eeg_5d = (x_eeg_fb if (x_eeg_fb is not None and self.eeg_filterbank_scope == "both")
+                    else x_eeg.unsqueeze(1))
         fus_s1 = self.fusion_branch.conv1(x_eeg_5d)                     # (B, 16, 8, 8, 100)
         fused1, eeg_pcc1, phi_pcc1 = self.efgf1(eeg_s1, fn_s1, fus_s1)
         if self.fusion_fnirs_inject != "none":
@@ -3648,6 +3776,7 @@ def run_subject_cross_session(subject_dir, subject_id, device="cuda" if torch.cu
                                conv_dropout=None, conv_dropout_type="channel",
                                fusion_fnirs_inject="none", erp_branch="none",
                                egta_pcc_lambda=0.0,
+                               eeg_filterbank="none", eeg_filterbank_scope="both",
                                fnirs_num_chromophores=2, eeg_spatial_mode="none",
                                eeg_spatial_layers=2, eeg_spatial_heads=4,
                                eeg_spatial_d_model=64,
@@ -4066,6 +4195,7 @@ def run_subject_cross_session(subject_dir, subject_id, device="cuda" if torch.cu
                         conv_dropout=conv_dropout, conv_dropout_type=conv_dropout_type,
                         fusion_fnirs_inject=fusion_fnirs_inject, erp_branch=erp_branch,
                         egta_pcc_lambda=egta_pcc_lambda,
+                        eeg_filterbank=eeg_filterbank, eeg_filterbank_scope=eeg_filterbank_scope,
                         fnirs_num_chromophores=fnirs_num_chromophores,
                         eeg_spatial_mode=eeg_spatial_mode,
                         eeg_spatial_layers=eeg_spatial_layers,

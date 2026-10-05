@@ -352,6 +352,19 @@ _arg_parser.add_argument("--egta-pcc-lambda", type=float, default=0.0,
                                "(Liu et al. 2025, Eq. 11). Requires --fnirs-temporal-align egta. "
                                "Default 0.0 = term not computed, bit-exact prior behavior. "
                                "Sweep candidates: 0.1, 0.5, 1.0.")
+_arg_parser.add_argument("--eeg-filterbank", type=str, default="none",
+                          choices=["none", "fixed", "learnable"],
+                          help="priority-FILTERBANK: split the EEG grid into 5 bands (delta<4, "
+                               "theta 4-8, alpha 8-13, beta 13-30, gamma 30-50 Hz) inside the "
+                               "forward pass and feed them to conv1 as 5 input channels (MSTFDN). "
+                               "'fixed' = FIR, no parameters; 'learnable' = SincNet edges (10 "
+                               "params). Nothing is written to disk. Default 'none' = prior "
+                               "behavior bit-for-bit.")
+_arg_parser.add_argument("--eeg-filterbank-scope", type=str, default="both",
+                          choices=["both", "eeg"],
+                          help="priority-FILTERBANK: 'both' (default) = EEG and fusion branches "
+                               "get the bands; 'eeg' = only the EEG branch. Ignored when "
+                               "--eeg-filterbank none.")
 _arg_parser.add_argument("--label-smoothing", type=float, default=0.0,
                           help="priority-B4 isolated variable: label smoothing strength applied "
                                "to all four loss terms (l_eeg, l_fnirs, l_fusion, l_pred), "
@@ -710,6 +723,8 @@ CONV_DROPOUT_TYPE = SEED_ARGS.conv_dropout_type
 FUSION_FNIRS_INJECT = SEED_ARGS.fusion_fnirs_inject
 ERP_BRANCH = SEED_ARGS.erp_branch
 EGTA_PCC_LAMBDA = SEED_ARGS.egta_pcc_lambda
+EEG_FILTERBANK = SEED_ARGS.eeg_filterbank
+EEG_FILTERBANK_SCOPE = SEED_ARGS.eeg_filterbank_scope
 if EGTA_PCC_LAMBDA < 0.0:
     raise ValueError(f"--egta-pcc-lambda must be >= 0, got {EGTA_PCC_LAMBDA}")
 if EGTA_PCC_LAMBDA > 0.0 and SEED_ARGS.fnirs_temporal_align != "egta":
@@ -964,6 +979,8 @@ _DATAROOT_SUBTAG = ("_data-" + os.path.basename(os.path.normpath(DATA_ROOT))
                     if os.path.normpath(DATA_ROOT) != os.path.normpath(_DEFAULT_DATA_ROOT) else "")
 _ERP_SUBTAG = f"_erp{ERP_BRANCH}" if ERP_BRANCH != "none" else ""
 _ERP_SUBTAG += f"_egtapcc{EGTA_PCC_LAMBDA:g}" if EGTA_PCC_LAMBDA > 0.0 else ""   # priority-EGTAPCC
+_ERP_SUBTAG += (f"_fb{EEG_FILTERBANK}{'' if EEG_FILTERBANK_SCOPE == 'both' else '-eegonly'}"
+                if EEG_FILTERBANK != "none" else "")                                  # priority-FILTERBANK
 _FNIRSINJECT_SUBTAG = f"_fninj{FUSION_FNIRS_INJECT}" if FUSION_FNIRS_INJECT != "none" else ""
 _CONVDROP_SUBTAG = ((f"_convdo{CONV_DROPOUT:g}" if CONV_DROPOUT is not None else "")
                     + ("_convdoElem" if CONV_DROPOUT_TYPE != "channel" else ""))
@@ -1201,6 +1218,8 @@ with CrashSafeLogger(os.path.join(RESULTS_DIR_VARIANT, f"baseline_run_log_{RUN_T
                 init_checkpoint=PRETRAIN_CKPT.get(subject_id),  # priority-XSUBJ: None (default) = random init
                 erp_branch=ERP_BRANCH,                    # priority-ERP: "none" (default) = no ERP pathway
                 egta_pcc_lambda=EGTA_PCC_LAMBDA,          # priority-EGTAPCC: 0.0 (default) = term off
+                eeg_filterbank=EEG_FILTERBANK,            # priority-FILTERBANK: "none" (default) = off
+                eeg_filterbank_scope=EEG_FILTERBANK_SCOPE,
                 stage1_max_epochs=STAGE1_MAX_EPOCHS, stage1_patience=STAGE1_PATIENCE,
                 stage2_max_epochs=STAGE2_MAX_EPOCHS,
                 warmup_epochs=WARMUP_EPOCHS, min_lr_factor=MIN_LR_FACTOR,
