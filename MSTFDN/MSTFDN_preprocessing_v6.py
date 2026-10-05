@@ -855,5 +855,12 @@ def run_parallel(subjects: list, n_workers: int = N_WORKERS):
 
 
 if __name__ == "__main__":
-    ALL_SUBJECTS = [f"VP{i:03d}" for i in range(1, 27)]
-    run_parallel(ALL_SUBJECTS, n_workers=N_WORKERS)
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--workers", type=int, default=N_WORKERS,
+                    help=f"number of subjects processed in parallel (default {N_WORKERS})")
+    ap.add_argument("--subjects", nargs="+", default=None,
+                    help="subset of subjects, e.g. --subjects VP001 VP002 (default: all 26)")
+    args = ap.parse_args()
+    ALL_SUBJECTS = args.subjects or [f"VP{i:03d}" for i in range(1, 27)]
+    run_parallel(ALL_SUBJECTS, n_workers=args.workers)
