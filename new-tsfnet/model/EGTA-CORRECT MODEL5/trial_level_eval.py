@@ -172,6 +172,8 @@ p.add_argument("--fusion-fnirs-inject", type=str, default="none", choices=["none
 p.add_argument("--erp-branch", type=str, default="none", choices=["none", "eeg", "eeg_fusion"])
 p.add_argument("--eeg-filterbank", type=str, default="none", choices=["none", "fixed", "learnable"])
 p.add_argument("--eeg-filterbank-scope", type=str, default="both", choices=["both", "eeg"])
+p.add_argument("--fnirs-chroma-split", type=str, default="none",
+               choices=["none", "separate", "separate_pair"])
 p.add_argument("--eeg-lstm-hidden", type=int, default=64)
 p.add_argument("--eeg-readout-mode", type=str, default="h_n",
                choices=["h_n", "last_step", "mean_pool"])
@@ -305,6 +307,7 @@ def collect_fold_posteriors(full, test_idx, ckpt_path, device, batch_size, adabn
         erp_branch=ARGS.erp_branch,
         eeg_filterbank=ARGS.eeg_filterbank,
         eeg_filterbank_scope=ARGS.eeg_filterbank_scope,
+        fnirs_chroma_split=ARGS.fnirs_chroma_split,
     ).to(device)
 
     state = torch.load(ckpt_path, map_location=device)

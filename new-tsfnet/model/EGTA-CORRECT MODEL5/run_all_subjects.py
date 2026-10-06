@@ -369,6 +369,15 @@ _arg_parser.add_argument("--eeg-filterbank-scope", type=str, default="both",
                           help="priority-FILTERBANK: 'both' (default) = EEG and fusion branches "
                                "get the bands; 'eeg' = only the EEG branch. Ignored when "
                                "--eeg-filterbank none.")
+_arg_parser.add_argument("--fnirs-chroma-split", type=str, default="none",
+                          choices=["none", "separate", "separate_pair"],
+                          help="priority-CHROMASPLIT (MGFNet): give HbO and HbR their own "
+                               "FNIRSBranch with non-shared weights, added to the fNIRS DECISION "
+                               "path (fn_pooled -> CAFE/EGTA -> clf_fnirs) through zero-init 1x1 "
+                               "convs. EFGF / the fusion branch are untouched. 'separate_pair' "
+                               "also adds an independently-weighted (HbO,HbR) pair branch. "
+                               "Requires --fnirs-num-chromophores 2. Default 'none' = prior "
+                               "behavior bit-for-bit.")
 _arg_parser.add_argument("--label-smoothing", type=float, default=0.0,
                           help="priority-B4 isolated variable: label smoothing strength applied "
                                "to all four loss terms (l_eeg, l_fnirs, l_fusion, l_pred), "
@@ -729,6 +738,7 @@ ERP_BRANCH = SEED_ARGS.erp_branch
 EGTA_PCC_LAMBDA = SEED_ARGS.egta_pcc_lambda
 EEG_FILTERBANK = SEED_ARGS.eeg_filterbank
 EEG_FILTERBANK_SCOPE = SEED_ARGS.eeg_filterbank_scope
+FNIRS_CHROMA_SPLIT = SEED_ARGS.fnirs_chroma_split
 if EGTA_PCC_LAMBDA < 0.0:
     raise ValueError(f"--egta-pcc-lambda must be >= 0, got {EGTA_PCC_LAMBDA}")
 if EGTA_PCC_LAMBDA > 0.0 and SEED_ARGS.fnirs_temporal_align != "egta":
@@ -985,6 +995,7 @@ _ERP_SUBTAG = f"_erp{ERP_BRANCH}" if ERP_BRANCH != "none" else ""
 _ERP_SUBTAG += f"_egtapcc{EGTA_PCC_LAMBDA:g}" if EGTA_PCC_LAMBDA > 0.0 else ""   # priority-EGTAPCC
 _ERP_SUBTAG += (f"_fb{EEG_FILTERBANK}{'' if EEG_FILTERBANK_SCOPE == 'both' else '-eegonly'}"
                 if EEG_FILTERBANK != "none" else "")                                  # priority-FILTERBANK
+_ERP_SUBTAG += f"_cs{FNIRS_CHROMA_SPLIT}" if FNIRS_CHROMA_SPLIT != "none" else ""      # priority-CHROMASPLIT
 _FNIRSINJECT_SUBTAG = f"_fninj{FUSION_FNIRS_INJECT}" if FUSION_FNIRS_INJECT != "none" else ""
 _CONVDROP_SUBTAG = ((f"_convdo{CONV_DROPOUT:g}" if CONV_DROPOUT is not None else "")
                     + ("_convdoElem" if CONV_DROPOUT_TYPE != "channel" else ""))
@@ -1223,6 +1234,7 @@ with CrashSafeLogger(os.path.join(RESULTS_DIR_VARIANT, f"baseline_run_log_{RUN_T
                 erp_branch=ERP_BRANCH,                    # priority-ERP: "none" (default) = no ERP pathway
                 egta_pcc_lambda=EGTA_PCC_LAMBDA,          # priority-EGTAPCC: 0.0 (default) = term off
                 eeg_filterbank=EEG_FILTERBANK,            # priority-FILTERBANK: "none" (default) = off
+                fnirs_chroma_split=FNIRS_CHROMA_SPLIT,    # priority-CHROMASPLIT: "none" (default) = off
                 eeg_filterbank_scope=EEG_FILTERBANK_SCOPE,
                 stage1_max_epochs=STAGE1_MAX_EPOCHS, stage1_patience=STAGE1_PATIENCE,
                 stage2_max_epochs=STAGE2_MAX_EPOCHS,

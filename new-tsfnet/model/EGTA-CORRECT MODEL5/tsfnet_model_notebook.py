@@ -1327,8 +1327,36 @@ class TSFNet(nn.Module):
                  efgf_gate_mode="clamp", efgf_gate_init=-6.0,
                  conv_dropout=None, conv_dropout_type="channel",
                  fusion_fnirs_inject="none", erp_branch="none",
-                 egta_pcc_lambda=0.0, eeg_filterbank="none", eeg_filterbank_scope="both"):
+                 egta_pcc_lambda=0.0, eeg_filterbank="none", eeg_filterbank_scope="both",
+                 fnirs_chroma_split="none"):
         super().__init__()
+        # priority-CHROMASPLIT (MGFNet, Zhang et al. 2026): that model gives HbO
+        # and HbR their OWN encoders with non-shared parameters, plus a third
+        # HbO-HbR pair branch. Here conv1 of the single FNIRSBranch mixes both
+        # chromophores from its very first layer, i.e. it can only learn a FIXED
+        # linear combination of two signals that are physiologically ANTI-PHASED
+        # and whose amplitude ratio varies by subject and by cortical region.
+        #   "none" (default): unchanged, bit-exact.
+        #   "separate":      + one FNIRSBranch on HbO alone and one on HbR alone.
+        #   "separate_pair": + a third, independently-weighted branch on the
+        #                    (HbO, HbR) pair (MGFNet's pair branch; the main
+        #                    branch already sees the pair, so this one adds
+        #                    independent capacity for it rather than a new input).
+        # The extra branches are added to fn_pooled ONLY -- the fNIRS DECISION
+        # path (CAFE/EGTA -> clf_fnirs), which run69 showed to be this model's
+        # strongest single predictor. fn_s1/fn_s2 are untouched, so EFGF and the
+        # fusion branch stay bit-identical to the baseline.
+        # Each contribution passes through a ZERO-INITIALIZED 1x1 conv (weight
+        # AND bias), so the forward pass at step 0 equals the baseline exactly
+        # while d(out)/d(W) != 0 -- the same safe-capacity pattern as
+        # fusion_fnirs_inject. Built under a saved/restored RNG state (rule 6).
+        if fnirs_chroma_split not in ("none", "separate", "separate_pair"):
+            raise ValueError(f"fnirs_chroma_split must be 'none', 'separate' or "
+                             f"'separate_pair', got {fnirs_chroma_split!r}")
+        if fnirs_chroma_split != "none" and fnirs_num_chromophores != 2:
+            raise ValueError("fnirs_chroma_split requires --fnirs-num-chromophores 2 "
+                             "(HbO/HbR); the HbT variant is a separate experiment")
+        self.fnirs_chroma_split = fnirs_chroma_split
         # priority-FILTERBANK: "none" (default) = no filter bank, bit-exact prior.
         if eeg_filterbank not in ("none", "fixed", "learnable"):
             raise ValueError(f"eeg_filterbank must be 'none', 'fixed' or 'learnable', got {eeg_filterbank!r}")
@@ -1591,6 +1619,25 @@ class TSFNet(nn.Module):
             self.eeg_filterbank = GridFilterBank(mode=eeg_filterbank)   # always GAP -- separate weights, same architecture (Sec. 3.1)
         self.fnirs_branch = FNIRSBranch(dropout=_conv_p, n_chromophores=fnirs_num_chromophores,
                                         dropout_type=conv_dropout_type)
+        if fnirs_chroma_split != "none":                      # priority-CHROMASPLIT
+            _rng_state = torch.get_rng_state()
+            try:
+                self.fnirs_branch_hbo = FNIRSBranch(dropout=_conv_p, n_chromophores=1,
+                                                    dropout_type=conv_dropout_type)
+                self.fnirs_branch_hbr = FNIRSBranch(dropout=_conv_p, n_chromophores=1,
+                                                    dropout_type=conv_dropout_type)
+                self.chroma_mix_hbo = nn.Conv2d(32, 32, kernel_size=1)
+                self.chroma_mix_hbr = nn.Conv2d(32, 32, kernel_size=1)
+                _mixers = [self.chroma_mix_hbo, self.chroma_mix_hbr]
+                if fnirs_chroma_split == "separate_pair":
+                    self.fnirs_branch_pair = FNIRSBranch(dropout=_conv_p, n_chromophores=2,
+                                                         dropout_type=conv_dropout_type)
+                    self.chroma_mix_pair = nn.Conv2d(32, 32, kernel_size=1)
+                    _mixers.append(self.chroma_mix_pair)
+                for _m in _mixers:
+                    nn.init.zeros_(_m.weight); nn.init.zeros_(_m.bias)
+            finally:
+                torch.set_rng_state(_rng_state)
 
         # EFGF stage 1: operates on conv1 outputs (channels=16, EEG kernel matches Table1
         # "EFGF1 Conv1" = 2x2x6, fNIRS kernel matches "EFGF1 Conv2" = 2x2x3)
@@ -1842,6 +1889,20 @@ class TSFNet(nn.Module):
         else:
             x_fnirs = x_fnirs * self._fnirs_chroma_mask
         fn_s1, fn_s2, fn_pooled = self.fnirs_branch(x_fnirs)
+        if self.fnirs_chroma_split != "none":                 # priority-CHROMASPLIT
+            # fn_pooled: (B, S, 32, 4, 4). Each extra branch's pooled map goes
+            # through its own zero-init 1x1 conv and is ADDED. fn_s1/fn_s2 (EFGF)
+            # are deliberately NOT modified.
+            _B, _S = fn_pooled.shape[0], fn_pooled.shape[1]
+            def _mix(mixer, pooled):
+                return mixer(pooled.reshape(_B * _S, *pooled.shape[2:])).reshape_as(pooled)
+            fn_pooled = fn_pooled + _mix(
+                self.chroma_mix_hbo, self.fnirs_branch_hbo(x_fnirs[..., 0:1])[2])
+            fn_pooled = fn_pooled + _mix(
+                self.chroma_mix_hbr, self.fnirs_branch_hbr(x_fnirs[..., 1:2])[2])
+            if self.fnirs_chroma_split == "separate_pair":
+                fn_pooled = fn_pooled + _mix(
+                    self.chroma_mix_pair, self.fnirs_branch_pair(x_fnirs)[2])
 
         # Fusion branch: manually driven through conv1 -> EFGF1 -> conv2 -> EFGF2, so each
         # EFGF stage's output becomes the INPUT to the fusion branch's next conv layer
@@ -3819,6 +3880,7 @@ def run_subject_cross_session(subject_dir, subject_id, device="cuda" if torch.cu
                                fusion_fnirs_inject="none", erp_branch="none",
                                egta_pcc_lambda=0.0,
                                eeg_filterbank="none", eeg_filterbank_scope="both",
+                               fnirs_chroma_split="none",
                                fnirs_num_chromophores=2, eeg_spatial_mode="none",
                                eeg_spatial_layers=2, eeg_spatial_heads=4,
                                eeg_spatial_d_model=64,
@@ -4238,6 +4300,7 @@ def run_subject_cross_session(subject_dir, subject_id, device="cuda" if torch.cu
                         fusion_fnirs_inject=fusion_fnirs_inject, erp_branch=erp_branch,
                         egta_pcc_lambda=egta_pcc_lambda,
                         eeg_filterbank=eeg_filterbank, eeg_filterbank_scope=eeg_filterbank_scope,
+                        fnirs_chroma_split=fnirs_chroma_split,
                         fnirs_num_chromophores=fnirs_num_chromophores,
                         eeg_spatial_mode=eeg_spatial_mode,
                         eeg_spatial_layers=eeg_spatial_layers,
