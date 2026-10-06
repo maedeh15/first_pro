@@ -502,6 +502,17 @@ _arg_parser.add_argument("--stage1-max-epochs", type=int, default=100,
 _arg_parser.add_argument("--stage1-patience", type=int, default=20,
                           help="priority-G1: stage-1 early-stopping patience (epochs without "
                                "val-accuracy improvement). Default 20 = prior behavior.")
+_arg_parser.add_argument("--best-min-epoch", type=int, default=1,
+                          help="priority-BESTSEL: epochs before this one cannot be chosen as the "
+                               "best stage-1 checkpoint and do not count toward patience. Default 1 "
+                               "= prior behavior bit-for-bit. Baseline diagnosis: validation has 3 "
+                               "trials, corr(val_acc, test_acc) = -0.04, and early 'best' epochs "
+                               "(<=5) went with lower test accuracy. Try 10.")
+_arg_parser.add_argument("--stage1-fixed-epochs", type=int, default=0,
+                          help="priority-BESTSEL: train exactly this many stage-1 epochs and keep the "
+                               "FINAL weights -- no validation-based selection, no early stopping. "
+                               "Default 0 = off. Baseline median 'best' epoch is 11. Mutually "
+                               "exclusive with --best-min-epoch > 1.")
 _arg_parser.add_argument("--stage2-max-epochs", type=int, default=80,
                           help="priority-G1: stage-2 epoch budget. Default 80 = prior behavior. "
                                "Stage 2 has no patience concept -- it stops on the stage-2 loss "
@@ -757,6 +768,12 @@ if CONV_DROPOUT is not None and not (0.0 <= CONV_DROPOUT < 1.0):
     raise ValueError(f"--conv-dropout must be in [0, 1), got {CONV_DROPOUT}")
 STAGE1_MAX_EPOCHS = SEED_ARGS.stage1_max_epochs
 STAGE1_PATIENCE = SEED_ARGS.stage1_patience
+BEST_MIN_EPOCH = SEED_ARGS.best_min_epoch
+STAGE1_FIXED_EPOCHS = SEED_ARGS.stage1_fixed_epochs
+if BEST_MIN_EPOCH < 1 or STAGE1_FIXED_EPOCHS < 0:
+    raise ValueError("--best-min-epoch must be >= 1 and --stage1-fixed-epochs >= 0")
+if STAGE1_FIXED_EPOCHS > 0 and BEST_MIN_EPOCH > 1:
+    raise ValueError("--stage1-fixed-epochs and --best-min-epoch > 1 are mutually exclusive")
 STAGE2_MAX_EPOCHS = SEED_ARGS.stage2_max_epochs
 WARMUP_EPOCHS = SEED_ARGS.warmup_epochs
 MIN_LR_FACTOR = SEED_ARGS.min_lr_factor
@@ -997,6 +1014,7 @@ for _nm, _v, _dflt in (("lr", LR, 1e-3), ("wd", WEIGHT_DECAY, 1e-4),
                         ("do", DROPOUT, 0.5), ("cdo", CAFE_DROPOUT, 0.3),
                         ("s1e", STAGE1_MAX_EPOCHS, 100), ("s1p", STAGE1_PATIENCE, 20),
                         ("s2e", STAGE2_MAX_EPOCHS, 80),
+                        ("bme", BEST_MIN_EPOCH, 1), ("fix", STAGE1_FIXED_EPOCHS, 0),   # priority-BESTSEL
                         ("wu", WARMUP_EPOCHS, 0), ("mlf", MIN_LR_FACTOR, 1.0)):
     if _v != _dflt:
         _G1_PARTS.append(f"{_nm}{_v}")
@@ -1251,6 +1269,7 @@ with CrashSafeLogger(os.path.join(RESULTS_DIR_VARIANT, f"baseline_run_log_{RUN_T
                 fnirs_chroma_split=FNIRS_CHROMA_SPLIT,    # priority-CHROMASPLIT: "none" (default) = off
                 eeg_filterbank_scope=EEG_FILTERBANK_SCOPE,
                 stage1_max_epochs=STAGE1_MAX_EPOCHS, stage1_patience=STAGE1_PATIENCE,
+                best_min_epoch=BEST_MIN_EPOCH, stage1_fixed_epochs=STAGE1_FIXED_EPOCHS,
                 stage2_max_epochs=STAGE2_MAX_EPOCHS,
                 warmup_epochs=WARMUP_EPOCHS, min_lr_factor=MIN_LR_FACTOR,
             )

@@ -3448,8 +3448,23 @@ def train_one_fold(model, train_loader, val_loader, test_loader, device,
                     no_decay_scalars=False, stage2_stop_mode="loss",
                     noise_aware_snr_db=None, noise_aware_prob=0.0,
                     swa_enabled=False, swa_start_epoch=None, swa_lr=None,
-                    efgf_lambda=1.0, cafe_lambda=1.0):
+                    efgf_lambda=1.0, cafe_lambda=1.0,
+                    best_min_epoch=1, stage1_fixed_epochs=0):
     """
+    best_min_epoch / stage1_fixed_epochs: priority-BESTSEL (checkpoint selection).
+      Diagnosis (baseline run60, 78 folds): validation uses ONE trial per class,
+      so val_acc is a handful of discrete values; corr(val_acc, test_acc) = -0.04,
+      val_acc at the chosen epoch averages 0.77 vs test 0.61, and in 25/78 folds
+      the "best" epoch is <= 5 (test 0.590 vs 0.616 for the other folds).
+      * best_min_epoch=N (default 1 = prior behavior, bit-exact): epochs < N are
+        still TRAINED but can never become the best checkpoint and do not count
+        toward patience (so early stopping cannot fire before the first eligible
+        epoch). Must be <= stage1_max_epochs.
+      * stage1_fixed_epochs=E (default 0 = off): NO validation-based selection
+        and no early stopping: train exactly E epochs and keep the LAST epoch's
+        weights. The validation metrics are still logged. Mutually exclusive
+        with best_min_epoch > 1. best_val_acc in the report then means the
+        validation accuracy of the final epoch.
     swa_enabled: ISOLATED ABLATION PARAMETER (priority-SWA). Stochastic Weight
     Averaging (Izmailov et al. 2018) -- averages model weights over the TAIL of
     stage-1 training (a wider, flatter minimum empirically generalizes better,
@@ -3631,8 +3646,24 @@ def train_one_fold(model, train_loader, val_loader, test_loader, device,
     else:
         optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
     # priority-G1: None unless the caller asked for a schedule (see docstring).
+    # priority-BESTSEL: fail fast, and in fixed mode the epoch budget is E.
+    if best_min_epoch < 1 or stage1_fixed_epochs < 0:
+        raise ValueError(f"best_min_epoch must be >= 1 and stage1_fixed_epochs >= 0, "
+                         f"got {best_min_epoch}, {stage1_fixed_epochs}")
+    if stage1_fixed_epochs > 0 and best_min_epoch > 1:
+        raise ValueError("best_min_epoch > 1 and stage1_fixed_epochs > 0 are mutually exclusive")
+    if best_min_epoch > stage1_max_epochs:
+        raise ValueError(f"best_min_epoch ({best_min_epoch}) > stage1_max_epochs ({stage1_max_epochs}): "
+                         f"no epoch would ever be eligible")
+    _s1_epochs = stage1_fixed_epochs if stage1_fixed_epochs > 0 else stage1_max_epochs
+    if stage1_fixed_epochs > 0:
+        log_fn(f"  [bestsel] FIXED {stage1_fixed_epochs} epochs, final-epoch weights, no val-based "
+               f"selection / early stopping (priority-BESTSEL)")
+    elif best_min_epoch > 1:
+        log_fn(f"  [bestsel] epochs < {best_min_epoch} are not eligible as best checkpoint "
+               f"(priority-BESTSEL)")
     scheduler = make_warmup_cosine_scheduler(
-        optimizer, warmup_epochs, stage1_max_epochs, min_lr_factor)
+        optimizer, warmup_epochs, _s1_epochs, min_lr_factor)
 
     history = {"epoch": [], "train_loss": [], "train_acc": [],
                "val_loss": [], "val_acc": [], "val_kappa": [],
@@ -3666,7 +3697,7 @@ def train_one_fold(model, train_loader, val_loader, test_loader, device,
     stage1_final_train_loss = None
     stage1_best_val_train_loss = None
 
-    for epoch in range(1, stage1_max_epochs + 1):
+    for epoch in range(1, _s1_epochs + 1):
         model.train()
         epoch_loss = 0.0
         n_seen = 0
@@ -3720,13 +3751,21 @@ def train_one_fold(model, train_loader, val_loader, test_loader, device,
         history["stage"].append(1)   # stage 2 computes no val metrics, so history is stage-1 only
         history["gates"].append(_collect_gate_values(model))
 
-        if val_acc > best_val_acc:
+        if stage1_fixed_epochs > 0:
+            # priority-BESTSEL fixed mode: the latest epoch is always "best";
+            # only the final one is written to disk.
+            best_val_acc = val_acc
+            best_epoch = epoch
+            stage1_best_val_train_loss = train_loss
+            if epoch == stage1_fixed_epochs:
+                torch.save(model.state_dict(), ckpt_path)
+        elif epoch >= best_min_epoch and val_acc > best_val_acc:
             best_val_acc = val_acc
             best_epoch = epoch
             stage1_best_val_train_loss = train_loss
             torch.save(model.state_dict(), ckpt_path)   # disk, not just memory -- crash-safe
             epochs_no_improve = 0
-        else:
+        elif epoch >= best_min_epoch:
             epochs_no_improve += 1
         # priority-SWA: once the tail phase starts, swa_scheduler (constant
         # swa_lr) takes over from whatever `scheduler` would have done this
@@ -3738,7 +3777,7 @@ def train_one_fold(model, train_loader, val_loader, test_loader, device,
             _swa_updated = True
         elif scheduler is not None:
             scheduler.step()   # priority-G1: once per completed epoch
-        if epochs_no_improve >= stage1_patience:
+        if stage1_fixed_epochs == 0 and epochs_no_improve >= stage1_patience:
             log_fn(f"  [stage1] early stop at epoch {epoch} (no improvement for {stage1_patience} epochs)")
             break
 
@@ -3960,6 +3999,9 @@ def train_one_fold(model, train_loader, val_loader, test_loader, device,
             adapt_batchnorm_to_target(model, test_loader, device, log_fn=log_fn)
         report = detailed_test_report(model, test_loader, device)
     report["best_val_acc"] = best_val_acc
+    report["stage1_best_epoch"] = int(best_epoch)                      # priority-BESTSEL (new keys)
+    report["stage1_selection"] = ("fixed" if stage1_fixed_epochs > 0 else
+                                  f"val_min_epoch{best_min_epoch}" if best_min_epoch > 1 else "val")
     report["final_train_acc"] = train_acc
     # Primary generalization-gap metric: best (leakage-free, trial-level) val_acc vs.
     # true held-out-session test_acc. Large gap = val is not a good proxy for a fully
