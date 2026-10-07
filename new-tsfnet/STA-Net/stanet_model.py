@@ -90,7 +90,7 @@ class FGSA(nn.Module):
         out = guided + (g * eeg + (1 - g) * eeg_fusion)
         pcc = pearson_r(eeg.mean(dim=(-1, 1)).flatten(1),   # official: mean over time & channels
                         phi.flatten(1))
-        return out, pcc
+        return out, pcc, phi
 
 
 class ConvBlock(nn.Module):
@@ -107,8 +107,8 @@ class ConvBlock(nn.Module):
         f = F.elu(self.fn_bn(self.fn_conv(fnirs.flatten(0, 1))))   # BN stats over B*S, as Keras
         f = f.view(B, S, *f.shape[1:])
         u = F.elu(self.fu_bn(self.fu_conv(fusion)))
-        u, pcc = self.fga(u, e, f)
-        return u, e, f, pcc
+        u, pcc, phi = self.fga(u, e, f)
+        return u, e, f, pcc, phi
 
 
 class EGTA(nn.Module):
@@ -156,7 +156,9 @@ class STANet(nn.Module):
         return x.permute(0, 2, 3, 4, 1).flatten(1)
 
     def forward(self, eeg, fnirs):
-        """returns dict: p_final, p_eeg, p_fusion, p_fnirs (probabilities), w (B,2), att (B,l), reg (scalar)"""
+        """returns dict: p_final, p_eeg, p_fusion, p_fnirs (probabilities), w (B,2)=[kappa_fusion,kappa_fnirs],
+        att (B,l) EGTA attention over the l lagged fNIRS windows, reg (scalar), fusion_emb/fnirs_emb/eeg_emb (B,256),
+        phi1 (B,1,8,8,1), phi2 (B,1,4,4,1) FGSA spatial attention maps"""
         if eeg.dim() == 4:
             eeg = eeg.unsqueeze(1)                          # (B,1,H,W,T)
         else:
@@ -164,9 +166,9 @@ class STANet(nn.Module):
         B, S = fnirs.shape[:2]
         fnirs = fnirs.permute(0, 1, 5, 2, 3, 4)             # (B,S,2,H,W,T)
 
-        fu1, e1, f1, pcc1 = self.b1(eeg, eeg, fnirs)
+        fu1, e1, f1, pcc1, phi1 = self.b1(eeg, eeg, fnirs)
         fu1, e1, f1 = self.drop(fu1), self.drop(e1), self.drop(f1)
-        fu2, e2, f2, pcc2 = self.b2(fu1, e1, f1)
+        fu2, e2, f2, pcc2, phi2 = self.b2(fu1, e1, f1)
         fu2, e2, f2 = (self.drop(x.mean(dim=-1, keepdim=True)) for x in (fu2, e2, f2))
 
         fu_flat = self._flat_cl(fu2)                                                  # (B,512)
@@ -183,7 +185,10 @@ class STANet(nn.Module):
         p_final = w[:, 0:1] * p_fu + w[:, 1:2] * p_fn
         reg = (1 - pcc1) + (1 - pcc2) + (1 - pcc_ef)
         return {"p_final": p_final, "p_eeg": p_eeg, "p_fusion": p_fu, "p_fnirs": p_fn,
-                "w": w, "att": att, "reg": reg}
+                "w": w, "att": att, "reg": reg,
+                # --- extras for diagnostics / XAI (no effect on training) ---
+                "fusion_emb": fusion_feat, "fnirs_emb": fnirs_feat, "eeg_emb": eeg_h,
+                "phi1": phi1, "phi2": phi2}
 
 
 def sta_loss(out, y_onehot, eps=1e-7):

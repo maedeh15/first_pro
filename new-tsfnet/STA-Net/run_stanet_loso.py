@@ -33,6 +33,8 @@ import numpy as np
 import torch
 
 from stanet_model import STANet, sta_loss
+from stanet_common import (NUM_CLASSES, CLASS_NAMES, load_subject, WindowLoader, cohen_kappa,
+                           confusion_matrix_np as confusion, adapt_batchnorm_to_target)
 
 try:
     from crash_safe_logger import CrashSafeLogger
@@ -41,10 +43,6 @@ except ImportError:
         def __init__(self, *a, **k): pass
         def __enter__(self): return self
         def __exit__(self, *a): return False
-
-NUM_CLASSES = 3
-CLASS_NAMES = ["0-back", "2-back", "3-back"]
-FNIRS_TRAIN_SCALE = 1e3          # official run_sta_net.py: fnirs *= 1e3
 
 p = argparse.ArgumentParser()
 p.add_argument("--data-root", default=r"E:\kntu\Thesis\codes\Results\STANET_PAPER_EXACT_nback")
@@ -60,6 +58,12 @@ p.add_argument("--stage1-patience", type=int, default=50)
 p.add_argument("--stage2-max-epochs", type=int, default=200)
 p.add_argument("--stage2-stop", choices=["loss", "epoch_count", "none"], default="loss",
                help="loss = official; epoch_count = stage 2 runs best_epoch more epochs; none = skip stage 2")
+p.add_argument("--adabn", action="store_true", default=False,
+               help="AdaBN on the held-out session's UNLABELED windows before scoring (transductive; NOT part of "
+                    "STA-Net). Only for matching a TSFNet run that used --adabn. The saved checkpoint is pre-AdaBN.")
+p.add_argument("--diagnostics", action="store_true", default=False,
+               help="run stanet_diagnostics.run_fold_diagnostics for the whitelisted subjects")
+p.add_argument("--diagnostics-subjects", default=None, help="override whitelist, e.g. 'VP001,VP006' or 'ALL'")
 p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
 args, _ = p.parse_known_args()
 
@@ -75,15 +79,6 @@ def set_seed(seed):
 
 
 # ---------------------------------------------------------------- data
-def load_subject(subject_dir, subject_id):
-    f = lambda k: np.load(os.path.join(subject_dir, f"{subject_id}_{k}.npy"))
-    eeg = f("eeg_windows").astype(np.float32, copy=False)
-    fnirs = f("fnirs_windows").astype(np.float32, copy=False)
-    fnirs *= FNIRS_TRAIN_SCALE                                # in place: no second copy in RAM
-    return (torch.from_numpy(eeg), torch.from_numpy(fnirs), f("labels").astype(np.int64),
-            f("session_ids"), f("trial_ids"))
-
-
 def batches(eeg, fnirs, labels, idx, bs, shuffle, device):
     idx = np.random.permutation(idx) if shuffle else idx
     for i in range(0, len(idx), bs):
@@ -137,19 +132,6 @@ def train_epoch(model, opt, eeg, fnirs, labels, idx, device, bs):
     return cls_sum / n
 
 
-def cohen_kappa(y_true, y_pred):
-    po = (y_true == y_pred).mean()
-    pe = sum((y_true == c).mean() * (y_pred == c).mean() for c in np.unique(np.concatenate([y_true, y_pred])))
-    return (po - pe) / (1 - pe) if 1 - pe > 1e-8 else 0.0
-
-
-def confusion(y_true, y_pred):
-    cm = np.zeros((NUM_CLASSES, NUM_CLASSES), dtype=int)
-    for t, q in zip(y_true, y_pred):
-        cm[int(t), int(q)] += 1
-    return cm
-
-
 def run_fold(eeg, fnirs, labels, sessions, trials, test_session, subject_id):
     test_session = int(test_session)
     dev = args.device
@@ -193,6 +175,10 @@ def run_fold(eeg, fnirs, labels, sessions, trials, test_session, subject_id):
                 break
         print(f"    [s2] {s2_epochs} epoch(s), last train_ce {tr_ce:.4f} (target {best_train_ce:.4f})")
 
+    # checkpoint = weights after stage 2, BEFORE any AdaBN (so replays can re-apply AdaBN identically)
+    torch.save(model.state_dict(), os.path.join(RESULTS_DIR, f"{subject_id}_session{test_session}_best.pt"))
+    if args.adabn:
+        adapt_batchnorm_to_target(model, WindowLoader(eeg, fnirs, labels, te, 64), dev)
     _, pred, branch, w, y_true = evaluate(model, eeg, fnirs, labels, te, dev)
     acc, kappa = float((pred == y_true).mean()), float(cohen_kappa(y_true, pred))
     res = {"test_session": test_session, "acc": acc, "kappa": kappa,
@@ -204,6 +190,18 @@ def run_fold(eeg, fnirs, labels, sessions, trials, test_session, subject_id):
            "best_epoch_s1": best_ep, "epochs_s2": s2_epochs,
            "n_train": int(len(tr)), "n_val": int(len(va)), "n_test": int(len(te))}
     print(f"    TEST S{test_session}: acc {acc * 100:.2f}%  kappa {kappa:.3f}")
+    if args.diagnostics:
+        try:
+            import stanet_diagnostics as D
+            if args.diagnostics_subjects:
+                D.DIAGNOSTIC_SUBJECTS = "ALL" if args.diagnostics_subjects == "ALL" else args.diagnostics_subjects.split(",")
+            d = D.run_fold_diagnostics(model, WindowLoader(eeg, fnirs, labels, tr_all, 32),
+                                       WindowLoader(eeg, fnirs, labels, te, 32), dev,
+                                       subject_id, test_session, RESULTS_DIR)
+            if d:
+                res["diagnostics"] = {k: v for k, v in d.items() if k != "figures"}
+        except Exception as e:
+            print(f"    [diagnostics] skipped: {e}")
     return res
 
 
