@@ -180,6 +180,9 @@ p.add_argument("--eeg-readout-mode", type=str, default="h_n",
 p.add_argument("--fnirs-chroma-mode", type=str, default="both")
 p.add_argument("--fnirs-num-chromophores", type=int, default=2, choices=[2, 3])
 p.add_argument("--eeg-spatial-mode", type=str, default="none")
+p.add_argument("--bandtok-norm", type=str, default="none", choices=["none", "relative"])
+p.add_argument("--bandtok-d-model", type=int, default=32)
+p.add_argument("--bandtok-heads", type=int, default=4)
 p.add_argument("--eeg-band-mode", type=str, default="none")
 p.add_argument("--eeg-backbone", type=str, default="native")
 p.add_argument("--norm-mode", type=str, default="batch", choices=["batch", "group"])
@@ -308,6 +311,8 @@ def collect_fold_posteriors(full, test_idx, ckpt_path, device, batch_size, adabn
         eeg_filterbank=ARGS.eeg_filterbank,
         eeg_filterbank_scope=ARGS.eeg_filterbank_scope,
         fnirs_chroma_split=ARGS.fnirs_chroma_split,
+        bandtok_d_model=ARGS.bandtok_d_model, bandtok_heads=ARGS.bandtok_heads,
+        bandtok_norm=ARGS.bandtok_norm,
     ).to(device)
 
     state = torch.load(ckpt_path, map_location=device)

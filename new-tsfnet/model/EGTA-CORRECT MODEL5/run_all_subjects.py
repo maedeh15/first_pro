@@ -502,6 +502,17 @@ _arg_parser.add_argument("--stage1-max-epochs", type=int, default=100,
 _arg_parser.add_argument("--stage1-patience", type=int, default=20,
                           help="priority-G1: stage-1 early-stopping patience (epochs without "
                                "val-accuracy improvement). Default 20 = prior behavior.")
+_arg_parser.add_argument("--best-min-epoch", type=int, default=1,
+                          help="priority-BESTSEL: epochs before this one cannot be chosen as the "
+                               "best stage-1 checkpoint and do not count toward patience. Default 1 "
+                               "= prior behavior bit-for-bit. Baseline diagnosis: validation has 3 "
+                               "trials, corr(val_acc, test_acc) = -0.04, and early 'best' epochs "
+                               "(<=5) went with lower test accuracy. Try 10.")
+_arg_parser.add_argument("--stage1-fixed-epochs", type=int, default=0,
+                          help="priority-BESTSEL: train exactly this many stage-1 epochs and keep the "
+                               "FINAL weights -- no validation-based selection, no early stopping. "
+                               "Default 0 = off. Baseline median 'best' epoch is 11. Mutually "
+                               "exclusive with --best-min-epoch > 1.")
 _arg_parser.add_argument("--stage2-max-epochs", type=int, default=80,
                           help="priority-G1: stage-2 epoch budget. Default 80 = prior behavior. "
                                "Stage 2 has no patience concept -- it stops on the stage-2 loss "
@@ -525,8 +536,12 @@ _arg_parser.add_argument("--fnirs-num-chromophores", type=int, default=2, choice
                                "of its grid-level variance is already linearly reachable from "
                                "the other two, so expect a small effect at best.")
 _arg_parser.add_argument("--eeg-spatial-mode", type=str, default="none",
-                          choices=["none", "mhsa"],
-                          help="priority-G4 isolated variable: 'mhsa' adds multi-head "
+                          choices=["none", "mhsa", "bandtok"],
+                          help="'bandtok' (priority-BANDTOK): channel attention over "
+                               "5-band log-POWER tokens (one pre-LN block, zero-init gates, joined to "
+                               "the EEG classifier through a zero-init Linear; ~30k params). "
+                               "Needs the channel-space windows. "
+                               "priority-G4 isolated variable: 'mhsa' adds multi-head "
                                "self-attention over EEG CHANNELS AS TOKENS (MSTFDN's E-SFEM; "
                                "their single largest ablation effect, +22.66 points on this "
                                "exact 3-class N-back LOSO protocol) and concatenates its "
@@ -536,6 +551,12 @@ _arg_parser.add_argument("--eeg-spatial-mode", type=str, default="none",
                                "Scope is deliberately limited to the y_eeg path, exactly like "
                                "the existing eeg-temporal-mode ablation. Default 'none' "
                                "reproduces prior behavior bit-for-bit.")
+_arg_parser.add_argument("--bandtok-norm", type=str, default="none", choices=["none", "relative"],
+                          help="priority-BANDTOK: 'none' = log band power; 'relative' = log of "
+                               "band/sum-over-bands power (drops overall amplitude, keeps the "
+                               "spectral shape). Only used with --eeg-spatial-mode bandtok.")
+_arg_parser.add_argument("--bandtok-d-model", type=int, default=32)
+_arg_parser.add_argument("--bandtok-heads", type=int, default=4)
 _arg_parser.add_argument("--eeg-spatial-layers", type=int, default=2,
                           help="priority-G4: Transformer encoder layers in the channel-wise "
                                "MHSA module. MSTFDN uses 2 for the 3-class N-back task.")
@@ -747,6 +768,12 @@ if CONV_DROPOUT is not None and not (0.0 <= CONV_DROPOUT < 1.0):
     raise ValueError(f"--conv-dropout must be in [0, 1), got {CONV_DROPOUT}")
 STAGE1_MAX_EPOCHS = SEED_ARGS.stage1_max_epochs
 STAGE1_PATIENCE = SEED_ARGS.stage1_patience
+BEST_MIN_EPOCH = SEED_ARGS.best_min_epoch
+STAGE1_FIXED_EPOCHS = SEED_ARGS.stage1_fixed_epochs
+if BEST_MIN_EPOCH < 1 or STAGE1_FIXED_EPOCHS < 0:
+    raise ValueError("--best-min-epoch must be >= 1 and --stage1-fixed-epochs >= 0")
+if STAGE1_FIXED_EPOCHS > 0 and BEST_MIN_EPOCH > 1:
+    raise ValueError("--stage1-fixed-epochs and --best-min-epoch > 1 are mutually exclusive")
 STAGE2_MAX_EPOCHS = SEED_ARGS.stage2_max_epochs
 WARMUP_EPOCHS = SEED_ARGS.warmup_epochs
 MIN_LR_FACTOR = SEED_ARGS.min_lr_factor
@@ -933,7 +960,9 @@ _LAMBDA_SUBTAG = (f"_lam{LAMBDA_EEG}-{LAMBDA_FNIRS}"
 _CHROMA_SUBTAG = f"_{FNIRS_CHROMA_MODE}" if FNIRS_CHROMA_MODE != "both" else ""
 _CHROMO_SUBTAG = f"_chr{FNIRS_NUM_CHROMOPHORES}" if FNIRS_NUM_CHROMOPHORES != 2 else ""
 _ESP_SUBTAG = (f"_esp{EEG_SPATIAL_MODE}L{EEG_SPATIAL_LAYERS}H{EEG_SPATIAL_HEADS}"
-               if EEG_SPATIAL_MODE != "none" else "")
+               if EEG_SPATIAL_MODE not in ("none", "bandtok") else "")
+if EEG_SPATIAL_MODE == "bandtok":
+    _ESP_SUBTAG = f"_bandtok{SEED_ARGS.bandtok_norm}d{SEED_ARGS.bandtok_d_model}h{SEED_ARGS.bandtok_heads}"
 _MHS_SUBTAG = f"_mhs{MHS_LAMBDA}" if MHS_LAMBDA > 0.0 else ""
 _PCCLAMBDA_SUBTAG = ((f"_efgfL{EFGF_LAMBDA:g}" if EFGF_LAMBDA != 1.0 else "")
                      + (f"_cafeL{CAFE_LAMBDA:g}" if CAFE_LAMBDA != 1.0 else ""))
@@ -985,6 +1014,7 @@ for _nm, _v, _dflt in (("lr", LR, 1e-3), ("wd", WEIGHT_DECAY, 1e-4),
                         ("do", DROPOUT, 0.5), ("cdo", CAFE_DROPOUT, 0.3),
                         ("s1e", STAGE1_MAX_EPOCHS, 100), ("s1p", STAGE1_PATIENCE, 20),
                         ("s2e", STAGE2_MAX_EPOCHS, 80),
+                        ("bme", BEST_MIN_EPOCH, 1), ("fix", STAGE1_FIXED_EPOCHS, 0),   # priority-BESTSEL
                         ("wu", WARMUP_EPOCHS, 0), ("mlf", MIN_LR_FACTOR, 1.0)):
     if _v != _dflt:
         _G1_PARTS.append(f"{_nm}{_v}")
@@ -1196,6 +1226,8 @@ with CrashSafeLogger(os.path.join(RESULTS_DIR_VARIANT, f"baseline_run_log_{RUN_T
                 fc_num_channels=FC_NUM_CHANNELS,
                 fc_embed_dim=FC_EMBED_DIM,
                 fnirs_num_chromophores=FNIRS_NUM_CHROMOPHORES,
+                bandtok_d_model=SEED_ARGS.bandtok_d_model, bandtok_heads=SEED_ARGS.bandtok_heads,
+                bandtok_norm=SEED_ARGS.bandtok_norm,
                 eeg_spatial_mode=EEG_SPATIAL_MODE,        # ISOLATED ABLATION (priority-G4): channel-wise MHSA on the EEG branch
                 eeg_spatial_layers=EEG_SPATIAL_LAYERS,
                 eeg_spatial_heads=EEG_SPATIAL_HEADS,   # ISOLATED ABLATION (priority-G2a): 2 (default) = HbO/HbR, 3 = +HbT
@@ -1237,6 +1269,7 @@ with CrashSafeLogger(os.path.join(RESULTS_DIR_VARIANT, f"baseline_run_log_{RUN_T
                 fnirs_chroma_split=FNIRS_CHROMA_SPLIT,    # priority-CHROMASPLIT: "none" (default) = off
                 eeg_filterbank_scope=EEG_FILTERBANK_SCOPE,
                 stage1_max_epochs=STAGE1_MAX_EPOCHS, stage1_patience=STAGE1_PATIENCE,
+                best_min_epoch=BEST_MIN_EPOCH, stage1_fixed_epochs=STAGE1_FIXED_EPOCHS,
                 stage2_max_epochs=STAGE2_MAX_EPOCHS,
                 warmup_epochs=WARMUP_EPOCHS, min_lr_factor=MIN_LR_FACTOR,
             )

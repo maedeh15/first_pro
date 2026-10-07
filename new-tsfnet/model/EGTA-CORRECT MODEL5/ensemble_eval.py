@@ -1,5 +1,5 @@
 """
-ensemble_eval-new.py -- seed-ensemble evaluation from SAVED checkpoints (no training).
+ensemble_eval.py -- seed-ensemble evaluation from SAVED checkpoints (no training).
 
 WHY
 ===
@@ -19,13 +19,13 @@ WHAT IT DOES
 For every subject and every held-out session:
   1. for every seed: load VPxxx_session{k}_best.pt, RE-APPLY AdaBN on the held-out
      session's unlabeled inputs (AdaBN is NOT stored in the checkpoint -- see
-     trial_level_eval-new.py, which this script mirrors), collect the posteriors
+     trial_level_eval.py, which this script mirrors), collect the posteriors
      of the four heads (final / eeg / fusion / fnirs);
   2. combine the seeds' posteriors: ARITHMETIC mean (primary) and GEOMETRIC mean
      (mean of log-probabilities, for comparison);
   3. score window level and block (trial) level -- the trial decision is the mean
      posterior over a block's windows, then argmax (same rule as
-     trial_level_eval-new.py), plus the majority-vote variant.
+     trial_level_eval.py), plus the majority-vote variant.
 Then, over subjects (the unit of the paired tests):
   * per-seed single-model accuracy, the mean of the singles, the ensemble, and
     the PAIRED difference ensemble - mean(singles) with a 95% CI, the number of
@@ -41,7 +41,7 @@ sum to 1 (it is normalised only inside the loss, --normalize-ypred). Averaging
 un-normalised posteriors across models would let a model with a larger sum
 dominate, so by default every posterior row is divided by its sum before it is
 combined. argmax is unchanged, so the window-level numbers of a single model are
-identical to trial_level_eval-new.py; block-level singles can differ in the 3rd
+identical to trial_level_eval.py; block-level singles can differ in the 3rd
 decimal. --raw-posteriors disables the division (for an exact cross-check).
 
 HONEST CAVEATS (they are printed again at the end)
@@ -58,13 +58,13 @@ HONEST CAVEATS (they are printed again at the end)
 
 USAGE
 =====
-    python ensemble_eval-new.py ^
+    python ensemble_eval.py ^
         --data-root "E:\\kntu\\Thesis\\codes\\Results\\TSFNET_PAPER_EXACT_nback" ^
         --variant-hash 40b7d8ea53 --seeds 42 999 2024 ^
         --expected-window-accs 0.6074 0.5961 0.6091 --save-posteriors
 
 Every architecture flag defaults to run60. For another configuration pass the same
-architecture flags that were used for ITS training (as for trial_level_eval-new.py);
+architecture flags that were used for ITS training (as for trial_level_eval.py);
 all ensemble members must share one architecture.
 """
 
@@ -110,7 +110,7 @@ p.add_argument("--save-posteriors", action="store_true", default=False,
                help="Also save every fold's per-seed posteriors, labels, trial ids and window "
                     "position within the block (npz) for later analysis.")
 
-# --- architecture flags (TSFNet ctor), defaults = run60 (same as trial_level_eval-new.py) ---
+# --- architecture flags (TSFNet ctor), defaults = run60 (same as trial_level_eval.py) ---
 p.add_argument("--fnirs-temporal-align", type=str, default="egta", choices=["none", "egta"])
 p.add_argument("--efgf-gate-mode", type=str, default="sigmoid", choices=["clamp", "sigmoid"])
 p.add_argument("--efgf-gate-init", type=float, default=-2.0)
@@ -146,9 +146,9 @@ try:
     _this_dir = os.path.dirname(os.path.abspath(__file__))
 except NameError:
     _this_dir = os.getcwd()
-_notebook_path = os.path.join(_this_dir, "tsfnet_model_notebook-new.py")
+_notebook_path = os.path.join(_this_dir, "tsfnet_model_notebook.py")
 if not os.path.isfile(_notebook_path):
-    sys.exit(f"ERROR: tsfnet_model_notebook-new.py not found next to this script ({_notebook_path}).")
+    sys.exit(f"ERROR: tsfnet_model_notebook.py not found next to this script ({_notebook_path}).")
 if "TSFNet" not in globals():
     print(f"[init] loading definitions from {_notebook_path}")
     exec(open(_notebook_path, encoding="utf-8").read(), globals())
@@ -157,7 +157,7 @@ HEADS = ("final", "eeg", "fusion", "fnirs")
 
 
 # ---------------------------------------------------------------------------
-# Decision rules (identical to trial_level_eval-new.py)
+# Decision rules (identical to trial_level_eval.py)
 # ---------------------------------------------------------------------------
 def aggregate_mean_prob(probs, trial_ids):
     trials = np.unique(trial_ids)

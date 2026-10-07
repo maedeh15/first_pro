@@ -1011,6 +1011,92 @@ class SpatialMHSABranch(nn.Module):
 
 
 # ----------------------------------------------------------------------------
+# priority-BANDTOK: channel-attention over BAND-POWER tokens.
+#
+# WHY (diagnosis of the existing eeg_spatial_mode='mhsa', SpatialMHSABranch):
+# its input path is two strided depthwise convs (k25/s10, k13/s5), which cut
+# the 2000-sample window to 40 samples (~4 Hz effective sampling rate), after
+# which AdaptiveAvgPool1d(64) UP-samples those 40 samples to 64. Each channel
+# keeps ONE learned filter and only an ELU/BN afterwards, which cannot really
+# compute band power. So the attention there sees a crippled token, and its
+# rejection says little about "attention over channels" itself.
+# Here the token of each of the 28 channels is its log POWER in 5 bands
+# (delta<4, theta, alpha, beta, gamma) in each of 10 non-overlapping 1 s
+# sub-windows = 50 numbers. That is the representation workload effects
+# (frontal theta up, parietal alpha down) are actually described in, and it is
+# SMALLER than a raw-sample token, not bigger.
+#
+#   x_chan (B,28,T) -> fixed 5-band FIR (GridFilterBank, no parameters)
+#     -> mean(x^2) per band per 1 s sub-window -> log (optionally RELATIVE
+#        power: band / sum over bands, which removes overall amplitude drift)
+#     -> BatchNorm over the 50 features (so AdaBN re-estimates it on the
+#        held-out session, like every other BN in this model)
+#     -> Linear(50 -> d) + learned channel-identity embedding
+#     -> ONE pre-LN transformer block (MHA + FFN), each residual multiplied
+#        by a zero-initialised scalar gate
+#     -> LayerNorm -> 1x1 conv over the token axis (28 -> 4) -> Linear -> embed
+# ~30k parameters at d=32 (about 7% of the 407k model).
+# ----------------------------------------------------------------------------
+class BandTokenBranch(nn.Module):
+    N_BANDS = len(GridFilterBank.BANDS)
+
+    def __init__(self, n_channels=28, d_model=32, n_heads=4, ffn_ratio=2, n_sub=10,
+                 sub_len=200, dropout=0.3, attn_dropout=0.1, norm="none",
+                 embed_dim=32, sfreq=200.0):
+        super().__init__()
+        if norm not in ("none", "relative"):
+            raise ValueError(f"bandtok norm must be 'none' or 'relative', got {norm!r}")
+        if d_model % n_heads != 0:
+            raise ValueError(f"d_model ({d_model}) must be divisible by n_heads ({n_heads})")
+        self.n_channels, self.n_sub, self.sub_len, self.norm = n_channels, n_sub, sub_len, norm
+        self.n_feat = self.N_BANDS * n_sub
+        self.embed_dim = embed_dim
+        self.bank = GridFilterBank(mode="fixed", sfreq=sfreq)          # buffers only
+        self.feat_bn = nn.BatchNorm1d(self.n_feat)
+        self.embed = nn.Linear(self.n_feat, d_model)
+        self.chan_emb = nn.Parameter(torch.zeros(1, n_channels, d_model))
+        nn.init.trunc_normal_(self.chan_emb, std=0.02)
+        self.ln1 = nn.LayerNorm(d_model)
+        self.attn = nn.MultiheadAttention(d_model, n_heads, dropout=attn_dropout, batch_first=True)
+        self.ln2 = nn.LayerNorm(d_model)
+        self.ffn = nn.Sequential(nn.Linear(d_model, d_model * ffn_ratio), nn.GELU(),
+                                 nn.Dropout(dropout), nn.Linear(d_model * ffn_ratio, d_model))
+        self.g_attn = nn.Parameter(torch.zeros(1))      # zero-init residual gates
+        self.g_ffn = nn.Parameter(torch.zeros(1))
+        self.drop = nn.Dropout(dropout)
+        self.ln_out = nn.LayerNorm(d_model)
+        self.compress = nn.Conv1d(n_channels, 4, kernel_size=1)
+        self.out = nn.Sequential(nn.Flatten(), nn.Linear(4 * d_model, embed_dim),
+                                 nn.ELU(), nn.Dropout(dropout))
+
+    def band_features(self, x_chan):
+        """(B, C, T) -> (B, C, N_BANDS * n_sub) log band power (exposed for tests)."""
+        B, C, T = x_chan.shape
+        if C != self.n_channels or T < self.n_sub * self.sub_len:
+            raise ValueError(
+                f"BandTokenBranch expected (B, {self.n_channels}, >= {self.n_sub * self.sub_len}) "
+                f"channel-space EEG, got {tuple(x_chan.shape)}. This usually means the preprocessed "
+                f"{{subject_id}}_eeg_channel_windows.npy is missing or has another montage/length.")
+        b = self.bank(x_chan.unsqueeze(2)).squeeze(3)                   # (B, 5, C, T)
+        b = b[..., : self.n_sub * self.sub_len].reshape(B, self.N_BANDS, C, self.n_sub, self.sub_len)
+        p = b.pow(2).mean(dim=-1)                                       # (B, 5, C, n_sub)
+        if self.norm == "relative":
+            p = p / (p.sum(dim=1, keepdim=True) + 1e-8)
+        f = torch.log(p + 1e-6)
+        return f.permute(0, 2, 1, 3).reshape(B, C, self.n_feat)
+
+    def forward(self, x_chan):
+        f = self.band_features(x_chan)                                  # (B, C, n_feat)
+        B, C, F_ = f.shape
+        f = self.feat_bn(f.reshape(B * C, F_)).reshape(B, C, F_)
+        x = self.embed(f) + self.chan_emb                               # (B, C, d)
+        h = self.ln1(x)
+        x = x + self.g_attn * self.drop(self.attn(h, h, h, need_weights=False)[0])
+        x = x + self.g_ffn * self.drop(self.ffn(self.ln2(x)))
+        return self.out(self.compress(self.ln_out(x)))                  # (B, embed_dim)
+
+
+# ----------------------------------------------------------------------------
 # Fixed (non-trainable) FIR band-pass filterbank.
 # ----------------------------------------------------------------------------
 class FixedFIRBandFilter(nn.Module):
@@ -1328,7 +1414,8 @@ class TSFNet(nn.Module):
                  conv_dropout=None, conv_dropout_type="channel",
                  fusion_fnirs_inject="none", erp_branch="none",
                  egta_pcc_lambda=0.0, eeg_filterbank="none", eeg_filterbank_scope="both",
-                 fnirs_chroma_split="none"):
+                 fnirs_chroma_split="none",
+                 bandtok_d_model=32, bandtok_heads=4, bandtok_norm="none"):
         super().__init__()
         # priority-CHROMASPLIT (MGFNet, Zhang et al. 2026): that model gives HbO
         # and HbR their OWN encoders with non-shared parameters, plus a third
@@ -1501,14 +1588,29 @@ class TSFNet(nn.Module):
         # The EEG branch is also the weakest of the three (~50% vs ~59% for
         # fNIRS), i.e. the one with the most headroom.
         self.eeg_spatial_mode = eeg_spatial_mode
-        if eeg_spatial_mode not in ("none", "mhsa"):
-            raise ValueError(f"eeg_spatial_mode must be 'none' or 'mhsa', "
+        if eeg_spatial_mode not in ("none", "mhsa", "bandtok"):
+            raise ValueError(f"eeg_spatial_mode must be 'none', 'mhsa' or 'bandtok', "
                               f"got {eeg_spatial_mode!r}")
         if eeg_spatial_mode == "mhsa":
             self.eeg_spatial_branch = SpatialMHSABranch(
                 n_channels=eeg_spatial_channels, d_model=eeg_spatial_d_model,
                 n_heads=eeg_spatial_heads, n_layers=eeg_spatial_layers,
                 embed_dim=eeg_spatial_embed_dim, dropout=cafe_dropout)
+
+        # priority-BANDTOK: built under a saved/restored RNG state (rule 6) and
+        # joined to the EEG classifier input ADDITIVELY through a zero-init
+        # Linear (like erp_to_eeg), so clf_eeg keeps its 512-d input, every
+        # other module initialises exactly as in run60, and at step 0 the whole
+        # model equals the baseline. Needs _clf_eeg_dim, defined further down,
+        # so the Linear is created there; the branch itself is created here.
+        if eeg_spatial_mode == "bandtok":
+            _rng_state = torch.get_rng_state()
+            try:
+                self.bandtok_branch = BandTokenBranch(
+                    n_channels=eeg_spatial_channels, d_model=bandtok_d_model,
+                    n_heads=bandtok_heads, dropout=cafe_dropout, norm=bandtok_norm)
+            finally:
+                torch.set_rng_state(_rng_state)
 
         # priority-D-1-safe: validation only. The branch itself is constructed
         # at the very END of __init__ (see below) so that, in the default
@@ -1710,6 +1812,13 @@ class TSFNet(nn.Module):
                                           if eeg_spatial_mode == "mhsa" else 0) \
                                        + (eeg_band_embed_dim
                                           if eeg_band_mode == "safe" else 0)
+        if eeg_spatial_mode == "bandtok":
+            _rng_state = torch.get_rng_state()
+            try:
+                self.bandtok_to_eeg = nn.Linear(self.bandtok_branch.embed_dim, clf_eeg_in_dim)
+                nn.init.zeros_(self.bandtok_to_eeg.weight); nn.init.zeros_(self.bandtok_to_eeg.bias)
+            finally:
+                torch.set_rng_state(_rng_state)
         if eeg_temporal_mode == "gap_logvar":
             # priority-LOGVAR, rule 6: a 1024-input Linear draws more random
             # numbers than the 512-input one, which would shift the init of
@@ -1958,6 +2067,14 @@ class TSFNet(nn.Module):
                     "{subject_id}_eeg_channel_windows.npy -- re-run preprocessing with "
                     "ENABLE_EEG_CHANNEL_SPACE=True (see Preproc_tsfnet_nback_badch.py).")
             eeg_flat = torch.cat([eeg_flat, self.eeg_spatial_branch(x_chan)], dim=-1)
+        if self.eeg_spatial_mode == "bandtok":                          # priority-BANDTOK
+            if x_chan is None:
+                raise ValueError(
+                    "TSFNet was constructed with eeg_spatial_mode='bandtok' but forward() "
+                    "received x_chan=None. The subject_dir has no "
+                    "{subject_id}_eeg_channel_windows.npy -- re-run preprocessing with "
+                    "ENABLE_EEG_CHANNEL_SPACE=True (see Preproc_tsfnet_nback_badch.py).")
+            eeg_flat = eeg_flat + self.bandtok_to_eeg(self.bandtok_branch(x_chan))
         band_gate_value = None
         if self.eeg_band_mode == "safe":
             if x_chan is None:
@@ -3331,8 +3448,23 @@ def train_one_fold(model, train_loader, val_loader, test_loader, device,
                     no_decay_scalars=False, stage2_stop_mode="loss",
                     noise_aware_snr_db=None, noise_aware_prob=0.0,
                     swa_enabled=False, swa_start_epoch=None, swa_lr=None,
-                    efgf_lambda=1.0, cafe_lambda=1.0):
+                    efgf_lambda=1.0, cafe_lambda=1.0,
+                    best_min_epoch=1, stage1_fixed_epochs=0):
     """
+    best_min_epoch / stage1_fixed_epochs: priority-BESTSEL (checkpoint selection).
+      Diagnosis (baseline run60, 78 folds): validation uses ONE trial per class,
+      so val_acc is a handful of discrete values; corr(val_acc, test_acc) = -0.04,
+      val_acc at the chosen epoch averages 0.77 vs test 0.61, and in 25/78 folds
+      the "best" epoch is <= 5 (test 0.590 vs 0.616 for the other folds).
+      * best_min_epoch=N (default 1 = prior behavior, bit-exact): epochs < N are
+        still TRAINED but can never become the best checkpoint and do not count
+        toward patience (so early stopping cannot fire before the first eligible
+        epoch). Must be <= stage1_max_epochs.
+      * stage1_fixed_epochs=E (default 0 = off): NO validation-based selection
+        and no early stopping: train exactly E epochs and keep the LAST epoch's
+        weights. The validation metrics are still logged. Mutually exclusive
+        with best_min_epoch > 1. best_val_acc in the report then means the
+        validation accuracy of the final epoch.
     swa_enabled: ISOLATED ABLATION PARAMETER (priority-SWA). Stochastic Weight
     Averaging (Izmailov et al. 2018) -- averages model weights over the TAIL of
     stage-1 training (a wider, flatter minimum empirically generalizes better,
@@ -3514,8 +3646,24 @@ def train_one_fold(model, train_loader, val_loader, test_loader, device,
     else:
         optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
     # priority-G1: None unless the caller asked for a schedule (see docstring).
+    # priority-BESTSEL: fail fast, and in fixed mode the epoch budget is E.
+    if best_min_epoch < 1 or stage1_fixed_epochs < 0:
+        raise ValueError(f"best_min_epoch must be >= 1 and stage1_fixed_epochs >= 0, "
+                         f"got {best_min_epoch}, {stage1_fixed_epochs}")
+    if stage1_fixed_epochs > 0 and best_min_epoch > 1:
+        raise ValueError("best_min_epoch > 1 and stage1_fixed_epochs > 0 are mutually exclusive")
+    if best_min_epoch > stage1_max_epochs:
+        raise ValueError(f"best_min_epoch ({best_min_epoch}) > stage1_max_epochs ({stage1_max_epochs}): "
+                         f"no epoch would ever be eligible")
+    _s1_epochs = stage1_fixed_epochs if stage1_fixed_epochs > 0 else stage1_max_epochs
+    if stage1_fixed_epochs > 0:
+        log_fn(f"  [bestsel] FIXED {stage1_fixed_epochs} epochs, final-epoch weights, no val-based "
+               f"selection / early stopping (priority-BESTSEL)")
+    elif best_min_epoch > 1:
+        log_fn(f"  [bestsel] epochs < {best_min_epoch} are not eligible as best checkpoint "
+               f"(priority-BESTSEL)")
     scheduler = make_warmup_cosine_scheduler(
-        optimizer, warmup_epochs, stage1_max_epochs, min_lr_factor)
+        optimizer, warmup_epochs, _s1_epochs, min_lr_factor)
 
     history = {"epoch": [], "train_loss": [], "train_acc": [],
                "val_loss": [], "val_acc": [], "val_kappa": [],
@@ -3549,7 +3697,7 @@ def train_one_fold(model, train_loader, val_loader, test_loader, device,
     stage1_final_train_loss = None
     stage1_best_val_train_loss = None
 
-    for epoch in range(1, stage1_max_epochs + 1):
+    for epoch in range(1, _s1_epochs + 1):
         model.train()
         epoch_loss = 0.0
         n_seen = 0
@@ -3603,13 +3751,21 @@ def train_one_fold(model, train_loader, val_loader, test_loader, device,
         history["stage"].append(1)   # stage 2 computes no val metrics, so history is stage-1 only
         history["gates"].append(_collect_gate_values(model))
 
-        if val_acc > best_val_acc:
+        if stage1_fixed_epochs > 0:
+            # priority-BESTSEL fixed mode: the latest epoch is always "best";
+            # only the final one is written to disk.
+            best_val_acc = val_acc
+            best_epoch = epoch
+            stage1_best_val_train_loss = train_loss
+            if epoch == stage1_fixed_epochs:
+                torch.save(model.state_dict(), ckpt_path)
+        elif epoch >= best_min_epoch and val_acc > best_val_acc:
             best_val_acc = val_acc
             best_epoch = epoch
             stage1_best_val_train_loss = train_loss
             torch.save(model.state_dict(), ckpt_path)   # disk, not just memory -- crash-safe
             epochs_no_improve = 0
-        else:
+        elif epoch >= best_min_epoch:
             epochs_no_improve += 1
         # priority-SWA: once the tail phase starts, swa_scheduler (constant
         # swa_lr) takes over from whatever `scheduler` would have done this
@@ -3621,7 +3777,7 @@ def train_one_fold(model, train_loader, val_loader, test_loader, device,
             _swa_updated = True
         elif scheduler is not None:
             scheduler.step()   # priority-G1: once per completed epoch
-        if epochs_no_improve >= stage1_patience:
+        if stage1_fixed_epochs == 0 and epochs_no_improve >= stage1_patience:
             log_fn(f"  [stage1] early stop at epoch {epoch} (no improvement for {stage1_patience} epochs)")
             break
 
@@ -3843,6 +3999,9 @@ def train_one_fold(model, train_loader, val_loader, test_loader, device,
             adapt_batchnorm_to_target(model, test_loader, device, log_fn=log_fn)
         report = detailed_test_report(model, test_loader, device)
     report["best_val_acc"] = best_val_acc
+    report["stage1_best_epoch"] = int(best_epoch)                      # priority-BESTSEL (new keys)
+    report["stage1_selection"] = ("fixed" if stage1_fixed_epochs > 0 else
+                                  f"val_min_epoch{best_min_epoch}" if best_min_epoch > 1 else "val")
     report["final_train_acc"] = train_acc
     # Primary generalization-gap metric: best (leakage-free, trial-level) val_acc vs.
     # true held-out-session test_acc. Large gap = val is not a good proxy for a fully
@@ -3881,6 +4040,7 @@ def run_subject_cross_session(subject_dir, subject_id, device="cuda" if torch.cu
                                egta_pcc_lambda=0.0,
                                eeg_filterbank="none", eeg_filterbank_scope="both",
                                fnirs_chroma_split="none",
+                               bandtok_d_model=32, bandtok_heads=4, bandtok_norm="none",
                                fnirs_num_chromophores=2, eeg_spatial_mode="none",
                                eeg_spatial_layers=2, eeg_spatial_heads=4,
                                eeg_spatial_d_model=64,
@@ -4301,6 +4461,8 @@ def run_subject_cross_session(subject_dir, subject_id, device="cuda" if torch.cu
                         egta_pcc_lambda=egta_pcc_lambda,
                         eeg_filterbank=eeg_filterbank, eeg_filterbank_scope=eeg_filterbank_scope,
                         fnirs_chroma_split=fnirs_chroma_split,
+                        bandtok_d_model=bandtok_d_model, bandtok_heads=bandtok_heads,
+                        bandtok_norm=bandtok_norm,
                         fnirs_num_chromophores=fnirs_num_chromophores,
                         eeg_spatial_mode=eeg_spatial_mode,
                         eeg_spatial_layers=eeg_spatial_layers,
