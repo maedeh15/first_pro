@@ -17,12 +17,12 @@
 #   fNIRS: dataset already holds HbO/HbR (modified Beer-Lambert applied by the
 #          dataset authors) -> 6th-order zero-phase Butterworth 0.01-0.1 Hz ->
 #          per-trial baseline correction (mean of -5..-2 s). No z-score.
-#   Epochs: EEG [-5, TASK_PERIOD] s, fNIRS [-5, TASK_PERIOD+12] s around trial onset.
+#   Epochs: EEG [-5, TASK_PERIOD] s, fNIRS [-5, TASK_PERIOD+10] s around trial onset.
 #   3D   : 16x16 grid with the official HARD-CODED electrode / channel pixel
 #          coordinates (identical montage in the WG and n-back recordings),
 #          cubic interpolation, then nearest-neighbour fill for pixels outside the
 #          convex hull -> X_eeg (16,16,T), X_fnirs (16,16,T,2).
-#   Windows: 3 s windows, step 1 s, from -2 s to TASK_PERIOD (=10 s).
+#   Windows: 3 s windows, step 1 s, from -2 s to TASK_PERIOD s (paper: 10, here 42 like TSFNet).
 #          EEG sample = 1 window (16,16,600). fNIRS sample = the SAME-start window
 #          plus the next 10 windows (l = 11) -> (11,16,16,30,2).
 #
@@ -129,14 +129,16 @@ DATASET_ALREADY_BEER_LAMBERT = True   # Shin's .mat already contains HbO/HbR con
 FNIRS_TRAIN_SCALE = 1e3          # official run_sta_net.py: fnirs *= 1e3 (applied in TRAINING, not here)
 
 # --- Epoching (official epoch.py), seconds relative to trial onset ----------
-# TASK_PERIOD = 10 reproduces the paper exactly (-2..10 s windows). The n-back task lasts 40 s;
-# raise it (e.g. 40) only if you deliberately want to use more of the trial -- the number of windows
-# per trial then becomes TASK_PERIOD and the fNIRS epoch grows accordingly.
-TASK_PERIOD = 10
+# TASK_PERIOD = 10 reproduces the STA-Net paper (-2..10 s). Here it is set to 42 to match your TSFNet
+# n-back pipeline (SLIDE_TMIN=-2, SLIDE_TMAX=42 relative to the trial marker = 2 s instruction + 40 s
+# task), so both models see the same part of every trial. Windows per trial = TASK_PERIOD (42 -> starts
+# -2..39 s); the fNIRS lag windows reach up to TASK_PERIOD+10 s after onset (trial = 62 s incl. rest).
+# Set TASK_PERIOD = 10 for the literal paper setting.
+TASK_PERIOD = 42
 EEG_PRE_ONSET = 5
 EEG_POST_ONSET = TASK_PERIOD
 FNIRS_PRE_ONSET = 5
-FNIRS_POST_ONSET = TASK_PERIOD + 12
+FNIRS_POST_ONSET = TASK_PERIOD + 10   # official code uses +12 (22 s) but only 20 s are ever read
 BASELINE_N_SAMPLES = 31          # mne EpochsArray(baseline=(None, 3.)) with tmin=0 -> samples 0..30
                                  # INCLUSIVE = -5.0 ... -2.0 s (31 samples @10 Hz)
 
@@ -147,12 +149,13 @@ WIN_FIRST_START = 3              # s from epoch start -> window starts at -2 s r
 FNIRS_LAG_LENGTH = 11            # l = 11 (current window + 10 following)
 GRID_SIZE = 16
 
-N_EEG_WINDOWS = TASK_PERIOD                                           # 10 windows -> -2 ... 10 s
-N_FNIRS_SEGMENTS = FNIRS_PRE_ONSET + FNIRS_POST_ONSET - WIN_FIRST_START - WIN_LENGTH + 1   # 22 (official)
+N_EEG_WINDOWS = TASK_PERIOD                                           # windows start at -2, -1, ... (TASK_PERIOD of them)
+N_FNIRS_SEGMENTS = FNIRS_PRE_ONSET + FNIRS_POST_ONSET - WIN_FIRST_START - WIN_LENGTH + 1   # = N_EEG_WINDOWS+10
 assert N_EEG_WINDOWS - 1 + FNIRS_LAG_LENGTH <= N_FNIRS_SEGMENTS
 
 # --- Optional extras from YOUR TSFNet pipeline. ALL OFF = paper/official-exact. ----
-ENABLE_PYPREP_BADCH = False      # PyPREP bad-channel interpolation BEFORE CAR (not in STA-Net)
+ENABLE_PYPREP_BADCH = True       # PyPREP bad-channel interpolation BEFORE CAR (not in STA-Net; ON to match your
+                                 # TSFNet pipeline so both models get identical bad-channel handling)
 
 # --- n-back marker codes (Shin et al. 2018) ----------------------------------
 EEG_TRIAL_LABEL_MAP = {112: 0, 128: 1, 144: 2}     # 0-back / 2-back / 3-back
