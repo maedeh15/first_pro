@@ -813,8 +813,15 @@ class CAFELayer(nn.Module):
                 torch.manual_seed(20260921)
                 self.egta_q = nn.Linear(d_model, d_model)
                 self.egta_k = nn.Linear(d_model, d_model)
-                nn.init.zeros_(self.egta_k.weight)   # => scores==0 => uniform
-                nn.init.zeros_(self.egta_k.bias)     #    weights at step 0
+                # Was nn.init.zeros_(self.egta_k.weight/.bias): exact zero makes
+                # k == 0 for every input, so scores = q @ k^T == 0 identically and
+                # d(scores)/dq == k == 0 -- egta_q's gradient is EXACTLY zero until
+                # egta_k's own (weak, q-driven) gradient nudges it off zero first.
+                # A small-noise weight keeps scores ~0 (still ~uniform attention at
+                # step 0, same intent) but breaks that bilinear deadlock: egta_q gets
+                # a live gradient from step 0 instead of waiting on egta_k to move.
+                nn.init.normal_(self.egta_k.weight, std=0.01)
+                nn.init.zeros_(self.egta_k.bias)     # still uniform-ish at step 0
             finally:
                 torch.set_rng_state(_rng_state)
 
