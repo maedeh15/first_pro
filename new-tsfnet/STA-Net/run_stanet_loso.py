@@ -120,16 +120,20 @@ def evaluate(model, eeg, fnirs, labels, idx, device, bs=64):
 
 
 def train_epoch(model, opt, eeg, fnirs, labels, idx, device, bs):
+    """returns (total_loss, class_ce, acc): size-weighted epoch means over the (dropout-on) training pass.
+    total_loss = CE(final) + CE(eeg) + (1-PCC_fgsa1) + (1-PCC_fgsa2) + (1-PCC_egta); class_ce is the term
+    used for early stopping / the stage-2 target (Keras `class_output_loss`)."""
     model.train()
-    n, cls_sum = 0, 0.0
+    n, tot_sum, ce_sum, hit = 0, 0.0, 0.0, 0
     for xe, xf, y in batches(eeg, fnirs, labels, idx, bs, True, device):
         out = model(xe, xf)
         loss, c = sta_loss(out, y)
         opt.zero_grad(set_to_none=True)
         loss.backward()
         opt.step()
-        cls_sum += c.item() * len(y); n += len(y)          # size-weighted epoch mean, as Keras
-    return cls_sum / n
+        tot_sum += loss.item() * len(y); ce_sum += c.item() * len(y); n += len(y)
+        hit += int((out["p_final"].argmax(1) == y.argmax(1)).sum())
+    return tot_sum / n, ce_sum / n, hit / n
 
 
 def run_fold(eeg, fnirs, labels, sessions, trials, test_session, subject_id):
@@ -137,46 +141,69 @@ def run_fold(eeg, fnirs, labels, sessions, trials, test_session, subject_id):
     dev = args.device
     tr_all = np.where(sessions != test_session)[0]
     te = np.where(sessions == test_session)[0]
+    print(f"\n=== {subject_id} | test session {test_session} ===")
     if args.val_mode == "trial":
         tr, va = trial_level_split(trials, labels, tr_all, args.val_ratio, args.seed + test_session)
+        print(f"  [val_mode] 'trial' -- {args.val_ratio:.0%} of the training TRIALS (stratified) held out for "
+              f"early stopping: train {len(tr)} / val {len(va)} / test {len(te)} windows (stage 2 uses all {len(tr_all)})")
     else:
         vs = int(sessions[tr_all].min())
         tr, va = tr_all[sessions[tr_all] != vs], tr_all[sessions[tr_all] == vs]
-    print(f"  fold test=S{test_session}: train {len(tr)} / val {len(va)} / test {len(te)} windows "
-          f"(stage 2 uses all {len(tr_all)})")
+        print(f"  [val_mode] 'cross_session' -- training session {vs} is the validation set: "
+              f"train {len(tr)} / val {len(va)} / test {len(te)} windows (stage 2 uses all {len(tr_all)})")
+    print("  [stanet] EGTA temporal alignment (cross-attention over the 11 lagged fNIRS windows) + FGSA spatial "
+          "alignment; final decision = softmax-weighted fusion of the fusion and fNIRS heads")
 
     set_seed(args.seed * 100 + test_session)
     model = STANet(NUM_CLASSES, seg_len=fnirs.shape[1]).to(dev)
     opt = torch.optim.Adam(model.parameters(), lr=args.lr, eps=1e-7)      # keras Adam epsilon
 
     best_val, best_ep, best_state, best_train_ce, wait = float("inf"), 0, None, None, 0
+    stopped_early = False
     for ep in range(1, args.stage1_max_epochs + 1):
-        tr_ce = train_epoch(model, opt, eeg, fnirs, labels, tr, dev, args.batch_size)
-        va_ce = evaluate(model, eeg, fnirs, labels, va, dev)[0]
+        tr_loss, tr_ce, tr_acc = train_epoch(model, opt, eeg, fnirs, labels, tr, dev, args.batch_size)
+        va_ce, va_pred, _, _, va_true = evaluate(model, eeg, fnirs, labels, va, dev)
+        va_acc, va_kap = float((va_pred == va_true).mean()), float(cohen_kappa(va_true, va_pred))
         if va_ce < best_val:
             best_val, best_ep, best_train_ce, wait = va_ce, ep, tr_ce, 0
             best_state = copy.deepcopy(model.state_dict())
         else:
             wait += 1
-        if ep % 10 == 0 or ep == 1:
-            print(f"    [s1] ep {ep:3d} train_ce {tr_ce:.4f} val_ce {va_ce:.4f} (best {best_val:.4f}@{best_ep})")
+        print(f"  [stage1] epoch {ep:3d} | train_loss={tr_loss:.4f} train_ce={tr_ce:.4f} train_acc={tr_acc:.4f} | "
+              f"val_loss={va_ce:.4f} val_acc={va_acc:.4f} val_kappa={va_kap:.4f}")
         if wait >= args.stage1_patience:
-            print(f"    [s1] early stop at epoch {ep}; restoring epoch {best_ep}")
+            print(f"  [stage1] early stop at epoch {ep} (no improvement for {args.stage1_patience} epochs)")
+            stopped_early = True
             break
+    if not stopped_early:
+        print(f"  [stage1] reached max epochs ({args.stage1_max_epochs}) without early stopping")
     model.load_state_dict(best_state)
+    print(f"  [stage1] best validation class-CE {best_val:.4f} at epoch {best_ep} restored "
+          f"(train class-CE there = {best_train_ce:.4f}, the stage-2 target)")
 
     s2_epochs = 0
-    if args.stage2_stop != "none":
+    if args.stage2_stop == "none":
+        print(f"  [stage2] skipped (stage2_stop='none') -- using stage 1's best checkpoint (epoch {best_ep}) directly "
+              f"as the final model.")
+    else:
         budget = best_ep if args.stage2_stop == "epoch_count" else args.stage2_max_epochs
+        reached = False
         for ep in range(1, budget + 1):
-            tr_ce = train_epoch(model, opt, eeg, fnirs, labels, tr_all, dev, args.batch_size)
+            tr_loss, tr_ce, tr_acc = train_epoch(model, opt, eeg, fnirs, labels, tr_all, dev, args.batch_size)
             s2_epochs = ep
+            print(f"  [stage2] epoch {ep:3d} | train_loss={tr_loss:.4f} train_ce={tr_ce:.4f} train_acc={tr_acc:.4f} "
+                  f"(target train_ce <= {best_train_ce:.4f})")
             if args.stage2_stop == "loss" and tr_ce <= best_train_ce:
+                reached = True
                 break
-        print(f"    [s2] {s2_epochs} epoch(s), last train_ce {tr_ce:.4f} (target {best_train_ce:.4f})")
+        why = ("train class-CE reached the stage-1 target" if reached else
+               f"epoch budget exhausted ({budget})" if args.stage2_stop == "loss" else
+               f"ran {budget} epochs (= stage-1 best epoch, stage2_stop='epoch_count')")
+        print(f"  [stage2] stopped after {s2_epochs} epoch(s): {why}")
 
     # checkpoint = weights after stage 2, BEFORE any AdaBN (so replays can re-apply AdaBN identically)
-    torch.save(model.state_dict(), os.path.join(RESULTS_DIR, f"{subject_id}_session{test_session}_best.pt"))
+    ckpt_path = os.path.join(RESULTS_DIR, f"{subject_id}_session{test_session}_best.pt")
+    torch.save(model.state_dict(), ckpt_path)
     if args.adabn:
         adapt_batchnorm_to_target(model, WindowLoader(eeg, fnirs, labels, te, 64), dev)
     _, pred, branch, w, y_true = evaluate(model, eeg, fnirs, labels, te, dev)
@@ -189,7 +216,9 @@ def run_fold(eeg, fnirs, labels, sessions, trials, test_session, subject_id):
            "w_fusion": float(w[0]), "w_fnirs": float(w[1]),
            "best_epoch_s1": best_ep, "epochs_s2": s2_epochs,
            "n_train": int(len(tr)), "n_val": int(len(va)), "n_test": int(len(te))}
-    print(f"    TEST S{test_session}: acc {acc * 100:.2f}%  kappa {kappa:.3f}")
+    print(f"  -> test_acc={acc:.4f} test_kappa={kappa:.4f} | ablation: eeg={res['eeg_only_acc']:.3f} "
+          f"fnirs={res['fnirs_only_acc']:.3f} fusion={res['fusion_only_acc']:.3f} | "
+          f"weights: w_fusion={res['w_fusion']:.3f} w_fnirs={res['w_fnirs']:.3f}")
     if args.diagnostics:
         try:
             import stanet_diagnostics as D
@@ -201,7 +230,12 @@ def run_fold(eeg, fnirs, labels, sessions, trials, test_session, subject_id):
             if d:
                 res["diagnostics"] = {k: v for k, v in d.items() if k != "figures"}
         except Exception as e:
-            print(f"    [diagnostics] skipped: {e}")
+            print(f"  [diagnostics] skipped: {e}")
+    fold_json = os.path.join(RESULTS_DIR, f"results_{subject_id}_session{test_session}.json")
+    with open(fold_json, "w") as fh:
+        json.dump({"subject_id": subject_id, "args": vars(args), **res}, fh, indent=2)
+    print(f"  results saved to: {fold_json}")
+    print(f"  checkpoint saved to: {ckpt_path}")
     return res
 
 
@@ -274,20 +308,29 @@ def main():
                                w_fnirs=np.mean([f["w_fnirs"] for f in folds]),
                                recall_0back=rec[0], recall_2back=rec[1], recall_3back=rec[2])
                     row["elapsed_min"] = round((time.time() - t0) / 60, 2)
-                    with open(os.path.join(RESULTS_DIR, f"stanet_{sid}_summary.json"), "w") as fh:
-                        json.dump({"subject_id": sid, "args": vars(args), "folds": folds,
-                                   "confusion_matrix_summed": cm.tolist(), "per_class_recall": rec,
-                                   **{k: row[k] for k in ("mean_acc", "std_acc", "mean_kappa", "std_kappa")}},
-                                  fh, indent=2)
+                    sd = lambda k: float(np.std([f[k] for f in folds]))
+                    summ_path = os.path.join(RESULTS_DIR, f"cross_session_{sid}_summary.json")
+                    with open(summ_path, "w") as fh:
+                        json.dump({"subject_id": sid, "args": vars(args), "session_results": folds,
+                                   "final_average_accuracy": row["mean_acc"], "final_std_accuracy": row["std_acc"],
+                                   "final_average_kappa": row["mean_kappa"], "final_std_kappa": row["std_kappa"],
+                                   "branch_accuracy": {k: float(np.mean([f[k] for f in folds])) for k in
+                                                       ("eeg_only_acc", "fnirs_only_acc", "fusion_only_acc")},
+                                   "decision_weights": {"w_fusion_mean": row["w_fusion"], "w_fnirs_mean": row["w_fnirs"]},
+                                   "confusion_matrix_summed": cm.tolist(), "per_class_recall": rec}, fh, indent=2)
+                    print(f"\n{sid} FINAL: acc={row['mean_acc']:.4f}+-{row['std_acc']:.4f}  "
+                          f"kappa={row['mean_kappa']:.4f}+-{row['std_kappa']:.4f}")
+                    print(f"{sid} BRANCH ACCURACY (mean over 3 folds): eeg={row['eeg_only_acc']:.4f}+-{sd('eeg_only_acc'):.4f}  "
+                          f"fnirs={row['fnirs_only_acc']:.4f}+-{sd('fnirs_only_acc'):.4f}  "
+                          f"fusion={row['fusion_only_acc']:.4f}+-{sd('fusion_only_acc'):.4f}")
+                    print(f"{sid} LEARNED DECISION WEIGHTS (mean over 3 folds, instance-adaptive softmax kappa, EEG head is "
+                          f"not part of the decision): w_fusion={row['w_fusion']:.4f}  w_fnirs={row['w_fnirs']:.4f}")
+                    print(f"Full cross-session summary saved to: {summ_path}")
                     print(f"\n[{sid}] DONE in {row['elapsed_min']:.1f} min | "
                           f"acc={row['mean_acc']:.4f}+-{row['std_acc']:.4f}  kappa={row['mean_kappa']:.4f}+-{row['std_kappa']:.4f} | "
                           f"branch acc: eeg={row['eeg_only_acc']:.4f} fnirs={row['fnirs_only_acc']:.4f} "
-                          f"fusion={row['fusion_only_acc']:.4f} | decision weights: "
-                          f"kappa_fusion={row['w_fusion']:.4f} kappa_fnirs={row['w_fnirs']:.4f}")
-                    for f_ in folds:
-                        print(f"    fold test=S{f_['test_session']}: acc={f_['acc']:.4f} kappa={f_['kappa']:.4f} | "
-                              f"stage1 best epoch {f_['best_epoch_s1']}, stage2 {f_['epochs_s2']} ep | "
-                              f"n train/val/test = {f_['n_train']}/{f_['n_val']}/{f_['n_test']}")
+                          f"fusion={row['fusion_only_acc']:.4f} | "
+                          f"decision weights: w_fusion={row['w_fusion']:.4f} w_fnirs={row['w_fnirs']:.4f}")
                     print("  confusion matrix (summed over 3 session-folds):")
                     print(_fmt_cm(cm))
                     del eeg, fnirs
@@ -305,14 +348,14 @@ def main():
                 json.dump(rows, fh, indent=2, default=float)
 
         ok = [r for r in rows.values() if r["status"] == "ok"]
-        print(f"\n\n{'=' * 70}\nRUN COMPLETE: {len(ok)}/{len(SUBJECTS)} subjects finished successfully\n{'=' * 70}")
+        print(f"\n\n{'=' * 70}\nSTA-Net RUN COMPLETE: {len(ok)}/{len(SUBJECTS)} subjects finished successfully\n{'=' * 70}")
         if ok:
             col = lambda k: [r[k] for r in ok]
             print(f"Grand mean accuracy across subjects: {statistics.mean(col('mean_acc')):.4f} (+-{statistics.pstdev(col('mean_acc')):.4f})")
             print(f"Grand mean kappa across subjects:    {statistics.mean(col('mean_kappa')):.4f} (+-{statistics.pstdev(col('mean_kappa')):.4f})")
             print(f"Grand mean branch accuracy:  eeg={statistics.mean(col('eeg_only_acc')):.4f}  "
                   f"fnirs={statistics.mean(col('fnirs_only_acc')):.4f}  fusion={statistics.mean(col('fusion_only_acc')):.4f}")
-            print(f"Grand mean decision weights:  kappa_fusion={statistics.mean(col('w_fusion')):.4f}  "
+            print(f"Grand mean learned decision weights:  w_fusion={statistics.mean(col('w_fusion')):.4f}  "
                   f"kappa_fnirs={statistics.mean(col('w_fnirs')):.4f}")
         if all_cms:
             g = np.sum(all_cms, axis=0)
@@ -334,7 +377,7 @@ def main():
             elif r["status"] == "ok":
                 print(f"{sid}: acc={r['mean_acc']:.4f} +- {r['std_acc']:.4f}  kappa={r['mean_kappa']:.4f} +- {r['std_kappa']:.4f}  |  "
                       f"branch acc: eeg={r['eeg_only_acc']:.4f} fnirs={r['fnirs_only_acc']:.4f} fusion={r['fusion_only_acc']:.4f}  |  "
-                      f"decision weights: kappa_fusion={r['w_fusion']:.4f} kappa_fnirs={r['w_fnirs']:.4f}")
+                      f"decision weights: w_fusion={r['w_fusion']:.4f} w_fnirs={r['w_fnirs']:.4f}")
             elif r["status"] == "skipped_no_data":
                 print(f"{sid}: SKIPPED (no preprocessed data)")
             else:
