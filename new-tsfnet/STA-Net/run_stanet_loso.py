@@ -356,7 +356,7 @@ def main():
             print(f"Grand mean branch accuracy:  eeg={statistics.mean(col('eeg_only_acc')):.4f}  "
                   f"fnirs={statistics.mean(col('fnirs_only_acc')):.4f}  fusion={statistics.mean(col('fusion_only_acc')):.4f}")
             print(f"Grand mean learned decision weights:  w_fusion={statistics.mean(col('w_fusion')):.4f}  "
-                  f"kappa_fnirs={statistics.mean(col('w_fnirs')):.4f}")
+                  f"w_fnirs={statistics.mean(col('w_fnirs')):.4f}")
         if all_cms:
             g = np.sum(all_cms, axis=0)
             tot, diag = int(g.sum()), int(np.trace(g))
