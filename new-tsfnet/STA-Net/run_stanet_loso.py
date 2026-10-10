@@ -103,20 +103,21 @@ def trial_level_split(trial_ids, labels, idx, ratio, seed):
 
 # ---------------------------------------------------------------- train / eval
 @torch.no_grad()
-def evaluate(model, eeg, fnirs, labels, idx, device, bs=64):
+def evaluate(model, eeg, fnirs, labels, idx, device, bs=64, return_total=False):
     model.eval()
-    n, ce_sum, preds, branch, wsum = 0, 0.0, [], {"eeg": [], "fusion": [], "fnirs": []}, np.zeros(2)
+    n, ce_sum, tot_sum, preds, branch, wsum = 0, 0.0, 0.0, [], {"eeg": [], "fusion": [], "fnirs": []}, np.zeros(2)
     for xe, xf, y in batches(eeg, fnirs, labels, idx, bs, False, device):
         out = model(xe, xf)
-        _, c = sta_loss(out, y)
-        ce_sum += float(c) * len(y); n += len(y)
+        tl, c = sta_loss(out, y)
+        ce_sum += float(c) * len(y); tot_sum += float(tl) * len(y); n += len(y)
         preds.append(out["p_final"].argmax(1).cpu().numpy())
         branch["eeg"].append(out["p_eeg"].argmax(1).cpu().numpy())
         branch["fusion"].append(out["p_fusion"].argmax(1).cpu().numpy())
         branch["fnirs"].append(out["p_fnirs"].argmax(1).cpu().numpy())
         wsum += out["w"].sum(0).cpu().numpy()
     y_true = labels[idx]
-    return ce_sum / n, np.concatenate(preds), {k: np.concatenate(v) for k, v in branch.items()}, wsum / n, y_true
+    res = (ce_sum / n, np.concatenate(preds), {k: np.concatenate(v) for k, v in branch.items()}, wsum / n, y_true)
+    return res + (tot_sum / n,) if return_total else res
 
 
 def train_epoch(model, opt, eeg, fnirs, labels, idx, device, bs):
@@ -162,7 +163,7 @@ def run_fold(eeg, fnirs, labels, sessions, trials, test_session, subject_id):
     stopped_early = False
     for ep in range(1, args.stage1_max_epochs + 1):
         tr_loss, tr_ce, tr_acc = train_epoch(model, opt, eeg, fnirs, labels, tr, dev, args.batch_size)
-        va_ce, va_pred, _, _, va_true = evaluate(model, eeg, fnirs, labels, va, dev)
+        va_ce, va_pred, _, _, va_true, va_loss = evaluate(model, eeg, fnirs, labels, va, dev, return_total=True)
         va_acc, va_kap = float((va_pred == va_true).mean()), float(cohen_kappa(va_true, va_pred))
         if va_ce < best_val:
             best_val, best_ep, best_train_ce, wait = va_ce, ep, tr_ce, 0
@@ -170,7 +171,7 @@ def run_fold(eeg, fnirs, labels, sessions, trials, test_session, subject_id):
         else:
             wait += 1
         print(f"  [stage1] epoch {ep:3d} | train_loss={tr_loss:.4f} train_ce={tr_ce:.4f} train_acc={tr_acc:.4f} | "
-              f"val_loss={va_ce:.4f} val_acc={va_acc:.4f} val_kappa={va_kap:.4f}")
+              f"val_loss={va_loss:.4f} val_ce={va_ce:.4f} val_acc={va_acc:.4f} val_kappa={va_kap:.4f}")
         if wait >= args.stage1_patience:
             print(f"  [stage1] early stop at epoch {ep} (no improvement for {args.stage1_patience} epochs)")
             stopped_early = True
@@ -178,8 +179,8 @@ def run_fold(eeg, fnirs, labels, sessions, trials, test_session, subject_id):
     if not stopped_early:
         print(f"  [stage1] reached max epochs ({args.stage1_max_epochs}) without early stopping")
     model.load_state_dict(best_state)
-    print(f"  [stage1] best validation class-CE {best_val:.4f} at epoch {best_ep} restored "
-          f"(train class-CE there = {best_train_ce:.4f}, the stage-2 target)")
+    print(f"  [stage1] best val_ce {best_val:.4f} at epoch {best_ep} restored "
+          f"(train_ce there = {best_train_ce:.4f}, the stage-2 target)")
 
     s2_epochs = 0
     if args.stage2_stop == "none":
