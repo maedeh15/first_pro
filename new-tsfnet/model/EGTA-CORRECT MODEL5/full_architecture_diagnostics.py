@@ -246,11 +246,19 @@ def section2_weight_health(log):
 # SECTION 3 -- representation quality (CKA between layers, effective rank)
 # ===========================================================================
 def _linear_cka(X, Y):
+    """Linear CKA computed in the DUAL/kernel form (Kornblith et al. 2019):
+    ||X^T Y||_F^2 == trace(K L) == (K*L).sum() where K=X X^T, L=Y Y^T are
+    (N, N) Gram matrices -- N = batch size, always small. The primal form
+    (X^T Y, X^T X, directly (D, D)) OOMs for early conv layers where the
+    flattened feature dim D (e.g. 16*8*8*334 ~ 342k) is huge; this is
+    mathematically identical but costs O(N^2 D) instead of O(D^2)."""
     X = X - X.mean(0, keepdim=True)
     Y = Y - Y.mean(0, keepdim=True)
-    hsic = (X.T @ Y).norm() ** 2
-    norm_x = (X.T @ X).norm()
-    norm_y = (Y.T @ Y).norm()
+    K = X @ X.T          # (N, N)
+    L = Y @ Y.T          # (N, N)
+    hsic = (K * L).sum()
+    norm_x = (K * K).sum().sqrt()
+    norm_y = (L * L).sum().sqrt()
     return float(hsic / (norm_x * norm_y + 1e-12))
 
 
