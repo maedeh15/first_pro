@@ -205,54 +205,141 @@ def run_fold(eeg, fnirs, labels, sessions, trials, test_session, subject_id):
     return res
 
 
+def _fmt_cm(cm):
+    """3x3 confusion matrix as aligned text with per-class recall (same layout as run_all_subjects.py)."""
+    out = ["          " + "".join(f"{('pred ' + n):>12}" for n in CLASS_NAMES)]
+    for i, n in enumerate(CLASS_NAMES):
+        tot = int(sum(cm[i]))
+        rec = (cm[i][i] / tot * 100) if tot else float("nan")
+        out.append(f"  true {n:<4}" + "".join(f"{int(v):>12d}" for v in cm[i]) + f"   | recall {rec:5.1f}%")
+    return "\n".join(out)
+
+
+def _prep_line(subject_dir, sid):
+    """One-line provenance from the preprocessing run ({sid}_metadata.json), so the training log is
+    self-describing: window counts, task period, ICA exclusions."""
+    try:
+        with open(os.path.join(subject_dir, f"{sid}_metadata.json")) as fh:
+            m = json.load(fh)
+        return (f"  [prep] eeg {m['eeg_shape']} fnirs {m['fnirs_shape']} | labels {m['labels_distribution']} "
+                f"| per-session {m['samples_per_session']} | task_period {m['task_period_s']}s | "
+                f"ICA excluded {m['ica']['excluded']} | PyPREP={m.get('pyprep_badch')}")
+    except Exception as e:
+        return f"  [prep] metadata unavailable ({type(e).__name__})"
+
+
 def main():
+    import statistics
     os.makedirs(RESULTS_DIR, exist_ok=True)
     csv_path = os.path.join(RESULTS_DIR, f"stanet_all_subjects_{RUN_TAG}.csv")
+    json_path = os.path.join(RESULTS_DIR, f"stanet_all_subjects_{RUN_TAG}.json")
     fields = ["subject_id", "status", "mean_acc", "std_acc", "mean_kappa", "std_kappa", "eeg_only_acc",
               "fnirs_only_acc", "fusion_only_acc", "w_fusion", "w_fnirs",
               "recall_0back", "recall_2back", "recall_3back", "elapsed_min", "error"]
-    rows, total_cm = {}, np.zeros((NUM_CLASSES, NUM_CLASSES), dtype=int)
+    rows, all_cms = {}, []
     with CrashSafeLogger(os.path.join(RESULTS_DIR, f"stanet_run_log_{RUN_TAG}.txt"), experiment_tag="STANET_LOSO"):
-        print(f"===== STA-Net LOSO started {RUN_TAG} | device {args.device} | args {vars(args)}")
+        print(f"===== STA-Net LOSO started {RUN_TAG} (seed={args.seed}) =====")
+        print(f"[CONFIG] val_mode={args.val_mode!r} (val_ratio={args.val_ratio} if 'trial') | batch={args.batch_size} "
+              f"lr={args.lr} (Adam eps=1e-7) | stage1 max/patience={args.stage1_max_epochs}/{args.stage1_patience} "
+              f"| stage2 max={args.stage2_max_epochs} stop={args.stage2_stop!r} | adabn={args.adabn} "
+              f"(transductive; STA-Net default OFF) | diagnostics={args.diagnostics}")
+        print(f"[PROTOCOL] subject-dependent, leave-one-session-out (3 folds/subject), 3 classes, "
+              f"test session never used for early stopping / model selection / normalisation")
+        print(f"Subjects: {len(SUBJECTS)} | device={args.device} | data_root={args.data_root}")
+        print(f"Summary CSV : {csv_path}\nSummary JSON: {json_path}\nCheckpoints/per-subject JSON: {RESULTS_DIR}\n")
+        run_t0 = time.time()
         for i, sid in enumerate(SUBJECTS, 1):
             sdir = os.path.join(args.data_root, sid)
-            print(f"\n{'=' * 70}\n[{i}/{len(SUBJECTS)}] {sid}\n{'=' * 70}")
+            print(f"\n{'=' * 70}\n[{i}/{len(SUBJECTS)}] {sid}  ({time.time() - run_t0:.1f}s elapsed so far)\n{'=' * 70}")
             t0 = time.time()
             row = {k: "" for k in fields}; row["subject_id"] = sid
-            try:
-                eeg, fnirs, labels, sessions, trials = load_subject(sdir, sid)
-                folds = [run_fold(eeg, fnirs, labels, sessions, trials, s, sid) for s in sorted(np.unique(sessions))]
-                accs, kaps = [f["acc"] for f in folds], [f["kappa"] for f in folds]
-                cm = np.sum([np.array(f["cm"]) for f in folds], axis=0)
-                total_cm += cm
-                rec = [cm[c, c] / cm[c].sum() if cm[c].sum() else float("nan") for c in range(NUM_CLASSES)]
-                row.update(status="ok", mean_acc=np.mean(accs), std_acc=np.std(accs), mean_kappa=np.mean(kaps),
-                           std_kappa=np.std(kaps), eeg_only_acc=np.mean([f["eeg_only_acc"] for f in folds]),
-                           fnirs_only_acc=np.mean([f["fnirs_only_acc"] for f in folds]),
-                           fusion_only_acc=np.mean([f["fusion_only_acc"] for f in folds]),
-                           w_fusion=np.mean([f["w_fusion"] for f in folds]), w_fnirs=np.mean([f["w_fnirs"] for f in folds]),
-                           recall_0back=rec[0], recall_2back=rec[1], recall_3back=rec[2])
-                with open(os.path.join(RESULTS_DIR, f"stanet_{sid}_summary.json"), "w") as fh:
-                    json.dump({"subject_id": sid, "args": vars(args), "folds": folds,
-                               "mean_acc": row["mean_acc"], "mean_kappa": row["mean_kappa"]}, fh, indent=2)
-                print(f"  {sid}: mean acc {row['mean_acc'] * 100:.2f}%  kappa {row['mean_kappa']:.3f}")
-                del eeg, fnirs
-            except Exception as e:
-                row.update(status="error", error=str(e)); traceback.print_exc()
-            row["elapsed_min"] = round((time.time() - t0) / 60, 2)
-            rows[sid] = row
+            if not os.path.isdir(sdir):
+                print(f"  SKIP: {sdir} does not exist (preprocessing not run for this subject?)")
+                row["status"] = "skipped_no_data"
+                rows[sid] = row
+            else:
+                print(_prep_line(sdir, sid))
+                try:
+                    eeg, fnirs, labels, sessions, trials = load_subject(sdir, sid)
+                    folds = [run_fold(eeg, fnirs, labels, sessions, trials, s, sid) for s in sorted(np.unique(sessions))]
+                    accs, kaps = [f["acc"] for f in folds], [f["kappa"] for f in folds]
+                    cm = np.sum([np.array(f["cm"]) for f in folds], axis=0)
+                    all_cms.append(cm)
+                    rec = [cm[c, c] / cm[c].sum() if cm[c].sum() else float("nan") for c in range(NUM_CLASSES)]
+                    row.update(status="ok", mean_acc=np.mean(accs), std_acc=np.std(accs), mean_kappa=np.mean(kaps),
+                               std_kappa=np.std(kaps), eeg_only_acc=np.mean([f["eeg_only_acc"] for f in folds]),
+                               fnirs_only_acc=np.mean([f["fnirs_only_acc"] for f in folds]),
+                               fusion_only_acc=np.mean([f["fusion_only_acc"] for f in folds]),
+                               w_fusion=np.mean([f["w_fusion"] for f in folds]),
+                               w_fnirs=np.mean([f["w_fnirs"] for f in folds]),
+                               recall_0back=rec[0], recall_2back=rec[1], recall_3back=rec[2])
+                    row["elapsed_min"] = round((time.time() - t0) / 60, 2)
+                    with open(os.path.join(RESULTS_DIR, f"stanet_{sid}_summary.json"), "w") as fh:
+                        json.dump({"subject_id": sid, "args": vars(args), "folds": folds,
+                                   "confusion_matrix_summed": cm.tolist(), "per_class_recall": rec,
+                                   **{k: row[k] for k in ("mean_acc", "std_acc", "mean_kappa", "std_kappa")}},
+                                  fh, indent=2)
+                    print(f"\n[{sid}] DONE in {row['elapsed_min']:.1f} min | "
+                          f"acc={row['mean_acc']:.4f}+-{row['std_acc']:.4f}  kappa={row['mean_kappa']:.4f}+-{row['std_kappa']:.4f} | "
+                          f"branch acc: eeg={row['eeg_only_acc']:.4f} fnirs={row['fnirs_only_acc']:.4f} "
+                          f"fusion={row['fusion_only_acc']:.4f} | decision weights: "
+                          f"kappa_fusion={row['w_fusion']:.4f} kappa_fnirs={row['w_fnirs']:.4f}")
+                    for f_ in folds:
+                        print(f"    fold test=S{f_['test_session']}: acc={f_['acc']:.4f} kappa={f_['kappa']:.4f} | "
+                              f"stage1 best epoch {f_['best_epoch_s1']}, stage2 {f_['epochs_s2']} ep | "
+                              f"n train/val/test = {f_['n_train']}/{f_['n_val']}/{f_['n_test']}")
+                    print("  confusion matrix (summed over 3 session-folds):")
+                    print(_fmt_cm(cm))
+                    del eeg, fnirs
+                except Exception as e:
+                    row.update(status="error", error=str(e), elapsed_min=round((time.time() - t0) / 60, 2))
+                    print(f"\n[{sid}] FAILED after {row['elapsed_min']:.1f} min: {e}")
+                    traceback.print_exc()
+                rows[sid] = row
             new = not os.path.exists(csv_path)
-            with open(csv_path, "a", newline="", encoding="utf-8") as fh:
+            with open(csv_path, "a", newline="", encoding="utf-8") as fh:     # written immediately: survives a crash
                 w = csv.DictWriter(fh, fieldnames=fields)
                 if new: w.writeheader()
                 w.writerow(row)
+            with open(json_path, "w") as fh:
+                json.dump(rows, fh, indent=2, default=float)
 
         ok = [r for r in rows.values() if r["status"] == "ok"]
+        print(f"\n\n{'=' * 70}\nRUN COMPLETE: {len(ok)}/{len(SUBJECTS)} subjects finished successfully\n{'=' * 70}")
         if ok:
-            a, k = np.array([r["mean_acc"] for r in ok]), np.array([r["mean_kappa"] for r in ok])
-            print(f"\n===== OVERALL ({len(ok)} subjects): acc {a.mean() * 100:.2f} ± {a.std() * 100:.2f} %, "
-                  f"kappa {k.mean():.3f} ± {k.std():.3f}")
-            print("Summed confusion matrix (rows=true, cols=pred):\n", total_cm)
+            col = lambda k: [r[k] for r in ok]
+            print(f"Grand mean accuracy across subjects: {statistics.mean(col('mean_acc')):.4f} (+-{statistics.pstdev(col('mean_acc')):.4f})")
+            print(f"Grand mean kappa across subjects:    {statistics.mean(col('mean_kappa')):.4f} (+-{statistics.pstdev(col('mean_kappa')):.4f})")
+            print(f"Grand mean branch accuracy:  eeg={statistics.mean(col('eeg_only_acc')):.4f}  "
+                  f"fnirs={statistics.mean(col('fnirs_only_acc')):.4f}  fusion={statistics.mean(col('fusion_only_acc')):.4f}")
+            print(f"Grand mean decision weights:  kappa_fusion={statistics.mean(col('w_fusion')):.4f}  "
+                  f"kappa_fnirs={statistics.mean(col('w_fnirs')):.4f}")
+        if all_cms:
+            g = np.sum(all_cms, axis=0)
+            tot, diag = int(g.sum()), int(np.trace(g))
+            print(f"\n{'=' * 70}\nGRAND CONFUSION MATRIX (summed over {len(all_cms)} subjects x 3 folds)\n{'=' * 70}")
+            print(_fmt_cm(g))
+            print(f"\n  overall accuracy from matrix: {diag / tot * 100:.2f}%  (n={tot} windows)")
+            errs, hard = tot - diag, int(g[1, 2] + g[2, 1])
+            if errs > 0:
+                print(f"  2-back <-> 3-back confusions: {hard} of {errs} total errors ({hard / errs * 100:.1f}% of all errors)")
+        failed = [sid for sid, r in rows.items() if r["status"] not in ("ok",)]
+        if failed:
+            print(f"\nSubjects that did NOT complete: {failed}")
+        print(f"\n{'=' * 70}\nPER-SUBJECT RESULTS ({len(ok)} completed / {len(SUBJECTS)} total)\n{'=' * 70}")
+        for sid in SUBJECTS:
+            r = rows.get(sid)
+            if r is None:
+                print(f"{sid}: NOT RUN")
+            elif r["status"] == "ok":
+                print(f"{sid}: acc={r['mean_acc']:.4f} +- {r['std_acc']:.4f}  kappa={r['mean_kappa']:.4f} +- {r['std_kappa']:.4f}  |  "
+                      f"branch acc: eeg={r['eeg_only_acc']:.4f} fnirs={r['fnirs_only_acc']:.4f} fusion={r['fusion_only_acc']:.4f}  |  "
+                      f"decision weights: kappa_fusion={r['w_fusion']:.4f} kappa_fnirs={r['w_fnirs']:.4f}")
+            elif r["status"] == "skipped_no_data":
+                print(f"{sid}: SKIPPED (no preprocessed data)")
+            else:
+                print(f"{sid}: FAILED ({r.get('error', 'unknown error')})")
+        print(f"\nFull results: {csv_path}\n             {json_path}")
 
 
 if __name__ == "__main__":
