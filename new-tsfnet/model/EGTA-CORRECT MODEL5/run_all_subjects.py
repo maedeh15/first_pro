@@ -471,6 +471,23 @@ _arg_parser.add_argument("--fnirs-temporal-align", type=str, default="none",
                                "STA-Net's own 'No EGTA' ablation) with EEG-anchored attention "
                                "pooling. Zero-initialized keys make it identical to the mean at "
                                "step 0. Default 'none' reproduces prior behavior bit-for-bit.")
+_arg_parser.add_argument("--egta-k-init", type=str, default="zero",
+                          choices=["zero", "noisy"],
+                          help="Only used when --fnirs-temporal-align egta. 'zero' (DEFAULT, "
+                               "accepted baseline, bit-exact reproducible): egta_k's weight/bias "
+                               "init to exactly 0, which makes scores=q@k^T==0 identically at "
+                               "step 0 -- but ALSO makes d(scores)/d(egta_q)==k==0 identically, "
+                               "a CONFIRMED dead gradient on egta_q until egta_k's own weak "
+                               "gradient moves first (layer_gradient_diagnostics.py). 'noisy' "
+                               "(ISOLATED ABLATION, the fix): egta_k.weight ~ N(0, 0.01^2) instead "
+                               "of exact 0, breaking that bilinear deadlock so egta_q gets a live "
+                               "gradient from step 0; TESTED on the accepted baseline (3 seeds, 26 "
+                               "subjects): -1.34pp paired window accuracy (95% CI [-2.59,-0.10]pp, "
+                               "t-test p=0.045, Wilcoxon p=0.071, 17/26 subjects worse) -- a real "
+                               "but small, borderline-significant REGRESSION, not an improvement. "
+                               "Fixing the dead gradient does not fix accuracy, so 'zero' stays "
+                               "the default (rule 5); 'noisy' is kept available as a documented, "
+                               "tested alternative.")
 _arg_parser.add_argument("--lr", type=float, default=1e-3,
                           help="priority-G1: Adam learning rate. Default 1e-3 = prior behavior. "
                                "MSTFDN uses 3e-4 (with cosine annealing + warm-up).")
@@ -741,6 +758,7 @@ FC_EMBED_DIM = SEED_ARGS.fc_embed_dim
 ADABN = SEED_ARGS.adabn
 TTA_MODE = SEED_ARGS.tta_mode
 FNIRS_TEMPORAL_ALIGN = SEED_ARGS.fnirs_temporal_align
+EGTA_K_INIT = SEED_ARGS.egta_k_init
 TENT_LR = SEED_ARGS.tent_lr
 TENT_STEPS = SEED_ARGS.tent_steps
 if TTA_MODE == "tent" and ADABN:
@@ -972,6 +990,7 @@ _FC_SUBTAG = "_fc" if USE_FC_FEATURES else ""
 _ADABN_SUBTAG = "_adabn" if ADABN else ""
 _TENT_SUBTAG = "_tent" if TTA_MODE == "tent" else ""
 _EGTA_SUBTAG = "_egta" if FNIRS_TEMPORAL_ALIGN == "egta" else ""
+_EGTA_SUBTAG += "_kinit-noisy" if EGTA_K_INIT == "noisy" else ""   # MUST be in the tag (rule 5)
 # priority-D-1-safe / priority-GN: these MUST enter the variant tag, otherwise
 # a run with the flag on writes into the SAME results folder (same hash) as the
 # run without it and overwrites its per-session JSONs and .pt checkpoints --
@@ -1163,6 +1182,7 @@ with CrashSafeLogger(os.path.join(RESULTS_DIR_VARIANT, f"baseline_run_log_{RUN_T
           f"| tta_mode={TTA_MODE!r} (priority-E4 generalization, lr={TENT_LR} "
           f"steps={TENT_STEPS} if 'tent') "
           f"| fnirs_temporal_align={FNIRS_TEMPORAL_ALIGN!r} (priority-1 roadmap, STA-Net EGTA) "
+          f"| egta_k_init={EGTA_K_INIT!r} (default 'zero'=accepted baseline; 'noisy'=tested fix, -1.34pp) "
           f"| swa_enabled={SWA_ENABLED!r} (priority-SWA, start_epoch={SWA_START_EPOCH!r} "
           f"lr={SWA_LR!r})")
     print(f"Subjects: {len(SUBJECTS)} | diagnostics={RUN_DIAGNOSTICS} | device="
@@ -1236,6 +1256,7 @@ with CrashSafeLogger(os.path.join(RESULTS_DIR_VARIANT, f"baseline_run_log_{RUN_T
                 tta_mode=TTA_MODE,                        # ISOLATED ABLATION (priority-E4 generalization): "tent" for entropy-minimization BN adaptation, None (default) disables
                 tent_lr=TENT_LR, tent_steps=TENT_STEPS,   # only used when tta_mode="tent"
                 fnirs_temporal_align=FNIRS_TEMPORAL_ALIGN,
+                egta_k_init=EGTA_K_INIT,                      # "zero" (default, accepted) vs "noisy" (tested fix, -1.34pp)
                 eeg_band_mode=EEG_BAND_MODE,                  # priority-D-1-safe
                 eeg_band_d_model=EEG_BAND_D_MODEL,
                 eeg_band_embed_dim=EEG_BAND_EMBED_DIM,

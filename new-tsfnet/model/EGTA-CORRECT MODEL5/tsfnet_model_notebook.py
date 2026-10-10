@@ -765,11 +765,13 @@ class CAFELayer(nn.Module):
 
     def __init__(self, fusion_dim=4 * 4 * 32, fnirs_dim=4 * 4 * 32,
                  d_model=64, n_heads=4, n_segments=21, dropout=0.3,
-                 fnirs_temporal_align="none"):
+                 fnirs_temporal_align="none", egta_k_init="zero"):
         super().__init__()
         if fnirs_temporal_align not in ("none", "egta"):
             raise ValueError(f"fnirs_temporal_align must be 'none' or 'egta', "
                              f"got {fnirs_temporal_align!r}")
+        if egta_k_init not in ("zero", "noisy"):
+            raise ValueError(f"egta_k_init must be 'zero' or 'noisy', got {egta_k_init!r}")
         if fnirs_temporal_align == "egta" and (fnirs_dim % n_heads or d_model % n_heads):
             raise ValueError(f"fnirs_temporal_align='egta' needs fnirs_dim ({fnirs_dim}) "
                              f"and d_model ({d_model}) divisible by n_heads ({n_heads})")
@@ -813,15 +815,31 @@ class CAFELayer(nn.Module):
                 torch.manual_seed(20260921)
                 self.egta_q = nn.Linear(d_model, d_model)
                 self.egta_k = nn.Linear(d_model, d_model)
-                # Was nn.init.zeros_(self.egta_k.weight/.bias): exact zero makes
-                # k == 0 for every input, so scores = q @ k^T == 0 identically and
-                # d(scores)/dq == k == 0 -- egta_q's gradient is EXACTLY zero until
-                # egta_k's own (weak, q-driven) gradient nudges it off zero first.
-                # A small-noise weight keeps scores ~0 (still ~uniform attention at
-                # step 0, same intent) but breaks that bilinear deadlock: egta_q gets
-                # a live gradient from step 0 instead of waiting on egta_k to move.
-                nn.init.normal_(self.egta_k.weight, std=0.01)
-                nn.init.zeros_(self.egta_k.bias)     # still uniform-ish at step 0
+                # egta_k_init="zero" (DEFAULT, bit-exact prior/accepted behavior,
+                # project rule 5): k == 0 for every input, so scores = q @ k^T == 0
+                # identically and d(scores)/dq == k == 0 -- egta_q's gradient is
+                # EXACTLY zero until egta_k's own (weak, q-driven) gradient nudges
+                # it off zero first. CONFIRMED via layer_gradient_diagnostics.py: a
+                # real, isolated cold-start defect, not a hypothesis. Kept as the
+                # default so the accepted baseline (40b7d8ea53) stays bit-for-bit
+                # reproducible -- same convention as efgf_gate_mode="clamp" above.
+                # egta_k_init="noisy" (ISOLATED ABLATION, the fix): small-noise
+                # weight keeps scores ~0 (still ~uniform attention at step 0, same
+                # intent) but breaks the bilinear deadlock so egta_q gets a live
+                # gradient from step 0. TESTED on the accepted baseline, 3 seeds,
+                # 26 subjects: paired per-subject window accuracy -1.34pp (95% CI
+                # [-2.59, -0.10] pp), t-test p=0.045, Wilcoxon p=0.071, 17/26
+                # subjects worse -- a small, borderline-significant REGRESSION, not
+                # an improvement. Fixing the dead gradient does not mean fixing
+                # accuracy (rule 5: never silently adopt a "fix" with a measured
+                # cost as the new default); exposed here as a documented, tested
+                # alternative, exactly like efgf_gate_mode="sigmoid" above it.
+                if egta_k_init == "zero":
+                    nn.init.zeros_(self.egta_k.weight)
+                    nn.init.zeros_(self.egta_k.bias)
+                else:
+                    nn.init.normal_(self.egta_k.weight, std=0.01)
+                    nn.init.zeros_(self.egta_k.bias)     # still uniform-ish at step 0
             finally:
                 torch.set_rng_state(_rng_state)
 
@@ -1413,7 +1431,7 @@ class TSFNet(nn.Module):
                  eeg_spatial_mode="none", eeg_spatial_channels=28,
                  eeg_spatial_d_model=64, eeg_spatial_heads=4,
                  eeg_spatial_layers=2, eeg_spatial_embed_dim=64,
-                 eeg_backbone_mode="native", fnirs_temporal_align="none",
+                 eeg_backbone_mode="native", fnirs_temporal_align="none", egta_k_init="zero",
                  eeg_band_mode="none", eeg_band_channels=28,
                  eeg_band_d_model=32, eeg_band_embed_dim=32,
                  norm_mode="batch", norm_groups=8,
@@ -1799,7 +1817,7 @@ class TSFNet(nn.Module):
         self.cafe = CAFELayer(fusion_dim=feat_dim, fnirs_dim=feat_dim,
                                d_model=cafe_d_model, n_heads=cafe_n_heads,
                                n_segments=fnirs_num_segments, dropout=cafe_dropout,
-                               fnirs_temporal_align=fnirs_temporal_align)
+                               fnirs_temporal_align=fnirs_temporal_align, egta_k_init=egta_k_init)
         self.fnirs_temporal_align = fnirs_temporal_align
 
         # eeg_feat_dim depends on eeg_temporal_mode: GAP flattens a (32,4,4)
@@ -4053,7 +4071,7 @@ def run_subject_cross_session(subject_dir, subject_id, device="cuda" if torch.cu
                                eeg_spatial_d_model=64,
                                eeg_backbone="native", tta_mode=None,
                                tent_lr=1e-3, tent_steps=1,
-                               fnirs_temporal_align="none",
+                               fnirs_temporal_align="none", egta_k_init="zero",
                                eeg_band_mode="none", eeg_band_d_model=32,
                                eeg_band_embed_dim=32, eeg_band_weight_decay=1e-2,
                                norm_mode="batch", norm_groups=8,
@@ -4455,7 +4473,7 @@ def run_subject_cross_session(subject_dir, subject_id, device="cuda" if torch.cu
                   f"| alpha=uniform (class_weight=None, isolating the focusing term alone)")
 
         model = TSFNet(num_classes=3, fusion_combination=fusion_combination,
-                        fnirs_temporal_align=fnirs_temporal_align,
+                        fnirs_temporal_align=fnirs_temporal_align, egta_k_init=egta_k_init,
                         eeg_temporal_mode=eeg_temporal_mode, eeg_lstm_hidden=eeg_lstm_hidden,
                         eeg_readout_mode=eeg_readout_mode, cafe_d_model=cafe_d_model,
                         fnirs_num_segments=fnirs_num_segments,
