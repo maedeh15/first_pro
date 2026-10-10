@@ -58,14 +58,22 @@ SECTIONS
 USAGE
 =====
     %run full_architecture_diagnostics.py
-(edit SUBJECT_DIR below; run in the same kernel as tsfnet_model_notebook.py.
-Needs only one subject's preprocessed .npy files -- no GPU required, much
-faster with one. Expect 1-3 minutes total on CPU, seconds on GPU, dominated
-by SHORT_TRAIN_STEPS.)
+    %run full_architecture_diagnostics.py --real-ckpt-path "E:\...\VP001_session1_best.pt"
+    %run full_architecture_diagnostics.py --subject-id VP002 --subject-dir "E:\...\VP002" ^
+        --real-ckpt-path "E:\...\VP002_session1_best.pt"
 
-Set CKPT_A / CKPT_B below (optional) to run section 5's two-checkpoint
-basin check with real trained weights instead of the short run's own.
+All settings below are CLI flags with the hardcoded values as defaults, so
+you can either edit the "EDIT THESE" block once, or override anything per
+run from the %run command line without touching the file (handy for
+re-running against a different subject/checkpoint each time). Run in the
+same kernel as tsfnet_model_notebook.py. Needs only one subject's
+preprocessed .npy files -- no GPU required, much faster with one. Expect
+1-3 minutes total on CPU, seconds on GPU, dominated by SHORT_TRAIN_STEPS.
+
+Pass --ckpt-a / --ckpt-b (optional) to run section 5's two-checkpoint basin
+check with real trained weights instead of the short run's own.
 """
+import argparse
 import copy
 import math
 
@@ -77,29 +85,49 @@ from torch.utils.data import DataLoader
 
 from tsfnet_model_notebook import TSFNet, NBackDataset, _unpack_batch, tsfnet_loss
 
-# ---- EDIT THESE ----
-SUBJECT_DIR = r"E:\kntu\Thesis\codes\Results\TSFNET_PAPER_EXACT_nback\VP001"
-SUBJECT_ID = "VP001"
-FNIRS_NUM_SEGMENTS = 21
-BATCH_SIZE = 16
-SEED = 42
-SHORT_TRAIN_STEPS = 500     # proxy training run length for sections 2/4/7/8
-SHORT_TRAIN_LR = 1e-3
-LOG_EVERY = 25
-CKPT_A = None   # e.g. r"...\results_40b7d8ea53_seed42\VP001_session1_best.pt"
-CKPT_B = None   # e.g. r"...\results_40b7d8ea53_seed999\VP001_session1_best.pt"
-# REAL_CKPT_PATH: set this to a real trained checkpoint (e.g. one of CKPT_A's
-# path) to make sections 3/4/5/6 inspect THAT ACTUAL TRAINED MODEL instead of
-# a fresh/proxy-trained one. None (default) = old behaviour (fresh model for
-# section 3, the SHORT_TRAIN_STEPS proxy model for sections 2/4/5/6/7, a
-# second fresh model shuffled-label-trained for section 8). Section 8's
-# random-label memorization test and sections 2/7's weight/loss-curve logging
-# only make sense for a model being trained from scratch, so they IGNORE this
+# ---- EDIT THESE (or override any of them as a --flag on the %run command line) ----
+_p = argparse.ArgumentParser()
+_p.add_argument("--subject-dir", default=r"E:\kntu\Thesis\codes\Results\TSFNET_PAPER_EXACT_nback\VP001")
+_p.add_argument("--subject-id", default="VP001")
+_p.add_argument("--fnirs-num-segments", type=int, default=21)
+_p.add_argument("--batch-size", type=int, default=16)
+_p.add_argument("--seed", type=int, default=42)
+_p.add_argument("--short-train-steps", type=int, default=500,
+                help="proxy training run length for sections 2/4/7/8")
+_p.add_argument("--short-train-lr", type=float, default=1e-3)
+_p.add_argument("--log-every", type=int, default=25)
+_p.add_argument("--ckpt-a", default=None, help=r"e.g. ...\results_40b7d8ea53_seed42\VP001_session1_best.pt")
+_p.add_argument("--ckpt-b", default=None, help=r"e.g. ...\results_40b7d8ea53_seed999\VP001_session1_best.pt")
+_p.add_argument("--real-ckpt-path", default=None,
+                help="set to a real trained checkpoint to make sections 3/4/5/6 inspect "
+                     "THAT ACTUAL TRAINED MODEL instead of a fresh/proxy-trained one")
+_p.add_argument("--sections", default=None,
+                help="comma-separated subset to run, e.g. '1,3,6' (default: all 8)")
+ARGS, _unknown = _p.parse_known_args()   # parse_known_args: ignore any Jupyter/IPython-injected args
+
+SUBJECT_DIR = ARGS.subject_dir
+SUBJECT_ID = ARGS.subject_id
+FNIRS_NUM_SEGMENTS = ARGS.fnirs_num_segments
+BATCH_SIZE = ARGS.batch_size
+SEED = ARGS.seed
+SHORT_TRAIN_STEPS = ARGS.short_train_steps
+SHORT_TRAIN_LR = ARGS.short_train_lr
+LOG_EVERY = ARGS.log_every
+CKPT_A = ARGS.ckpt_a
+CKPT_B = ARGS.ckpt_b
+# REAL_CKPT_PATH: set this (or pass --real-ckpt-path) to make sections 3/4/5/6
+# inspect THAT ACTUAL TRAINED MODEL instead of a fresh/proxy-trained one.
+# None (default) = old behaviour (fresh model for section 3, the
+# SHORT_TRAIN_STEPS proxy model for sections 2/4/5/6/7, a second fresh model
+# shuffled-label-trained for section 8). Section 8's random-label
+# memorization test and sections 2/7's weight/loss-curve logging only make
+# sense for a model being trained from scratch, so they IGNORE this
 # and keep using the proxy run even when it is set -- only sections 3/4/5/6
 # (pure inspection/ablation of a model's CURRENT state) switch to the real
 # checkpoint.
-REAL_CKPT_PATH = None   # e.g. r"...\results_40b7d8ea53_seed42\VP001_session1_best.pt"
-RUN_SECTIONS = {1, 2, 3, 4, 5, 6, 7, 8}   # comment out any you want to skip
+REAL_CKPT_PATH = ARGS.real_ckpt_path   # e.g. r"...\results_40b7d8ea53_seed42\VP001_session1_best.pt"
+RUN_SECTIONS = (set(int(x) for x in ARGS.sections.split(",")) if ARGS.sections
+                else {1, 2, 3, 4, 5, 6, 7, 8})
 # ---------------------
 
 torch.manual_seed(SEED)
