@@ -475,7 +475,6 @@ def section6_branch_info_flow(model, batch):
         e = acts["eeg_pooled"].reshape(acts["eeg_pooled"].shape[0], -1).cpu().numpy()
         f = acts["fnirs_pooled"]
         f = f.reshape(f.shape[0], -1).cpu().numpy()
-        f = f.reshape(f.shape[0], -1).cpu().numpy()
 
         def top_pc(x):
             x = x - x.mean(0, keepdims=True)
