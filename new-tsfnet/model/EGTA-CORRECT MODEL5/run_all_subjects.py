@@ -319,6 +319,14 @@ _arg_parser.add_argument("--data-root", type=str, default=None,
                                "the baseline DATA_ROOT below, prior behavior. For the shared-"
                                "grid ablation pass the '..._fnirsbboxEEG' folder produced by "
                                "Preproc_tsfnet_nback_badch.py --fnirs-grid-bbox eeg.")
+_arg_parser.add_argument("--subjects", type=str, default="1-26",
+                          help="Which subjects to run, e.g. '1-2' or '1,5,12-14'. Default "
+                               "'1-26' (all 26, prior behavior) -- use a small range for a quick "
+                               "isolated-ablation smoke test before committing to the full sweep. "
+                               "Does NOT enter the variant hash/tag (it is a run-scope choice, not "
+                               "a model/training change), so re-running the same flags with more "
+                               "subjects later just adds results into the same results_<hash>_seed<N> "
+                               "folder.")
 _arg_parser.add_argument("--erp-branch", type=str, default="none", choices=["none", "eeg", "eeg_fusion"],
                           help="priority-ERP: add a digit-locked ERP pathway (needs the files from "
                                "build_erp_windows.py). 'eeg' feeds it into the EEG classifier, "
@@ -913,7 +921,19 @@ _DEFAULT_DATA_ROOT = r"E:\kntu\Thesis\codes\Results\TSFNET_PAPER_EXACT_nback"
 DATA_ROOT = SEED_ARGS.data_root or _DEFAULT_DATA_ROOT
 if not os.path.isdir(DATA_ROOT):
     raise FileNotFoundError(f"--data-root does not exist: {DATA_ROOT}")
-SUBJECTS = [f"VP{i:03d}" for i in range(1, 27)]     # VP001..VP026
+def _parse_subjects_spec(spec):
+    ids = []
+    for part in spec.split(","):
+        part = part.strip()
+        if "-" in part:
+            a, b = part.split("-")
+            ids.extend(range(int(a), int(b) + 1))
+        elif part:
+            ids.append(int(part))
+    return [f"VP{i:03d}" for i in ids]
+
+
+SUBJECTS = _parse_subjects_spec(SEED_ARGS.subjects)     # default "1-26" = VP001..VP026, prior behavior
 
 # priority-XSUBJ: resolve, per subject, the pretrained checkpoint whose
 # pretraining pool did NOT contain that subject. Every leakage-relevant fact
