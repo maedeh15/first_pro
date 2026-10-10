@@ -1,4 +1,4 @@
-"""
+r"""
 full_architecture_diagnostics.py -- a single-file battery covering the 8
 categories of model-behaviour diagnostics discussed for this project, beyond
 plain gradient-flow (layer_gradient_diagnostics.py covers category 1 only).
