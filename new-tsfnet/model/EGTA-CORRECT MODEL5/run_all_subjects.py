@@ -729,6 +729,17 @@ _arg_parser.add_argument("--efgf-gate-init", type=float, default=-6.0,
                                "leaves the gate at only ~0.37 by the end of stage 1 even when "
                                "the data wants it open (vs ~0.82 from -2.0) -- exposed here so "
                                "both can be compared directly.")
+_arg_parser.add_argument("--attn-conv-init-gain", type=float, default=None,
+                          help="ISOLATED ABLATION ('item 3' from the gradient-flow review): "
+                               "None (DEFAULT, accepted baseline, bit-exact reproducible) leaves "
+                               "EFGF's eeg_attn_conv/fnirs_attn_conv at PyTorch's own default "
+                               "Kaiming-uniform init. A float (e.g. 0.5) re-inits both convs' "
+                               "weight with xavier_uniform_(gain=attn_conv_init_gain) instead -- "
+                               "layer_gradient_diagnostics.py flagged these layers with a large "
+                               "grad/weight ratio under the default init; a smaller gain keeps "
+                               "their pre-sigmoid output closer to the sigmoid's linear region at "
+                               "step 0. NEVER MEASURED to help or hurt accuracy -- test before "
+                               "trusting.")
 SEED_ARGS = _arg_parser.parse_args()
 SEED = SEED_ARGS.seed
 GRAD_CLIP_NORM = 1.0 if SEED_ARGS.grad_clip else None
@@ -815,6 +826,7 @@ SWA_ENABLED = SEED_ARGS.swa_enabled
 SWA_START_EPOCH = SEED_ARGS.swa_start_epoch
 SWA_LR = SEED_ARGS.swa_lr
 EFGF_GATE_INIT = SEED_ARGS.efgf_gate_init
+ATTN_CONV_INIT_GAIN = SEED_ARGS.attn_conv_init_gain
 if EFGF_GATE_INIT != -6.0 and EFGF_GATE_MODE == "clamp":
     print(f"WARNING: --efgf-gate-init {EFGF_GATE_INIT} has NO EFFECT because "
           f"--efgf-gate-mode is 'clamp' (clamp mode always inits gamma/alpha to exactly "
@@ -1023,6 +1035,7 @@ _STAGE2_SUBTAG = ({"epoch_count": "_s2ep", "none": "_s2none"}.get(STAGE2_STOP_MO
 # active and is not something a flag turns on or off.
 _EFGFINIT_SUBTAG = (f"_gi{EFGF_GATE_INIT}"
                     if EFGF_GATE_INIT != -6.0 and EFGF_GATE_MODE == "sigmoid" else "")
+_EFGFINIT_SUBTAG += f"_acg{ATTN_CONV_INIT_GAIN:g}" if ATTN_CONV_INIT_GAIN is not None else ""
 _LABRAM_SUBTAG = {"native": "", "labram_frozen": "_labram",
                   "labram_ensemble": "_labramens",
                   "labram_blend": "_labramblend"}[EEG_BACKBONE]
@@ -1162,6 +1175,7 @@ with CrashSafeLogger(os.path.join(RESULTS_DIR_VARIANT, f"baseline_run_log_{RUN_T
           f"| no_decay_scalars={NO_DECAY_SCALARS!r} (priority-nodecay-scalars) "
           f"| stage2_stop_mode={STAGE2_STOP_MODE!r} (priority-stage2fix) "
           f"| efgf_gate_init={EFGF_GATE_INIT!r} (priority-efgfinit) "
+          f"| attn_conv_init_gain={ATTN_CONV_INIT_GAIN!r} (None=default, untested if set) "
           f"| mhs_lambda={MHS_LAMBDA} (priority-B1 isolated variable, MSTFDN-inspired) "
           f"| efgf_lambda={EFGF_LAMBDA} cafe_lambda={CAFE_LAMBDA} (priority-PCCLAMBDA isolated variable) "
           f"| label_smoothing={LABEL_SMOOTHING} (priority-B4 isolated variable) "
@@ -1277,7 +1291,9 @@ with CrashSafeLogger(os.path.join(RESULTS_DIR_VARIANT, f"baseline_run_log_{RUN_T
                 swa_enabled=SWA_ENABLED,
                 swa_start_epoch=SWA_START_EPOCH,
                 swa_lr=SWA_LR,
-                efgf_gate_init=EFGF_GATE_INIT,                 # priority-efgfinit  # ISOLATED ABLATION (roadmap priority-1): "egta" = STA-Net EGTA pooling, "none" (default) disables
+                efgf_gate_init=EFGF_GATE_INIT,                 # priority-efgfinit
+                attn_conv_init_gain=ATTN_CONV_INIT_GAIN,        # "item 3": None (default) = PyTorch's own init, untested float = xavier_uniform_(gain=...)
+                # ISOLATED ABLATION (roadmap priority-1): "egta" = STA-Net EGTA pooling, "none" (default) disables
                 lr=LR, weight_decay=WEIGHT_DECAY,         # priority-G1 (defaults = prior behavior)
                 dropout=DROPOUT, cafe_dropout=CAFE_DROPOUT,
                 conv_dropout=CONV_DROPOUT,                # priority-CONVDROP: None (default) = use dropout

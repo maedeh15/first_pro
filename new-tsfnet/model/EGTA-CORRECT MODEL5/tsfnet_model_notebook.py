@@ -491,10 +491,29 @@ class FNIRSBranch(nn.Module):
 # residual gamma additionally blends in the EEG-branch's own feature map.
 # ----------------------------------------------------------------------------
 class EFGFLayer(nn.Module):
-    def __init__(self, channels, eeg_kernel, fnirs_kernel, gate_mode="clamp", gate_init=-6.0):
+    def __init__(self, channels, eeg_kernel, fnirs_kernel, gate_mode="clamp", gate_init=-6.0,
+                 attn_conv_init_gain=None):
         super().__init__()
         self.eeg_attn_conv = Conv3dSame(channels, 1, eeg_kernel, stride=(1, 1, 1))
         self.fnirs_attn_conv = Conv3dSame(channels, 1, fnirs_kernel, stride=(1, 1, 1))
+        # attn_conv_init_gain: ISOLATED ABLATION PARAMETER (candidate "item 3"
+        # from the gradient-flow review, layer_gradient_diagnostics.py's
+        # Section 1 flagged efgf1/efgf2.eeg_attn_conv with grad/weight ratio
+        # ~1.4, "<-- large step", under default PyTorch Conv3d init). None
+        # (DEFAULT, bit-exact prior/accepted behaviour, rule 5): leaves
+        # eeg_attn_conv/fnirs_attn_conv at PyTorch's own default Kaiming-
+        # uniform init, UNCHANGED. A float (e.g. 0.5): re-initializes both
+        # convs' weight with nn.init.xavier_uniform_(gain=attn_conv_init_gain)
+        # instead -- a smaller gain keeps their pre-sigmoid output (Phi,
+        # EFGFLayer.forward's eeg_temporal_att/fnirs_spatial_att) closer to
+        # the sigmoid's linear region at init (less saturated) rather than
+        # changing what gate_mode/gate_init already control (gamma/alpha).
+        # NEVER MEASURED to help or hurt accuracy as of this writing -- test
+        # before trusting; kept opt-in exactly like egta_k_init and
+        # efgf_gate_mode above/below.
+        if attn_conv_init_gain is not None:
+            nn.init.xavier_uniform_(self.eeg_attn_conv.conv.weight, gain=attn_conv_init_gain)
+            nn.init.xavier_uniform_(self.fnirs_attn_conv.conv.weight, gain=attn_conv_init_gain)
         # priority-EFGF-gatefix: gate_mode controls how the trainable scalars
         # gamma, alpha in [0,1] ("initialized to zero", Sec. 3.6) are
         # parametrized.
@@ -1435,7 +1454,7 @@ class TSFNet(nn.Module):
                  eeg_band_mode="none", eeg_band_channels=28,
                  eeg_band_d_model=32, eeg_band_embed_dim=32,
                  norm_mode="batch", norm_groups=8,
-                 efgf_gate_mode="clamp", efgf_gate_init=-6.0,
+                 efgf_gate_mode="clamp", efgf_gate_init=-6.0, attn_conv_init_gain=None,
                  conv_dropout=None, conv_dropout_type="channel",
                  fusion_fnirs_inject="none", erp_branch="none",
                  egta_pcc_lambda=0.0, eeg_filterbank="none", eeg_filterbank_scope="both",
@@ -1768,9 +1787,9 @@ class TSFNet(nn.Module):
 
         # EFGF stage 1: operates on conv1 outputs (channels=16, EEG kernel matches Table1
         # "EFGF1 Conv1" = 2x2x6, fNIRS kernel matches "EFGF1 Conv2" = 2x2x3)
-        self.efgf1 = EFGFLayer(channels=16, eeg_kernel=(2, 2, 6), fnirs_kernel=(2, 2, 3), gate_mode=efgf_gate_mode, gate_init=efgf_gate_init)
+        self.efgf1 = EFGFLayer(channels=16, eeg_kernel=(2, 2, 6), fnirs_kernel=(2, 2, 3), gate_mode=efgf_gate_mode, gate_init=efgf_gate_init, attn_conv_init_gain=attn_conv_init_gain)
         # EFGF stage 2: operates on conv2 outputs (channels=32, both kernels = 2x2x3 per Table1)
-        self.efgf2 = EFGFLayer(channels=32, eeg_kernel=(2, 2, 3), fnirs_kernel=(2, 2, 3), gate_mode=efgf_gate_mode, gate_init=efgf_gate_init)
+        self.efgf2 = EFGFLayer(channels=32, eeg_kernel=(2, 2, 3), fnirs_kernel=(2, 2, 3), gate_mode=efgf_gate_mode, gate_init=efgf_gate_init, attn_conv_init_gain=attn_conv_init_gain)
         # priority-FNIRSINJECT: in the paper's design the fusion branch is fed
         # by x_eeg ONLY; fNIRS reaches it solely through alpha * sigmoid(map)
         # inside EFGF's attention Phi, and alpha converged to ~0.14 in run60,
@@ -4080,6 +4099,7 @@ def run_subject_cross_session(subject_dir, subject_id, device="cuda" if torch.cu
                                val_mode="trial",
                                no_decay_scalars=False,
                                stage2_stop_mode="loss", efgf_gate_init=-6.0,
+                               attn_conv_init_gain=None,
                                init_checkpoint=None,
                                **train_kwargs):
     """Sec. 3.6: Hold-Out over all 3 sessions, average of test accuracy/kappa
@@ -4499,7 +4519,8 @@ def run_subject_cross_session(subject_dir, subject_id, device="cuda" if torch.cu
                         eeg_band_embed_dim=eeg_band_embed_dim,
                         norm_mode=norm_mode, norm_groups=norm_groups,
                         efgf_gate_mode=efgf_gate_mode,
-                        efgf_gate_init=efgf_gate_init).to(device)
+                        efgf_gate_init=efgf_gate_init,
+                        attn_conv_init_gain=attn_conv_init_gain).to(device)
         if init_checkpoint is not None:
             # priority-XSUBJ: start every fold of this subject from the SAME
             # cross-subject pretrained weights (a model that never saw this
