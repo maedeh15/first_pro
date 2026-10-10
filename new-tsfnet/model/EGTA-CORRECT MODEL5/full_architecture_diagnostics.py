@@ -88,6 +88,17 @@ SHORT_TRAIN_LR = 1e-3
 LOG_EVERY = 25
 CKPT_A = None   # e.g. r"...\results_40b7d8ea53_seed42\VP001_session1_best.pt"
 CKPT_B = None   # e.g. r"...\results_40b7d8ea53_seed999\VP001_session1_best.pt"
+# REAL_CKPT_PATH: set this to a real trained checkpoint (e.g. one of CKPT_A's
+# path) to make sections 3/4/5/6 inspect THAT ACTUAL TRAINED MODEL instead of
+# a fresh/proxy-trained one. None (default) = old behaviour (fresh model for
+# section 3, the SHORT_TRAIN_STEPS proxy model for sections 2/4/5/6/7, a
+# second fresh model shuffled-label-trained for section 8). Section 8's
+# random-label memorization test and sections 2/7's weight/loss-curve logging
+# only make sense for a model being trained from scratch, so they IGNORE this
+# and keep using the proxy run even when it is set -- only sections 3/4/5/6
+# (pure inspection/ablation of a model's CURRENT state) switch to the real
+# checkpoint.
+REAL_CKPT_PATH = None   # e.g. r"...\results_40b7d8ea53_seed42\VP001_session1_best.pt"
 RUN_SECTIONS = {1, 2, 3, 4, 5, 6, 7, 8}   # comment out any you want to skip
 # ---------------------
 
@@ -101,6 +112,26 @@ def build_model():
         fnirs_num_segments=FNIRS_NUM_SEGMENTS, fnirs_temporal_align="egta",
         efgf_gate_mode="sigmoid", efgf_gate_init=-2.0,
     ).to(device)
+
+
+def load_real_model(ckpt_path):
+    """Builds the same architecture and loads REAL trained weights from a
+    run_all_subjects.py checkpoint -- no proxy training, no fresh init."""
+    model = build_model()
+    state = torch.load(ckpt_path, map_location=device)
+    model.load_state_dict(state, strict=True)
+    model.eval()
+    return model
+
+
+def model_for_inspection():
+    """Returns the model sections 3/4/5/6 should inspect: the REAL checkpoint
+    if REAL_CKPT_PATH is set, else the old proxy/fresh behaviour (caller
+    passes its own fallback when this returns None)."""
+    if REAL_CKPT_PATH:
+        print(f"[using REAL checkpoint] {REAL_CKPT_PATH}")
+        return load_real_model(REAL_CKPT_PATH)
+    return None
 
 
 def get_loader():
@@ -567,19 +598,21 @@ def main():
         if 2 in RUN_SECTIONS:
             section2_weight_health(train_log)
 
+    real_model = model_for_inspection()   # None unless REAL_CKPT_PATH is set
+
     if 3 in RUN_SECTIONS:
-        section3_representation_quality(build_model(), batch)
+        section3_representation_quality(real_model or build_model(), batch)
 
     if 4 in RUN_SECTIONS:
-        section4_robustness(train_log and model_short or build_model(), batch,
+        section4_robustness(real_model or (train_log and model_short or build_model()), batch,
                              train_log or {"gate_vals": {}})
 
     if 5 in RUN_SECTIONS:
-        model5 = train_log and model_short or build_model()
+        model5 = real_model or (train_log and model_short or build_model())
         section5_loss_landscape(model5, batch)
 
     if 6 in RUN_SECTIONS:
-        section6_branch_info_flow(train_log and model_short or build_model(), batch)
+        section6_branch_info_flow(real_model or (train_log and model_short or build_model()), batch)
 
     if 7 in RUN_SECTIONS and train_log is not None:
         section7_optimization_dynamics(train_log)
