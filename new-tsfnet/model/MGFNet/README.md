@@ -99,3 +99,30 @@ Output shapes: EEG 28×2000 and HbO/HbR 36×100 (10 s).
 **The only input difference:** MGFNet's fNIRS covers the same 10 s as its EEG window, because the model interpolates fNIRS onto the EEG time axis. TSFNet additionally sees 13 s of fNIRS after the window (21 × 3 s segments).
 
 **Not inductive:** per-session normalisation uses the held-out session's unlabelled statistics, exactly as in the TSFNet pipeline. Disclose this alongside both models' results.
+
+## XAI validation scripts (statistical tests on MGFNet's internal signals)
+
+These are MGFNet versions of the project's four TSFNet XAI checks. The statistics are the same: exact permutation, BH-FDR, Wilcoxon, Cochran's Q/I², Friedman + Kendall's W, ICC(2,1) and bootstrap. They live in `mgfnet_xai_common.py`.
+
+The signals are MGFNet's own, because EGTA and EFGF do not exist here:
+- **Gate:** EEG / fNIRS / cross-modal shares, and gate entropy
+- **Coupling C:** mean row entropy
+- **Router distribution:** mass on the theta-band tokens, and entropy
+
+**Directional hypothesis:** `routing_theta_mass` should go up with load, because frontal-midline theta rises with working-memory load. It is cross-checked against `theta_fm`.
+
+| script | question |
+|---|---|
+| `xai_biomarker_validation_mgfnet.py` | 3-back vs 2-back effect per subject, plus a physiology cross-check (`--capacity-summary`) |
+| `xai_load_level_anova_mgfnet.py` | Friedman test across 0/2/3-back, with BH post-hoc |
+| `xai_multimethod_consensus_mgfnet.py` | Do the learned weight, saliency and integrated gradients agree? Tested on coupling C (15 cells) and on the gate (6 branches) |
+| `xai_stability_check_mgfnet.py` | Are the gate / coupling / routing explanations reproducible across seeds (per-window ρ, ICC)? |
+
+```bash
+python xai_biomarker_validation_mgfnet.py --results-dir <results_mgf_<hash>_seed42> --data-root <data> --capacity-summary <capacity_summary.json>
+python xai_load_level_anova_mgfnet.py     --results-dir <results_mgf_<hash>_seed42> --data-root <data>
+python xai_multimethod_consensus_mgfnet.py --results-dir <results_mgf_<hash>_seed42> --data-root <data>
+python xai_stability_check_mgfnet.py      --data-root <data> --variant-hash <hash> --seeds 42 999 2024
+```
+
+These need full-MGFNet checkpoints (`*_mgf_final.pt`). A w/o-CGSCR checkpoint is refused, because it has no gate, coupling or router.
