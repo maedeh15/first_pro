@@ -124,6 +124,9 @@ _arg_parser.add_argument("--subjects", type=str, default=None,
 _arg_parser.add_argument("--workers", type=int, default=None, help="Override N_WORKERS.")
 _arg_parser.add_argument("--base", type=str, default=None, help="Override BASE_DATASET_PATH.")
 _arg_parser.add_argument("--out", type=str, default=None, help="Override OUTPUT_PATH.")
+_arg_parser.add_argument("--fnirs-bandpass", choices=["on", "off"], default="on",
+                          help="0.01-0.1 Hz zero-phase Butterworth on fNIRS (paper: on). The LDA diagnosis on the n-back data "
+                               "found that switching it OFF restores the class information the 40 s blocks carry.")
 _arg_parser.add_argument("--eeg-zscore", choices=["on", "off"], default="on", help="layer 1 (see header)")
 _arg_parser.add_argument("--fnirs-zscore", choices=["on", "off"], default="on", help="layer 2 (see header)")
 _arg_parser.add_argument("--per-session-norm", choices=["on", "off"], default="on", help="layer 3 (see header)")
@@ -176,6 +179,7 @@ FNIRS_BP_ORDER = 6               # same mne call as EEG: iir order=6 butter, zer
 DATASET_ALREADY_BEER_LAMBERT = True   # Shin's .mat already contains HbO/HbR concentration changes
 
 # --- normalisation layers (NEW; the only difference to the paper-exact script) --------------------------
+ENABLE_FNIRS_BANDPASS = (_cli_args.fnirs_bandpass == "on")
 ENABLE_EEG_ZSCORE = (_cli_args.eeg_zscore == "on")
 ENABLE_FNIRS_ZSCORE = (_cli_args.fnirs_zscore == "on")
 ENABLE_PER_SESSION_NORM = (_cli_args.per_session_norm == "on")
@@ -452,8 +456,11 @@ def preprocess_fnirs(hbo, hbr, subject_id, qc_dir):
                                   "conversion from raw intensity is not implemented here.")
     # NOTE: STA-Net's mne call scales data by 1 (mmol/L). mne treats the values as volts; for 'eeg'
     # channels filtering is linear, so scale does not matter.
-    hbo_f = _mne_bandpass(hbo, SFREQ_FNIRS, FNIRS_BP_LOW, FNIRS_BP_HIGH, FNIRS_BP_ORDER)
-    hbr_f = _mne_bandpass(hbr, SFREQ_FNIRS, FNIRS_BP_LOW, FNIRS_BP_HIGH, FNIRS_BP_ORDER)
+    if ENABLE_FNIRS_BANDPASS:
+        hbo_f = _mne_bandpass(hbo, SFREQ_FNIRS, FNIRS_BP_LOW, FNIRS_BP_HIGH, FNIRS_BP_ORDER)
+        hbr_f = _mne_bandpass(hbr, SFREQ_FNIRS, FNIRS_BP_LOW, FNIRS_BP_HIGH, FNIRS_BP_ORDER)
+    else:
+        hbo_f, hbr_f = hbo.copy(), hbr.copy()
     try:
         t = np.arange(hbo.shape[1]) / SFREQ_FNIRS
         fig, axes = plt.subplots(2, 1, figsize=(12, 6))
@@ -710,7 +717,8 @@ def process_subject(subject_id):
             "eeg_filter": f"notch50={APPLY_NOTCH}, butter order {EEG_BP_ORDER} zero-phase {EEG_BP_LOW}-{EEG_BP_HIGH} Hz, CAR, ICA",
             "ica": {"n_components": ICA_N_COMPONENTS, "method": ICA_METHOD, "fit_highpass_hz": ICA_FIT_HP,
                     "excluded": [int(i) for i in ica_excl]},
-            "fnirs_filter": f"butter order {FNIRS_BP_ORDER} zero-phase {FNIRS_BP_LOW}-{FNIRS_BP_HIGH} Hz",
+            "fnirs_filter": (f"butter order {FNIRS_BP_ORDER} zero-phase {FNIRS_BP_LOW}-{FNIRS_BP_HIGH} Hz"
+                             if ENABLE_FNIRS_BANDPASS else "NONE (bandpass off)"),
             "fnirs_baseline_s": [-5.0, -2.0],
             "FNIRS_TRAIN_SCALE": (1.0 if FNIRS_IS_STANDARDISED else FNIRS_TRAIN_SCALE),   # read by stanet_common.load_subject
             "eeg_units": "uV" if not (ENABLE_EEG_ZSCORE or (ENABLE_PER_SESSION_NORM and PER_SESSION_MODALITIES in ("both", "eeg")))
@@ -750,7 +758,7 @@ if __name__ == "__main__":
     log_message("===== PIPELINE STARTED (STA-Net paper/official-code exact, n-back) =====")
     log_message(f"NORMALISATION: eeg_zscore={ENABLE_EEG_ZSCORE} fnirs_zscore={ENABLE_FNIRS_ZSCORE} "
                 f"per_session_norm={ENABLE_PER_SESSION_NORM}({PER_SESSION_MODALITIES}) zscore_scope={ZSCORE_SCOPE} "
-                f"-> fNIRS training scale {'1.0 (standardised)' if FNIRS_IS_STANDARDISED else '1e3'}")
+                f"fnirs_bandpass={ENABLE_FNIRS_BANDPASS} -> fNIRS training scale {'1.0 (standardised)' if FNIRS_IS_STANDARDISED else '1e3'}")
     log_message(f"SUBJECTS={SUBJECTS}, N_WORKERS={N_WORKERS}, TASK_PERIOD={TASK_PERIOD}s, "
                 f"EEG windows/trial={N_EEG_WINDOWS}, fNIRS lag l={FNIRS_LAG_LENGTH}")
     t_total0 = time.time()
