@@ -250,6 +250,15 @@ def _fmt_cm(cm):
     return "\n".join(out)
 
 
+def _norm_str(n):
+    """compact description of the preprocessing normalisation recorded in metadata.json (str or dict)."""
+    if isinstance(n, dict):
+        on = [k.replace("ENABLE_", "") for k in ("ENABLE_EEG_ZSCORE", "ENABLE_FNIRS_ZSCORE", "ENABLE_PER_SESSION_NORM") if n.get(k)]
+        return (("+".join(on) if on else "none") + f" (scope={n.get('zscore_scope')}, per-session on {n.get('per_session_modalities')},"
+                f" leak-free={n.get('leak_free_wrt_heldout_session')})")
+    return str(n)
+
+
 def _prep_line(subject_dir, sid):
     """One-line provenance from the preprocessing run ({sid}_metadata.json), so the training log is
     self-describing: window counts, task period, ICA exclusions."""
@@ -258,7 +267,8 @@ def _prep_line(subject_dir, sid):
             m = json.load(fh)
         return (f"  [prep] eeg {m['eeg_shape']} fnirs {m['fnirs_shape']} | labels {m['labels_distribution']} "
                 f"| per-session {m['samples_per_session']} | task_period {m['task_period_s']}s | "
-                f"ICA excluded {m['ica']['excluded']} | PyPREP={m.get('pyprep_badch')}")
+                f"ICA excluded {m['ica']['excluded']} | PyPREP={m.get('pyprep_badch')} | "
+                f"fNIRS train scale x{m.get('FNIRS_TRAIN_SCALE', 1000.0):g} | normalisation {_norm_str(m.get('normalization'))}")
     except Exception as e:
         return f"  [prep] metadata unavailable ({type(e).__name__})"
 

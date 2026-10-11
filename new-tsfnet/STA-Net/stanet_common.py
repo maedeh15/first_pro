@@ -17,6 +17,19 @@ WINDOW_SECONDS = 3.0             # one EEG / fNIRS window
 LAG_STEP_SECONDS = 1.0           # consecutive fNIRS windows of one sample start 1 s apart
 
 
+def fnirs_train_scale(subject_dir, subject_id):
+    """Training-time fNIRS multiplier. Paper-exact tensors are in mmol/L -> x1e3 (official run_sta_net.py).
+    Preprocessing variants whose fNIRS is already standardised (z-score / per-session norm) record
+    FNIRS_TRAIN_SCALE = 1.0 in {sid}_metadata.json; multiplying those by 1e3 would feed std ~1000 to the net.
+    Falls back to 1e3 when no metadata is present."""
+    try:
+        import json
+        with open(os.path.join(subject_dir, f"{subject_id}_metadata.json")) as fh:
+            return float(json.load(fh).get("FNIRS_TRAIN_SCALE", FNIRS_TRAIN_SCALE))
+    except Exception:
+        return FNIRS_TRAIN_SCALE
+
+
 def load_subject(subject_dir, subject_id, scale_fnirs=True):
     """Returns eeg (N,16,16,600) tensor, fnirs (N,11,16,16,30,2) tensor (x1e3, in place),
     labels (N,), session_ids (N,), trial_ids (N,) numpy arrays."""
@@ -24,7 +37,7 @@ def load_subject(subject_dir, subject_id, scale_fnirs=True):
     eeg = f("eeg_windows").astype(np.float32, copy=False)
     fnirs = f("fnirs_windows").astype(np.float32, copy=False)
     if scale_fnirs:
-        fnirs *= FNIRS_TRAIN_SCALE
+        fnirs *= fnirs_train_scale(subject_dir, subject_id)
     return (torch.from_numpy(eeg), torch.from_numpy(fnirs), f("labels").astype(np.int64),
             f("session_ids"), f("trial_ids"))
 

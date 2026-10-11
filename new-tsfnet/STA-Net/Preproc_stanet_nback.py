@@ -644,7 +644,8 @@ def process_subject(subject_id):
                              if ENABLE_FNIRS_BANDPASS else "NONE (bandpass off)"),
             "fnirs_zscore": ENABLE_FNIRS_ZSCORE, "session_norm": SESSION_NORM, "fnirs_only": FNIRS_ONLY,
             "fnirs_baseline_s": [-5.0, -2.0], "fnirs_units": "mmol/L (NOT scaled)",
-            "FNIRS_TRAIN_SCALE": FNIRS_TRAIN_SCALE, "eeg_units": "uV",
+            "FNIRS_TRAIN_SCALE": (1.0 if (ENABLE_FNIRS_ZSCORE or SESSION_NORM in ("fnirs", "both")) else FNIRS_TRAIN_SCALE),
+            "eeg_units": "uV",
             "normalization": ("none (paper-exact)" if (ENABLE_FNIRS_BANDPASS and not ENABLE_FNIRS_ZSCORE and SESSION_NORM == "none")
                               else f"VARIANT: fnirs_bandpass={ENABLE_FNIRS_BANDPASS}, fnirs_zscore={ENABLE_FNIRS_ZSCORE}, "
                                    f"session_norm={SESSION_NORM}"),
