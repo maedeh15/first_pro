@@ -30,14 +30,20 @@ def fnirs_train_scale(subject_dir, subject_id):
         return FNIRS_TRAIN_SCALE
 
 
-def load_subject(subject_dir, subject_id, scale_fnirs=True):
-    """Returns eeg (N,16,16,600) tensor, fnirs (N,11,16,16,30,2) tensor (x1e3, in place),
-    labels (N,), session_ids (N,), trial_ids (N,) numpy arrays."""
+def load_subject(subject_dir, subject_id, scale_fnirs=True, scale_override=None):
+    """Returns eeg (N,16,16,T) tensor, fnirs (N,l,16,16,30,2) tensor (scaled in place),
+    labels (N,), session_ids (N,), trial_ids (N,) numpy arrays.
+    T and l are read from the files, so TSFNet-style tensors (T=2000, l=21) load unchanged.
+    scale_override: explicit fNIRS multiplier, bypassing the metadata lookup. Needed for
+    preprocessing runs whose metadata has no FNIRS_TRAIN_SCALE key but whose fNIRS is already
+    standardised (e.g. the TSFNet pipeline), where the 1e3 default would be wrong."""
     f = lambda k: np.load(os.path.join(subject_dir, f"{subject_id}_{k}.npy"))
     eeg = f("eeg_windows").astype(np.float32, copy=False)
     fnirs = f("fnirs_windows").astype(np.float32, copy=False)
     if scale_fnirs:
-        fnirs *= fnirs_train_scale(subject_dir, subject_id)
+        s = fnirs_train_scale(subject_dir, subject_id) if scale_override is None else float(scale_override)
+        if s != 1.0:
+            fnirs *= s
     return (torch.from_numpy(eeg), torch.from_numpy(fnirs), f("labels").astype(np.int64),
             f("session_ids"), f("trial_ids"))
 

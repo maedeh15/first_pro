@@ -65,6 +65,11 @@ p.add_argument("--diagnostics", action="store_true", default=False,
                help="run stanet_diagnostics.run_fold_diagnostics for the whitelisted subjects")
 p.add_argument("--diagnostics-subjects", default=None, help="override whitelist, e.g. 'VP001,VP006' or 'ALL'")
 p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+p.add_argument("--fnirs-scale", type=float, default=None,
+               help="Explicit fNIRS multiplier applied at load time, overriding the metadata's "
+                    "FNIRS_TRAIN_SCALE (default 1e3 for mmol/L paper-exact tensors). Pass 1.0 when the "
+                    "fNIRS is ALREADY z-scored by the preprocessing -- e.g. the TSFNet pipeline, whose "
+                    "metadata.json has no FNIRS_TRAIN_SCALE key and would otherwise be scaled by 1000.")
 args, _ = p.parse_known_args()
 
 SUBJECTS = [f"VP{int(s):03d}" for s in (args.subjects.split(",") if args.subjects else range(1, 27))]
@@ -261,14 +266,27 @@ def _norm_str(n):
 
 def _prep_line(subject_dir, sid):
     """One-line provenance from the preprocessing run ({sid}_metadata.json), so the training log is
-    self-describing: window counts, task period, ICA exclusions."""
+    self-describing: window counts, task period, ICA exclusions. Tolerates metadata written by the
+    TSFNet pipeline, whose key names differ and which has no FNIRS_TRAIN_SCALE / task_period_s."""
     try:
         with open(os.path.join(subject_dir, f"{sid}_metadata.json")) as fh:
             m = json.load(fh)
-        return (f"  [prep] eeg {m['eeg_shape']} fnirs {m['fnirs_shape']} | labels {m['labels_distribution']} "
-                f"| per-session {m['samples_per_session']} | task_period {m['task_period_s']}s | "
-                f"ICA excluded {m['ica']['excluded']} | PyPREP={m.get('pyprep_badch')} | "
-                f"fNIRS train scale x{m.get('FNIRS_TRAIN_SCALE', 1000.0):g} | normalisation {_norm_str(m.get('normalization'))}")
+        scale = args.fnirs_scale if args.fnirs_scale is not None else m.get("FNIRS_TRAIN_SCALE", 1000.0)
+        bits = [f"eeg {m['eeg_shape']} fnirs {m['fnirs_shape']}", f"labels {m['labels_distribution']}"]
+        if "samples_per_session" in m:
+            bits.append(f"per-session {m['samples_per_session']}")
+        if "task_period_s" in m:                              # STA-Net preprocessing
+            bits.append(f"task_period {m['task_period_s']}s")
+        elif "slide_tmin_s" in m:                             # TSFNet preprocessing
+            bits.append(f"slide [{m['slide_tmin_s']},{m['slide_tmax_s']}]s "
+                        f"eeg_win {m.get('window_len_eeg_s')}s segs {m.get('fnirs_num_segments')}")
+        if isinstance(m.get("ica"), dict):
+            bits.append(f"ICA excluded {m['ica']['excluded']}")
+        bits.append(f"PyPREP={m.get('pyprep_badch')}")
+        bits.append(f"fNIRS train scale x{float(scale):g}"
+                    + ("" if args.fnirs_scale is None else " (--fnirs-scale)"))
+        bits.append(f"normalisation {_norm_str(m.get('normalization'))}")
+        return "  [prep] " + " | ".join(bits)
     except Exception as e:
         return f"  [prep] metadata unavailable ({type(e).__name__})"
 
@@ -305,7 +323,8 @@ def main():
             else:
                 print(_prep_line(sdir, sid))
                 try:
-                    eeg, fnirs, labels, sessions, trials = load_subject(sdir, sid)
+                    eeg, fnirs, labels, sessions, trials = load_subject(sdir, sid,
+                                                                        scale_override=args.fnirs_scale)
                     folds = [run_fold(eeg, fnirs, labels, sessions, trials, s, sid) for s in sorted(np.unique(sessions))]
                     accs, kaps = [f["acc"] for f in folds], [f["kappa"] for f in folds]
                     cm = np.sum([np.array(f["cm"]) for f in folds], axis=0)
