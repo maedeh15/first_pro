@@ -54,7 +54,11 @@ p.add_argument("--subjects", default="1-26")
 p.add_argument("--t0", type=float, default=6.0, help="first window START (s after marker) to include")
 p.add_argument("--t1", type=float, default=30.0, help="last window START (s after marker) to include")
 p.add_argument("--first-offset", type=float, default=-2.0, help="start (s) of window rank 0 when no window_ids file")
-p.add_argument("--expect-windows", type=int, default=None, help="warn if a trial has another window count")
+p.add_argument("--expect-windows", type=int, default=None,
+               help="expected windows per trial for roots WITHOUT window_ids (e.g. 35 for TSFNet); trials with another count "
+                    "have dropped windows, so their rank-based offsets are wrong. Summarised in ONE line per subject.")
+p.add_argument("--strict-windows", action="store_true", default=False,
+               help="with --expect-windows: use ONLY trials that have exactly that many windows (exact timing, fewer trials)")
 p.add_argument("--features", choices=["pooled", "grid", "channels"], default="pooled")
 p.add_argument("--unit", choices=["trial", "window"], default="trial",
                help="trial: one averaged sample per trial; window: one sample per window (what the network classifies)")
@@ -96,11 +100,20 @@ def load_samples(root, sid):
         offset = args.first_offset + np.load(wid_path)
     else:
         offset = np.empty(len(trial))
+        bad_trials = []
         for t in np.unique(trial):
             m = np.where(trial == t)[0]
             offset[m] = args.first_offset + np.arange(len(m))
             if args.expect_windows is not None and len(m) != args.expect_windows:
-                print(f"  [{sid}] WARNING trial {t} has {len(m)} windows (expected {args.expect_windows}); offsets are ranks")
+                bad_trials.append(t)
+        if bad_trials:
+            n_all = len(np.unique(trial))
+            print(f"  [{sid}] {len(bad_trials)}/{n_all} trials have != {args.expect_windows} windows (windows were dropped "
+                  f"upstream); " + ("those trials are EXCLUDED (--strict-windows)." if args.strict_windows
+                                    else "their offsets are rank-based (approximate)."))
+        if args.strict_windows:
+            skip_trials = set(bad_trials)
+    skip_trials = locals().get('skip_trials', set())
     L = min(args.lags, fn.shape[1])
 
     def feat(m):                                       # m: (16, 16, 2) -> feature vector
@@ -112,6 +125,8 @@ def load_samples(root, sid):
 
     X, y, s, g = [], [], [], []
     for t in np.unique(trial):
+        if t in skip_trials:
+            continue
         idx = np.where((trial == t) & (offset >= args.t0) & (offset <= args.t1))[0]
         if len(idx) == 0:
             continue
