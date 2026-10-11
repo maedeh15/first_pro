@@ -84,6 +84,19 @@ _arg_parser.add_argument("--subjects", type=str, default=None,
 _arg_parser.add_argument("--workers", type=int, default=None, help="Override N_WORKERS.")
 _arg_parser.add_argument("--base", type=str, default=None, help="Override BASE_DATASET_PATH.")
 _arg_parser.add_argument("--out", type=str, default=None, help="Override OUTPUT_PATH.")
+# --- optional fNIRS variants for the A/B diagnosis of STA-Net vs your TSFNet preprocessing. DEFAULTS = paper/official-exact.
+_arg_parser.add_argument("--fnirs-bandpass", choices=["on", "off"], default="on",
+                          help="0.01-0.1 Hz zero-phase Butterworth (paper: on). TSFNet's final pipeline has it OFF.")
+_arg_parser.add_argument("--fnirs-zscore", action="store_true", default=False,
+                          help="per-channel z-score of the continuous fNIRS (after filtering, before baseline correction), "
+                               "as your TSFNet pipeline. NOT in STA-Net.")
+_arg_parser.add_argument("--session-norm", choices=["none", "fnirs", "both"], default="none",
+                          help="TSFNet's priority-E3: re-standardise each session separately on the windowed tensors "
+                               "(per grid cell [and chromophore]). TRANSDUCTIVE w.r.t. the held-out session's unlabeled "
+                               "inputs; NOT in STA-Net. 'fnirs' = fNIRS only, 'both' = fNIRS and EEG.")
+_arg_parser.add_argument("--fnirs-only", action="store_true", default=False,
+                          help="skip EEG load/ICA/windowing and write only the fNIRS arrays (+labels/session/trial/window ids). "
+                               "Takes ~1 min for all 26 subjects; for fast fNIRS-variant experiments.")
 _cli_args, _ = _arg_parser.parse_known_args()
 
 N_WORKERS = 4
@@ -125,6 +138,10 @@ USE_ICLABEL = True               # official code excludes ICs MANUALLY (input())
 FNIRS_BP_LOW = 0.01
 FNIRS_BP_HIGH = 0.1
 FNIRS_BP_ORDER = 6               # same mne call as EEG: iir order=6 butter, zero-phase
+ENABLE_FNIRS_BANDPASS = (_cli_args.fnirs_bandpass == "on")
+ENABLE_FNIRS_ZSCORE = bool(_cli_args.fnirs_zscore)
+SESSION_NORM = _cli_args.session_norm
+FNIRS_ONLY = bool(_cli_args.fnirs_only)
 DATASET_ALREADY_BEER_LAMBERT = True   # Shin's .mat already contains HbO/HbR concentration changes
 FNIRS_TRAIN_SCALE = 1e3          # official run_sta_net.py: fnirs *= 1e3 (applied in TRAINING, not here)
 
@@ -394,15 +411,22 @@ def preprocess_fnirs(hbo, hbr, subject_id, qc_dir):
                                   "conversion from raw intensity is not implemented here.")
     # NOTE: STA-Net's mne call scales data by 1 (mmol/L). mne treats the values as volts; for 'eeg'
     # channels filtering is linear, so scale does not matter.
-    hbo_f = _mne_bandpass(hbo, SFREQ_FNIRS, FNIRS_BP_LOW, FNIRS_BP_HIGH, FNIRS_BP_ORDER)
-    hbr_f = _mne_bandpass(hbr, SFREQ_FNIRS, FNIRS_BP_LOW, FNIRS_BP_HIGH, FNIRS_BP_ORDER)
+    if ENABLE_FNIRS_BANDPASS:
+        hbo_f = _mne_bandpass(hbo, SFREQ_FNIRS, FNIRS_BP_LOW, FNIRS_BP_HIGH, FNIRS_BP_ORDER)
+        hbr_f = _mne_bandpass(hbr, SFREQ_FNIRS, FNIRS_BP_LOW, FNIRS_BP_HIGH, FNIRS_BP_ORDER)
+    else:
+        hbo_f, hbr_f = hbo.copy(), hbr.copy()
+    if ENABLE_FNIRS_ZSCORE:      # per-channel, whole recording, BEFORE baseline correction (same order as TSFNet)
+        hbo_f = (hbo_f - hbo_f.mean(axis=1, keepdims=True)) / (hbo_f.std(axis=1, keepdims=True) + 1e-8)
+        hbr_f = (hbr_f - hbr_f.mean(axis=1, keepdims=True)) / (hbr_f.std(axis=1, keepdims=True) + 1e-8)
     try:
         t = np.arange(hbo.shape[1]) / SFREQ_FNIRS
         fig, axes = plt.subplots(2, 1, figsize=(12, 6))
         axes[0].plot(t, hbo[0], "tab:red", lw=0.5)
         axes[0].set_title(f"{subject_id} fNIRS RAW HbO ({FNIRS_CHN_NAMES[0]})")
         axes[1].plot(t, hbo_f[0], "tab:blue", lw=0.5)
-        axes[1].set_title(f"{subject_id} fNIRS PREPROCESSED HbO (0.01-0.1 Hz)")
+        axes[1].set_title(f"{subject_id} fNIRS PREPROCESSED HbO (bandpass={'0.01-0.1 Hz' if ENABLE_FNIRS_BANDPASS else 'OFF'}, "
+                          f"zscore={ENABLE_FNIRS_ZSCORE})")
         plt.tight_layout()
         fig.savefig(os.path.join(qc_dir, f"{subject_id}_fnirs_before_after.png"), dpi=120)
         plt.close(fig)
@@ -438,14 +462,15 @@ def epoch_trials(eeg, hbo, hbr, eeg_t, f_t, subject_id):
     n_trials = len(eeg_t)
     e_len = (EEG_PRE_ONSET + EEG_POST_ONSET) * SFREQ_EEG
     f_len = (FNIRS_PRE_ONSET + FNIRS_POST_ONSET) * SFREQ_FNIRS
-    eeg_ep = np.zeros((n_trials, eeg.shape[0], e_len))
+    eeg_ep = np.zeros((n_trials, eeg.shape[0], e_len)) if eeg is not None else None
     hbo_ep = np.zeros((n_trials, hbo.shape[0], f_len))
     hbr_ep = np.zeros((n_trials, hbr.shape[0], f_len))
     for t in range(n_trials):
-        s = int((eeg_t[t] - EEG_PRE_ONSET) * SFREQ_EEG)          # int() truncation as in the official code
-        if s < 0 or s + e_len > eeg.shape[1]:
-            raise ValueError(f"{subject_id}: trial {t} EEG epoch [{s}:{s + e_len}] outside recording ({eeg.shape[1]})")
-        eeg_ep[t] = eeg[:, s:s + e_len]
+        if eeg is not None:
+            s = int((eeg_t[t] - EEG_PRE_ONSET) * SFREQ_EEG)          # int() truncation as in the official code
+            if s < 0 or s + e_len > eeg.shape[1]:
+                raise ValueError(f"{subject_id}: trial {t} EEG epoch [{s}:{s + e_len}] outside recording ({eeg.shape[1]})")
+            eeg_ep[t] = eeg[:, s:s + e_len]
         fs_ = int((f_t[t] - FNIRS_PRE_ONSET) * SFREQ_FNIRS)
         if fs_ < 0 or fs_ + f_len > hbo.shape[1]:
             raise ValueError(f"{subject_id}: trial {t} fNIRS epoch [{fs_}:{fs_ + f_len}] outside recording ({hbo.shape[1]})")
@@ -516,13 +541,15 @@ def to_3d(x, kind):
 def make_windows(eeg3d, hbo3d, hbr3d):
     """eeg3d: (n,16,16,Te); hbo3d/hbr3d: (n,16,16,Tf).
     returns eeg (n*W,16,16,600), fnirs (n*W,11,16,16,30,2), trial_idx (n*W,), window_idx (n*W,)"""
-    n = eeg3d.shape[0]
+    n = hbo3d.shape[0]
     w_e = WIN_LENGTH * SFREQ_EEG
     w_f = WIN_LENGTH * SFREQ_FNIRS
-    eeg_w = np.zeros((n, N_EEG_WINDOWS, GRID_SIZE, GRID_SIZE, w_e), dtype=np.float32)
-    for w in range(N_EEG_WINDOWS):
-        s = (WIN_FIRST_START + w * WIN_STEP) * SFREQ_EEG
-        eeg_w[:, w] = eeg3d[..., s:s + w_e]
+    eeg_w = None
+    if eeg3d is not None:
+        eeg_w = np.zeros((n, N_EEG_WINDOWS, GRID_SIZE, GRID_SIZE, w_e), dtype=np.float32)
+        for w in range(N_EEG_WINDOWS):
+            s = (WIN_FIRST_START + w * WIN_STEP) * SFREQ_EEG
+            eeg_w[:, w] = eeg3d[..., s:s + w_e]
     seg = np.zeros((n, N_FNIRS_SEGMENTS, GRID_SIZE, GRID_SIZE, w_f, 2), dtype=np.float32)
     for fw in range(N_FNIRS_SEGMENTS):
         s = (WIN_FIRST_START + fw * WIN_STEP) * SFREQ_FNIRS
@@ -533,9 +560,28 @@ def make_windows(eeg3d, hbo3d, hbr3d):
         fnirs_w[:, w] = seg[:, w:w + FNIRS_LAG_LENGTH]
     trial_idx = np.repeat(np.arange(n), N_EEG_WINDOWS)
     window_idx = np.tile(np.arange(N_EEG_WINDOWS), n)
-    return (eeg_w.reshape(n * N_EEG_WINDOWS, GRID_SIZE, GRID_SIZE, w_e),
+    return (eeg_w.reshape(n * N_EEG_WINDOWS, GRID_SIZE, GRID_SIZE, w_e) if eeg_w is not None else None,
             fnirs_w.reshape(n * N_EEG_WINDOWS, FNIRS_LAG_LENGTH, GRID_SIZE, GRID_SIZE, w_f, 2),
             trial_idx, window_idx)
+
+
+# ============================================================================
+# OPTIONAL per-session re-normalisation (TSFNet priority-E3). Default OFF = paper-exact.
+# Each session is standardised with its OWN statistics (per grid cell, and per chromophore for fNIRS), so
+# session-to-session offsets/gain drift are removed. TRANSDUCTIVE: the held-out session's unlabeled inputs
+# define its own statistics (no labels, no cross-session information) -- disclose when reporting.
+# ============================================================================
+def apply_session_norm(eeg_w, fnirs_w, session_ids, which):
+    for sess in np.unique(session_ids):
+        m = np.where(session_ids == sess)[0]
+        f = fnirs_w[m]
+        mu = f.mean(axis=(0, 1, 4), keepdims=True)
+        sd = f.std(axis=(0, 1, 4), keepdims=True) + 1e-8
+        fnirs_w[m] = (f - mu) / sd
+        if which == "both" and eeg_w is not None:
+            e = eeg_w[m]
+            eeg_w[m] = (e - e.mean(axis=(0, 3), keepdims=True)) / (e.std(axis=(0, 3), keepdims=True) + 1e-8)
+    return eeg_w, fnirs_w
 
 
 # ============================================================================
@@ -547,17 +593,22 @@ def process_subject(subject_id):
     sub_out_dir = os.path.join(OUTPUT_PATH, subject_id)
     os.makedirs(sub_out_dir, exist_ok=True)
     try:
-        eeg, eog, eog_names, eeg_t_ms, eeg_codes = load_eeg(os.path.join(BASE_DATASET_PATH, f"{subject_id}-EEG"))
         hbo, hbr, f_t_ms, f_codes = load_fnirs(subject_id)
-        log_message(f"  {subject_id}: EEG {eeg.shape} (+{len(eog_names)} EOG), fNIRS HbO {hbo.shape}, "
-                    f"{len(eeg_t_ms)} EEG / {len(f_t_ms)} fNIRS markers")
-
-        eeg_p, ica_excl = preprocess_eeg(eeg, eog, eog_names, subject_id, sub_out_dir)
+        if FNIRS_ONLY:      # EEG signal not needed: only its trial markers (the trial clock)
+            eeg_t_ms, eeg_codes = _read_markers(_load_struct(os.path.join(BASE_DATASET_PATH, f"{subject_id}-EEG",
+                                                                          "mrk_nback.mat")), SFREQ_EEG)
+            eeg_p, ica_excl = None, []
+            log_message(f"  {subject_id}: FNIRS-ONLY mode; fNIRS HbO {hbo.shape}, {len(eeg_t_ms)} EEG / {len(f_t_ms)} fNIRS markers")
+        else:
+            eeg, eog, eog_names, eeg_t_ms, eeg_codes = load_eeg(os.path.join(BASE_DATASET_PATH, f"{subject_id}-EEG"))
+            log_message(f"  {subject_id}: EEG {eeg.shape} (+{len(eog_names)} EOG), fNIRS HbO {hbo.shape}, "
+                        f"{len(eeg_t_ms)} EEG / {len(f_t_ms)} fNIRS markers")
+            eeg_p, ica_excl = preprocess_eeg(eeg, eog, eog_names, subject_id, sub_out_dir)
         hbo_p, hbr_p = preprocess_fnirs(hbo, hbr, subject_id, sub_out_dir)
 
         eeg_t, f_t, trial_labels = _trial_times(subject_id, eeg_t_ms, eeg_codes, f_t_ms, f_codes)
         eeg_ep, hbo_ep, hbr_ep = epoch_trials(eeg_p, hbo_p, hbr_p, eeg_t, f_t, subject_id)
-        eeg3d = to_3d(eeg_ep, "eeg")
+        eeg3d = to_3d(eeg_ep, "eeg") if eeg_ep is not None else None
         hbo3d = to_3d(hbo_ep, "fnirs")
         hbr3d = to_3d(hbr_ep, "fnirs")
         del eeg_ep, hbo_ep, hbr_ep
@@ -565,9 +616,12 @@ def process_subject(subject_id):
         eeg_w, fnirs_w, trial_idx, window_idx = make_windows(eeg3d, hbo3d, hbr3d)
         labels = trial_labels[trial_idx].astype(np.int64)
         session_ids = (trial_idx // TRIALS_PER_SESSION + 1).astype(np.int64)
+        if SESSION_NORM != "none":
+            eeg_w, fnirs_w = apply_session_norm(eeg_w, fnirs_w, session_ids, SESSION_NORM)
 
         pre = f"{subject_id}_"
-        np.save(os.path.join(sub_out_dir, pre + "eeg_windows.npy"), eeg_w)
+        if eeg_w is not None:
+            np.save(os.path.join(sub_out_dir, pre + "eeg_windows.npy"), eeg_w)
         np.save(os.path.join(sub_out_dir, pre + "fnirs_windows.npy"), fnirs_w)
         np.save(os.path.join(sub_out_dir, pre + "labels.npy"), labels)
         np.save(os.path.join(sub_out_dir, pre + "session_ids.npy"), session_ids)
@@ -576,7 +630,7 @@ def process_subject(subject_id):
 
         metadata = {
             "subject_id": subject_id,
-            "eeg_shape": list(eeg_w.shape), "fnirs_shape": list(fnirs_w.shape),
+            "eeg_shape": list(eeg_w.shape) if eeg_w is not None else None, "fnirs_shape": list(fnirs_w.shape),
             "labels_distribution": np.bincount(labels).tolist(),
             "samples_per_session": [int((session_ids == s).sum()) for s in range(1, N_SESSIONS + 1)],
             "task_period_s": TASK_PERIOD, "eeg_epoch_s": [-EEG_PRE_ONSET, EEG_POST_ONSET],
@@ -586,15 +640,20 @@ def process_subject(subject_id):
             "eeg_filter": f"notch50={APPLY_NOTCH}, butter order {EEG_BP_ORDER} zero-phase {EEG_BP_LOW}-{EEG_BP_HIGH} Hz, CAR, ICA",
             "ica": {"n_components": ICA_N_COMPONENTS, "method": ICA_METHOD, "fit_highpass_hz": ICA_FIT_HP,
                     "excluded": [int(i) for i in ica_excl]},
-            "fnirs_filter": f"butter order {FNIRS_BP_ORDER} zero-phase {FNIRS_BP_LOW}-{FNIRS_BP_HIGH} Hz",
+            "fnirs_filter": (f"butter order {FNIRS_BP_ORDER} zero-phase {FNIRS_BP_LOW}-{FNIRS_BP_HIGH} Hz"
+                             if ENABLE_FNIRS_BANDPASS else "NONE (bandpass off)"),
+            "fnirs_zscore": ENABLE_FNIRS_ZSCORE, "session_norm": SESSION_NORM, "fnirs_only": FNIRS_ONLY,
             "fnirs_baseline_s": [-5.0, -2.0], "fnirs_units": "mmol/L (NOT scaled)",
-            "FNIRS_TRAIN_SCALE": FNIRS_TRAIN_SCALE, "eeg_units": "uV", "normalization": "none (paper-exact)",
+            "FNIRS_TRAIN_SCALE": FNIRS_TRAIN_SCALE, "eeg_units": "uV",
+            "normalization": ("none (paper-exact)" if (ENABLE_FNIRS_BANDPASS and not ENABLE_FNIRS_ZSCORE and SESSION_NORM == "none")
+                              else f"VARIANT: fnirs_bandpass={ENABLE_FNIRS_BANDPASS}, fnirs_zscore={ENABLE_FNIRS_ZSCORE}, "
+                                   f"session_norm={SESSION_NORM}"),
             "pyprep_badch": ENABLE_PYPREP_BADCH,
             "spec_source": "STA-Net, Liu et al., Information Fusion 119 (2025) 103023, Sec. 2.2-2.4 + official repo",
         }
         with open(os.path.join(sub_out_dir, pre + "metadata.json"), "w") as f:
             json.dump(metadata, f, indent=2)
-        log_message(f"DONE {subject_id} in {(time.time() - t0) / 60:.1f} min | EEG {eeg_w.shape} | "
+        log_message(f"DONE {subject_id} in {(time.time() - t0) / 60:.1f} min | EEG {None if eeg_w is None else eeg_w.shape} | "
                     f"fNIRS {fnirs_w.shape} | labels {np.bincount(labels)} | per-session {metadata['samples_per_session']}")
     except Exception as e:
         log_message(f"ERROR processing {subject_id} after {(time.time() - t0) / 60:.1f} min: {e}")
@@ -615,6 +674,8 @@ if __name__ == "__main__":
     log_message("===== PIPELINE STARTED (STA-Net paper/official-code exact, n-back) =====")
     log_message(f"SUBJECTS={SUBJECTS}, N_WORKERS={N_WORKERS}, TASK_PERIOD={TASK_PERIOD}s, "
                 f"EEG windows/trial={N_EEG_WINDOWS}, fNIRS lag l={FNIRS_LAG_LENGTH}")
+    log_message(f"fNIRS variant flags: bandpass={ENABLE_FNIRS_BANDPASS} zscore={ENABLE_FNIRS_ZSCORE} "
+                f"session_norm={SESSION_NORM} fnirs_only={FNIRS_ONLY}  (defaults = paper-exact)")
     t_total0 = time.time()
     lock = mp.Lock()
     with mp.Pool(processes=N_WORKERS, initializer=_init_worker, initargs=(lock,)) as pool:
