@@ -754,8 +754,18 @@ if __name__ == "__main__":
     log_message(f"SUBJECTS={SUBJECTS}, N_WORKERS={N_WORKERS}, TASK_PERIOD={TASK_PERIOD}s, "
                 f"EEG windows/trial={N_EEG_WINDOWS}, fNIRS lag l={FNIRS_LAG_LENGTH}")
     t_total0 = time.time()
-    lock = mp.Lock()
-    with mp.Pool(processes=N_WORKERS, initializer=_init_worker, initargs=(lock,)) as pool:
-        for _ in pool.imap_unordered(_process_subject_safe, SUBJECTS):
-            pass
+    # Jupyter/IPython `%run` leaves __main__ without __spec__, which makes multiprocessing's Windows "spawn" pool crash
+    # (AttributeError: module '__main__' has no attribute '__spec__'). Detect that and process the subjects one after the
+    # other in this process instead (same results, just not parallel). From a terminal (python script.py) or `!python
+    # script.py` in a notebook the parallel pool is used as before.
+    if N_WORKERS > 1 and not hasattr(sys.modules.get("__main__"), "__spec__"):
+        log_message("NOTE: running inside an IPython/Jupyter %run -> multiprocessing is not possible here; processing "
+                    "the subjects SEQUENTIALLY (use a terminal or `!python` for the parallel run).")
+        for _n in SUBJECTS:
+            _process_subject_safe(_n)
+    else:
+        lock = mp.Lock()
+        with mp.Pool(processes=N_WORKERS, initializer=_init_worker, initargs=(lock,)) as pool:
+            for _ in pool.imap_unordered(_process_subject_safe, SUBJECTS):
+                pass
     log_message(f"===== PIPELINE FINISHED in {(time.time() - t_total0) / 60:.1f} min =====")
