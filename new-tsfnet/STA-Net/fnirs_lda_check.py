@@ -37,6 +37,13 @@ import csv
 
 import numpy as np
 
+# Official 16x16 pixel positions ([row, col]) of the 36 fNIRS channels (same table as Preproc_stanet_nback.py).
+# Embedded here so this script has NO dependency on stanet_common.py (only used by --features channels).
+FNIRS_PIXELS = np.array([
+    [2, 4], [3, 4], [1, 5], [2, 5], [1, 7], [3, 6], [2, 7], [3, 8], [1, 8], [2, 9], [1, 9], [6, 4], [7, 5],
+    [7, 3], [8, 4], [10, 5], [11, 6], [11, 4], [12, 5], [3, 10], [2, 11], [3, 12], [1, 11], [2, 12], [6, 12],
+    [7, 13], [7, 11], [8, 12], [10, 11], [11, 12], [11, 10], [12, 11], [12, 8], [13, 7], [13, 9], [14, 8]])
+
 p = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 p.add_argument("--root", action="append", required=True,
                help="LABEL=PATH to a preprocessing output folder (holding VPxxx/). Repeat; first one is the reference.")
@@ -82,7 +89,6 @@ def trial_features(root, sid):
             if args.expect_windows is not None and len(m) != args.expect_windows:
                 print(f"  [{sid}] WARNING trial {t} has {len(m)} windows (expected {args.expect_windows}); offsets are ranks")
     X, y, s = [], [], []
-    from stanet_common import FNIRS_PIXELS
     for t in np.unique(trial):
         idx = np.where((trial == t) & (offset >= args.t0) & (offset <= args.t1))[0]
         if len(idx) == 0:
@@ -174,5 +180,4 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     main()
