@@ -72,3 +72,30 @@ These are listed in `MGFNET_AMBIGUITIES` (model) and `MGFNET_PREPROC_AMBIGUITIES
 - **CGSCR tokens:** `token_ij = 3·C_ij · LayerNorm(E_i + F_j)`, using a pre-norm Transformer. C is applied *after* the LayerNorm, because LN(c·x) = LN(x) would otherwise erase the coupling.
 - **Gumbel-Softmax:** standard `softmax((s+g)/τ)`, hard straight-through in training and one-hot `argmax(s)` at inference.
 - **Morlet init:** EEG components start at 2/6/10.5/21.5/35 Hz and fNIRS at 0.03/0.08/0.15 Hz, all inside the preprocessed band.
+
+## Comparing with TSFNet (same preprocessing, same windows)
+
+`Preproc_mgfnet_nback_tsfnetmatched.py` produces MGFNet inputs with preprocessing **identical** to `Preproc_tsfnet_nback_badch.py`, which must sit in the same folder. The EEG chain is not reimplemented: the script imports the TSFNet module and calls its `load_eeg_data` / `preprocess_eeg` (0.5–50 Hz order-6 Butterworth, PyPREP, CAR, ICA with EOG correlation + ICLabel + manual IC overrides, per-channel z-score). fNIRS and windowing use the TSFNet constants, in channel space:
+
+- **fNIRS:** no band-pass (as in the TSFNet file), z-score, then baseline correction over −5…−2 s.
+- **Windows:** 10 s, step 1 s, slide −2…42 s. A window is dropped if |z| > 8.
+- **Per-session normalisation:** applied as the last step, as in TSFNet.
+
+A window is kept only if TSFNet keeps it, so both models are evaluated on the same samples.
+
+```bash
+python Preproc_mgfnet_nback_tsfnetmatched.py --check-against "E:\kntu\Thesis\codes\Results\TSFNET_PAPER_EXACT_nback"
+python run_all_subjects_MGFNET.py --data-root "E:\kntu\Thesis\codes\Results\MGFNET_TSFNETMATCHED_nback"
+```
+
+Output shapes: EEG 28×2000 and HbO/HbR 36×100 (10 s).
+
+**Verified on the fixture, against the original TSFNet script on the same data:**
+- PyPREP flagged the same bad channels and ICA removed the same components.
+- Both produced the same 945 windows, with identical labels, sessions and trials.
+- EEG max |diff| = 0.0.
+- `spatial_mapping(channel-space fNIRS)` reproduces TSFNet's fNIRS grid with max |diff| = 0.0.
+
+**The only input difference:** MGFNet's fNIRS covers the same 10 s as its EEG window, because the model interpolates fNIRS onto the EEG time axis. TSFNet additionally sees 13 s of fNIRS after the window (21 × 3 s segments).
+
+**Not inductive:** per-session normalisation uses the held-out session's unlabelled statistics, exactly as in the TSFNet pipeline. Disclose this alongside both models' results.

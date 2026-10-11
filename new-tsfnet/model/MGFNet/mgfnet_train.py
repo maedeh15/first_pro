@@ -288,7 +288,8 @@ def select_epoch_cv(curves_acc, curves_loss):
 def run_fold_mgfnet(full, train_idx, test_idx, subject_id, test_session, device,
                     model_kwargs, base_seed=42, batch_size=64, max_epochs=60,
                     lr=1e-3, weight_decay=1e-3, lambda_hyb=0.4, lambda_aux=0.1,
-                    selection="cv5", n_cv_folds=5, ckpt_path=None, log_fn=print):
+                    selection="cv5", n_cv_folds=5, ckpt_path=None, log_fn=print,
+                    eeg_fs=200.0):
     hp = dict(lr=lr, weight_decay=weight_decay, lambda_hyb=lambda_hyb, lambda_aux=lambda_aux)
     labels_np = full.labels.numpy()
     cv_info = None
@@ -337,8 +338,13 @@ def run_fold_mgfnet(full, train_idx, test_idx, subject_id, test_session, device,
                     "test_session": int(test_session),
                     "n_epochs": n_epochs}, ckpt_path)
 
+    # ITR decision time = the window length actually fed to the model
+    # (5 s for the MGFNet-paper pipeline, 10 s for the TSFNet-matched one).
+    window_s = full.eeg.shape[-1] / eeg_fs
     report = detailed_test_report_mgfnet(
-        model, _make_loader(full, test_idx, batch_size, False, seed), device, norm)
+        model, _make_loader(full, test_idx, batch_size, False, seed), device, norm,
+        decision_time_s=window_s)
+    report["window_s"] = window_s
     report.update({"selection": selection, "epochs_trained": n_epochs,
                    "final_train_acc": hist[-1]["train_acc"] if hist else None,
                    "final_train_loss": hist[-1]["train_loss"] if hist else None,

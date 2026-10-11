@@ -68,7 +68,7 @@ from mgfnet_diagnostics import (extract_outputs, CLASS_NAMES, CLASS_COLORS, BRAN
 
 MODALITIES = ("eeg", "hbo", "hbr")
 MOD_NAMES = {"eeg": "EEG", "hbo": "HbO", "hbr": "HbR"}
-WINDOW_S = 5.0
+EEG_FS = 200.0      # window length in seconds = n_samples / EEG_FS (5 s or 10 s)
 
 
 # ============================================================================
@@ -269,7 +269,8 @@ def run_shap_analysis(model, norm, test_loader, device, subject_id, session_id, 
             m = labels == c
             if m.any():
                 v = np.abs(sv[mod][c][m]).mean(axis=(0, 1))
-                ax.plot(np.linspace(0, WINDOW_S, len(v)), v, color=CLASS_COLORS[c],
+                win_s = sv["eeg"].shape[-1] / EEG_FS
+                ax.plot(np.linspace(0, win_s, len(v)), v, color=CLASS_COLORS[c],
                         label=CLASS_NAMES[c], lw=1.2)
         ax.set_xlabel("time in window (s)"); ax.set_title(MOD_NAMES[mod]); ax.legend(fontsize=8)
     axes[0].set_ylabel("mean |SHAP|")
@@ -339,7 +340,7 @@ def run_gradcam_analysis(model, norm, test_loader, device, subject_id, session_i
     """Grad-CAM (Selvaraju et al. 2017) on the last CBR activation (B, C, T')
     before GAP in each branch: alpha_k = mean_t dy_c/dA_k, CAM = ReLU(sum_k
     alpha_k A_k). Target = hybrid-head LOGIT of each sample's TRUE class.
-    Each CAM is resampled to n_points over the 5 s window and normalised per
+    Each CAM is resampled to n_points over the window and normalised per
     sample (max = 1) before averaging, so branches are comparable."""
     os.makedirs(output_dir, exist_ok=True)
     model.eval()
@@ -359,6 +360,7 @@ def run_gradcam_analysis(model, norm, test_loader, device, subject_id, session_i
             if seen >= n_samples:
                 break
             x_eeg, x_hbo, x_hbr, y = _unpack_mgf_batch(batch)
+            window_s = x_eeg.shape[-1] / EEG_FS
             x_eeg, x_hbo, x_hbr = norm(x_eeg.to(device), x_hbo.to(device), x_hbr.to(device))
             y = y.to(device)
             model.zero_grad(set_to_none=True)
@@ -384,7 +386,7 @@ def run_gradcam_analysis(model, norm, test_loader, device, subject_id, session_i
     tag = f"{subject_id}_S{session_id}"
     keys = list(targets)
     fig, axes = plt.subplots(2, 3, figsize=(16, 7.5), sharex=True, sharey=True)
-    t = np.linspace(0, WINDOW_S, n_points)
+    t = np.linspace(0, window_s, n_points)
     profiles = {}
     for ax, k in zip(axes.ravel(), BRANCH_KEYS):
         if k not in store:
