@@ -143,6 +143,11 @@ _arg_parser.add_argument("--subjects", type=str, default=None,
 _arg_parser.add_argument("--workers", type=int, default=None, help="Override N_WORKERS.")
 _arg_parser.add_argument("--base", type=str, default=None, help="Override BASE_DATASET_PATH.")
 _arg_parser.add_argument("--out", type=str, default=None, help="Override OUTPUT_PATH.")
+_arg_parser.add_argument("--eeg-channel-space", choices=["on", "off"], default="on",
+                          help="also write {sid}_eeg_channel_windows.npy, the SAME windows in channel space "
+                               "(N,28,samples) before the 16x16 mapping -- TSFNet's ENABLE_EEG_CHANNEL_SPACE. "
+                               "STA-Net does not read it; it is there so TSFNet can be trained from this very "
+                               "folder. Costs ~0.4 GB per subject; pass 'off' to skip it.")
 _arg_parser.add_argument("--eeg-window", type=float, default=10.0,
                           help="EEG window length in seconds (TSFNet WINDOW_LEN_EEG = 10; STA-Net paper = 3)")
 _arg_parser.add_argument("--fnirs-segments", type=int, default=21,
@@ -248,6 +253,7 @@ assert FNIRS_POST_ONSET <= 62, ("fNIRS epoch would run past the 62 s trial (2 s 
 N_FNIRS_SEGMENTS = N_EEG_WINDOWS - 1 + FNIRS_LAG_LENGTH                  # 34+21 = 55 segments to cut
 
 # --- Optional extras from YOUR TSFNet pipeline. ALL OFF = paper/official-exact. ----
+ENABLE_EEG_CHANNEL_SPACE = (_cli_args.eeg_channel_space == "on")   # TSFNet writes this too (priority-G4)
 ENABLE_PYPREP_BADCH = True       # PyPREP bad-channel interpolation BEFORE CAR (not in STA-Net; ON to match your
                                  # TSFNet pipeline so both models get identical bad-channel handling)
 
@@ -275,6 +281,7 @@ FNIRS_PIXELS = np.array([
     [7, 13], [7, 11], [8, 12], [10, 11], [11, 12], [11, 10], [12, 11], [12, 8], [13, 7], [13, 9], [14, 8]],
     dtype=float)
 assert len(EEG_PIXELS) == len(EEG_CHN_NAMES) == 28 and len(FNIRS_PIXELS) == len(FNIRS_CHN_NAMES) == 36
+N_EEG_CHANNELS = len(EEG_CHN_NAMES)      # 28 scalp electrodes (TP9/TP10 are reference/ground, not data)
 
 # ============================================================================
 # LOGGING (multiprocessing-safe)
@@ -636,6 +643,19 @@ def make_windows(eeg3d, hbo3d, hbr3d):
             trial_idx, window_idx)
 
 
+def make_channel_windows(eeg_ep):
+    """The SAME EEG windows as make_windows(), but in CHANNEL space (before the 16x16 mapping).
+    eeg_ep: (n_trials, n_ch, Te) -> (n_trials*W, n_ch, WIN_LENGTH_EEG*SFREQ_EEG), window order identical to
+    make_windows()'s, so index i refers to the same window in both arrays (TSFNet's eeg_channel_space_windows)."""
+    n, n_ch = eeg_ep.shape[0], eeg_ep.shape[1]
+    w_e = WIN_LENGTH_EEG * SFREQ_EEG
+    out = np.zeros((n, N_EEG_WINDOWS, n_ch, w_e), dtype=np.float32)
+    for w in range(N_EEG_WINDOWS):
+        st = (WIN_FIRST_START + w * WIN_STEP) * SFREQ_EEG
+        out[:, w] = eeg_ep[..., st:st + w_e]
+    return out.reshape(n * N_EEG_WINDOWS, n_ch, w_e)
+
+
 # ============================================================================
 # NORMALISATION LAYERS
 # ============================================================================
@@ -673,10 +693,13 @@ def zscore_channels(data, core, owned, scope, name, subject_id):
     return out
 
 
-def apply_session_norm(eeg_w, fnirs_w, session_ids, which):
+def apply_session_norm(eeg_w, fnirs_w, session_ids, which, chan_w=None):
     """Layer 3 (TSFNet priority-E3): each session standardised with ITS OWN statistics, per modality.
       EEG  (n,16,16,T)       : per 16x16 cell over (windows, time)
-      fNIRS (n,11,16,16,T,2) : per 16x16 cell and chromophore over (windows, lags, time)
+      fNIRS (n,l,16,16,T,2)  : per 16x16 cell and chromophore over (windows, lags, time)
+      chan_w (n,n_ch,T)      : per channel over (windows, time) -- the channel-space copy, normalised the
+                               same way TSFNet normalises eeg_channel_space_windows, so it stays consistent
+                               with the grid tensor it was cut alongside.
     Sessions never see each other's statistics. In place."""
     for sess in np.unique(session_ids):
         m = np.where(session_ids == sess)[0]
@@ -686,7 +709,10 @@ def apply_session_norm(eeg_w, fnirs_w, session_ids, which):
         if which in ("eeg", "both") and eeg_w is not None:
             e = eeg_w[m]
             eeg_w[m] = (e - e.mean(axis=(0, 3), keepdims=True)) / (e.std(axis=(0, 3), keepdims=True) + 1e-8)
-    return eeg_w, fnirs_w
+            if chan_w is not None:
+                c = chan_w[m]
+                chan_w[m] = (c - c.mean(axis=(0, 2), keepdims=True)) / (c.std(axis=(0, 2), keepdims=True) + 1e-8)
+    return eeg_w, fnirs_w, chan_w
 
 
 # ============================================================================
@@ -731,6 +757,7 @@ def process_subject(subject_id):
             hbr_p = zscore_channels(hbr_p, core_f, owned_f, ZSCORE_SCOPE, "HbR", subject_id)
             log_message(f"  {subject_id}: fNIRS z-score applied (scope={ZSCORE_SCOPE}), before baseline correction")
         eeg_ep, hbo_ep, hbr_ep = epoch_trials(eeg_p, hbo_p, hbr_p, eeg_t, f_t, subject_id)
+        chan_w = make_channel_windows(eeg_ep) if ENABLE_EEG_CHANNEL_SPACE else None
         eeg3d = to_3d(eeg_ep, "eeg")
         hbo3d = to_3d(hbo_ep, "fnirs")
         hbr3d = to_3d(hbr_ep, "fnirs")
@@ -740,7 +767,8 @@ def process_subject(subject_id):
         labels = trial_labels[trial_idx].astype(np.int64)
         session_ids = (trial_idx // TRIALS_PER_SESSION + 1).astype(np.int64)
         if ENABLE_PER_SESSION_NORM:  # layer 3: last step, on the final windowed tensors
-            eeg_w, fnirs_w = apply_session_norm(eeg_w, fnirs_w, session_ids, PER_SESSION_MODALITIES)
+            eeg_w, fnirs_w, chan_w = apply_session_norm(eeg_w, fnirs_w, session_ids, PER_SESSION_MODALITIES,
+                                                        chan_w=chan_w)
             log_message(f"  {subject_id}: per-session normalisation applied to {PER_SESSION_MODALITIES}")
 
         pre = f"{subject_id}_"
@@ -750,6 +778,10 @@ def process_subject(subject_id):
         np.save(os.path.join(sub_out_dir, pre + "session_ids.npy"), session_ids)
         np.save(os.path.join(sub_out_dir, pre + "trial_ids.npy"), trial_idx.astype(np.int64))
         np.save(os.path.join(sub_out_dir, pre + "window_ids.npy"), window_idx.astype(np.int64))
+        if chan_w is not None:
+            np.save(os.path.join(sub_out_dir, pre + "eeg_channel_windows.npy"), chan_w)
+            log_message(f"  {subject_id}: saved channel-space EEG windows {chan_w.shape} "
+                        f"(same window order as eeg_windows.npy)")
 
         metadata = {
             "subject_id": subject_id,
@@ -767,6 +799,9 @@ def process_subject(subject_id):
             "slide_tmin_s": float(SLIDE_TMIN), "slide_tmax_s": float(TASK_PERIOD),
             "fnirs_num_segments": FNIRS_LAG_LENGTH, "window_step_s": float(WIN_STEP),
             "autoreject_windows_enabled": False,
+            "eeg_channel_space_saved": ENABLE_EEG_CHANNEL_SPACE,
+            "eeg_channel_space_shape": (list(chan_w.shape) if chan_w is not None else None),
+            "eeg_connectivity_saved": False,   # TSFNet's ENABLE_EEG_CONNECTIVITY is False too
             "variant": "STA-Net preprocessing with TSFNet-comparable segmentation",
             "eeg_filter": f"notch50={APPLY_NOTCH}, butter order {EEG_BP_ORDER} zero-phase {EEG_BP_LOW}-{EEG_BP_HIGH} Hz, CAR, ICA",
             "ica": {"n_components": ICA_N_COMPONENTS, "method": ICA_METHOD, "fit_highpass_hz": ICA_FIT_HP,
@@ -823,7 +858,8 @@ if __name__ == "__main__":
                 f"EEG windows/trial={N_EEG_WINDOWS}, fNIRS lag l={FNIRS_LAG_LENGTH}")
     _gb = (N_EEG_WINDOWS * TRIALS_PER_SESSION * N_SESSIONS
            * (GRID_SIZE ** 2 * WIN_LENGTH_EEG * SFREQ_EEG
-              + FNIRS_LAG_LENGTH * GRID_SIZE ** 2 * WIN_LENGTH_FNIRS * SFREQ_FNIRS * 2) * 4) / 1024 ** 3
+              + FNIRS_LAG_LENGTH * GRID_SIZE ** 2 * WIN_LENGTH_FNIRS * SFREQ_FNIRS * 2
+              + (N_EEG_CHANNELS * WIN_LENGTH_EEG * SFREQ_EEG if ENABLE_EEG_CHANNEL_SPACE else 0)) * 4) / 1024 ** 3
     log_message(f"DISK: about {_gb:.1f} GB per subject, {_gb * len(SUBJECTS):.0f} GB for this run. "
                 f"Make sure that much is free -- a full disk fails with 'N requested and 0 written'.")
     t_total0 = time.time()
