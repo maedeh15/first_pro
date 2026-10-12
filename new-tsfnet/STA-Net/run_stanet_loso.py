@@ -73,11 +73,15 @@ p.add_argument("--decay-scalars", choices=["on", "off"], default="off",
                     "STA-Net's own learned scalars (FGSA residual_para, EGTA positional embedding). 'off' (the "
                     "default, and the usual practice) exempts them, matching a TSFNet run with --no-decay-scalars. "
                     "Ignored when --weight-decay is 0.")
-p.add_argument("--stop-metric", choices=["ce", "acc"], default="ce",
-               help="Stage-1 early-stopping / model-selection criterion on the validation set. 'ce' = validation "
-                    "class cross-entropy (the default; what STA-Net's own code tracks). 'acc' = validation "
-                    "accuracy, to match a TSFNet run that selected on accuracy. Ties on 'acc' are broken by the "
-                    "lower val CE, so the choice is deterministic.")
+p.add_argument("--stop-metric", choices=["ce", "acc", "loss"], default="ce",
+               help="Stage-1 early-stopping / model-selection criterion on the validation set.\n"
+                    "  'ce'   (default) validation CE of the FINAL decision, CE(p_final) alone.\n"
+                    "  'acc'  validation accuracy, ties broken by the lower val CE (deterministic).\n"
+                    "  'loss' the FULL objective: CE(p_final) + CE(p_eeg) + 3*(1 - |PCC|).\n"
+                    "'ce' is the statistically right choice -- the other two terms of the objective are a "
+                    "training-time regulariser and an auxiliary head that the final decision does not use, so an "
+                    "epoch can win on 'loss' by raising PCC while classifying worse. Use 'loss' or 'acc' only to "
+                    "MATCH what the TSFNet run selected on; the manifest records which was used.")
 p.add_argument("--val-seed", type=int, default=None,
                help="Seed for the stratified trial-level validation split, overriding the default "
                     "(--seed + test_session). Set it to whatever formula your TSFNet run used so BOTH models hold "
@@ -234,15 +238,18 @@ def run_fold(eeg, fnirs, labels, sessions, trials, test_session, subject_id):
 
     # stage-1 model selection: 'ce' minimises val class-CE, 'acc' maximises val accuracy (ties -> lower CE).
     # Scoring as a tuple to MINIMISE keeps one comparison for both, with a deterministic tie-break either way.
-    score_of = (lambda ce, acc: (ce,)) if args.stop_metric == "ce" else (lambda ce, acc: (-acc, ce))
+    score_of = {"ce": lambda ce, acc, tot: (ce,),              # CE of the final decision only
+                "acc": lambda ce, acc, tot: (-acc, ce),         # maximise accuracy, tie-break on CE
+                "loss": lambda ce, acc, tot: (tot,),            # full objective, incl. aux head + PCC terms
+                }[args.stop_metric]
     best_val, best_ep, best_state, best_train_ce, wait = (float("inf"),), 0, None, None, 0
     stopped_early = False
     for ep in range(1, args.stage1_max_epochs + 1):
         tr_loss, tr_ce, tr_acc = train_epoch(model, opt, eeg, fnirs, labels, tr, dev, args.batch_size)
         va_ce, va_pred, _, _, va_true, va_loss = evaluate(model, eeg, fnirs, labels, va, dev, return_total=True)
         va_acc, va_kap = float((va_pred == va_true).mean()), float(cohen_kappa(va_true, va_pred))
-        if score_of(va_ce, va_acc) < best_val:
-            best_val, best_ep, best_train_ce, wait = score_of(va_ce, va_acc), ep, tr_ce, 0
+        if score_of(va_ce, va_acc, va_loss) < best_val:
+            best_val, best_ep, best_train_ce, wait = score_of(va_ce, va_acc, va_loss), ep, tr_ce, 0
             best_state = copy.deepcopy(model.state_dict())
         else:
             wait += 1
@@ -255,7 +262,8 @@ def run_fold(eeg, fnirs, labels, sessions, trials, test_session, subject_id):
     if not stopped_early:
         print(f"  [stage1] reached max epochs ({args.stage1_max_epochs}) without early stopping")
     model.load_state_dict(best_state)
-    _bs = f"val_ce {best_val[0]:.4f}" if args.stop_metric == "ce" else f"val_acc {-best_val[0]:.4f}"
+    _bs = (f"val_acc {-best_val[0]:.4f}" if args.stop_metric == "acc"
+           else f"val_{args.stop_metric} {best_val[0]:.4f}")
     print(f"  [stage1] best {_bs} at epoch {best_ep} restored (selection metric = {args.stop_metric!r}; "
           f"train_ce there = {best_train_ce:.4f}, the stage-2 target)")
 
@@ -383,7 +391,9 @@ def main():
                  f"EGTA pos -- are {'INCLUDED' if args.decay_scalars == 'on' else 'EXEMPT'})"
                  if args.weight_decay else " (STA-Net official setting: no L2)")
               + f" | stage-1 selection metric = val_{args.stop_metric}"
-              + (" (STA-Net default)" if args.stop_metric == "ce" else " (matched to a TSFNet accuracy-selected run)")
+              + {"ce": " (CE of the final decision only -- STA-Net default)",
+                 "acc": " (accuracy, ties -> lower CE; matched to an accuracy-selected TSFNet run)",
+                 "loss": " (FULL objective incl. the auxiliary EEG head and the 3x(1-|PCC|) terms)"}[args.stop_metric]
               + f" | val-split seed = {'seed + test_session' if args.val_seed is None else args.val_seed}")
         print(f"[LOSS] STA-Net's own objective, deliberately NOT replaced: CE(p_final) + CE(p_eeg) + "
               f"3x(1 - |PCC|). The comparison equalises the DATA and the PROTOCOL, never each method's "
