@@ -82,6 +82,14 @@ p.add_argument("--stop-metric", choices=["ce", "acc", "loss"], default="ce",
                     "training-time regulariser and an auxiliary head that the final decision does not use, so an "
                     "epoch can win on 'loss' by raising PCC while classifying worse. Use 'loss' or 'acc' only to "
                     "MATCH what the TSFNet run selected on; the manifest records which was used.")
+p.add_argument("--acc-tiebreak", choices=["ce", "first"], default="ce",
+               help="With --stop-metric acc, how to break ties between epochs with EQUAL validation accuracy. "
+                    "Ties are COMMON here: the independent unit is the trial, and a 20%% trial-level split "
+                    "leaves only ~4-5 validation trials, so accuracy takes very few distinct values. "
+                    "'ce' keeps the tied epoch with the lower validation CE (finer-grained, and it breaks ties "
+                    "on evidence rather than on arrival order). 'first' keeps the EARLIEST tied epoch, which is "
+                    "what a plain `if val_acc > best_acc:` does -- use it to match a TSFNet run written that way. "
+                    "Ignored for --stop-metric ce / loss.")
 p.add_argument("--val-seed", type=int, default=None,
                help="Seed for the stratified trial-level validation split, overriding the default "
                     "(--seed + test_session). Set it to whatever formula your TSFNet run used so BOTH models hold "
@@ -239,7 +247,9 @@ def run_fold(eeg, fnirs, labels, sessions, trials, test_session, subject_id):
     # stage-1 model selection: 'ce' minimises val class-CE, 'acc' maximises val accuracy (ties -> lower CE).
     # Scoring as a tuple to MINIMISE keeps one comparison for both, with a deterministic tie-break either way.
     score_of = {"ce": lambda ce, acc, tot: (ce,),              # CE of the final decision only
-                "acc": lambda ce, acc, tot: (-acc, ce),         # maximise accuracy, tie-break on CE
+                # maximise accuracy; tie-break on val CE, or keep the earliest tied epoch (strict '>')
+                "acc": ((lambda ce, acc, tot: (-acc, ce)) if args.acc_tiebreak == "ce"
+                        else (lambda ce, acc, tot: (-acc,))),
                 "loss": lambda ce, acc, tot: (tot,),            # full objective, incl. aux head + PCC terms
                 }[args.stop_metric]
     best_val, best_ep, best_state, best_train_ce, wait = (float("inf"),), 0, None, None, 0
@@ -392,7 +402,7 @@ def main():
                  if args.weight_decay else " (STA-Net official setting: no L2)")
               + f" | stage-1 selection metric = val_{args.stop_metric}"
               + {"ce": " (CE of the final decision only -- STA-Net default)",
-                 "acc": " (accuracy, ties -> lower CE; matched to an accuracy-selected TSFNet run)",
+                 "acc": f" (accuracy, ties -> {'lower val CE' if args.acc_tiebreak == 'ce' else 'earliest epoch'})",
                  "loss": " (FULL objective incl. the auxiliary EEG head and the 3x(1-|PCC|) terms)"}[args.stop_metric]
               + f" | val-split seed = {'seed + test_session' if args.val_seed is None else args.val_seed}")
         print(f"[LOSS] STA-Net's own objective, deliberately NOT replaced: CE(p_final) + CE(p_eeg) + "
@@ -531,6 +541,7 @@ def main():
                              "stage1_max_epochs": args.stage1_max_epochs,
                              "stage1_patience": args.stage1_patience,
                              "stage1_selection_metric": f"val_{args.stop_metric}",
+                             "acc_tiebreak": (args.acc_tiebreak if args.stop_metric == "acc" else None),
                              "stage2_max_epochs": args.stage2_max_epochs, "stage2_stop": args.stage2_stop},
             "method_kept_unchanged": {
                 "loss": "CE(p_final) + CE(p_eeg) + 3 * (1 - |PCC|)  -- STA-Net's own objective",
