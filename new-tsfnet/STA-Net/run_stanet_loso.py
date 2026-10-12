@@ -65,6 +65,25 @@ p.add_argument("--diagnostics", action="store_true", default=False,
                help="run stanet_diagnostics.run_fold_diagnostics for the whitelisted subjects")
 p.add_argument("--diagnostics-subjects", default=None, help="override whitelist, e.g. 'VP001,VP006' or 'ALL'")
 p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+p.add_argument("--weight-decay", type=float, default=0.0,
+               help="L2 weight decay on the Adam optimiser. STA-Net's official Keras code uses NONE (0.0, the "
+                    "default here). Set it to your TSFNet value (1e-4) for a matched-optimiser comparison.")
+p.add_argument("--decay-scalars", choices=["on", "off"], default="off",
+               help="Whether weight decay also applies to 1-D parameters: biases, BatchNorm weight/bias, and "
+                    "STA-Net's own learned scalars (FGSA residual_para, EGTA positional embedding). 'off' (the "
+                    "default, and the usual practice) exempts them, matching a TSFNet run with --no-decay-scalars. "
+                    "Ignored when --weight-decay is 0.")
+p.add_argument("--stop-metric", choices=["ce", "acc"], default="ce",
+               help="Stage-1 early-stopping / model-selection criterion on the validation set. 'ce' = validation "
+                    "class cross-entropy (the default; what STA-Net's own code tracks). 'acc' = validation "
+                    "accuracy, to match a TSFNet run that selected on accuracy. Ties on 'acc' are broken by the "
+                    "lower val CE, so the choice is deterministic.")
+p.add_argument("--val-seed", type=int, default=None,
+               help="Seed for the stratified trial-level validation split, overriding the default "
+                    "(--seed + test_session). Set it to whatever formula your TSFNet run used so BOTH models hold "
+                    "out the SAME trials. The log prints the chosen validation trial ids and their checksum for "
+                    "every fold -- compare those two lines between the runs to VERIFY the splits are identical "
+                    "instead of assuming it.")
 p.add_argument("--fnirs-scale", type=float, default=None,
                help="Explicit fNIRS multiplier applied at load time, overriding the metadata's "
                     "FNIRS_TRAIN_SCALE (default 1e3 for mmol/L paper-exact tensors). Pass 1.0 when the "
@@ -142,6 +161,51 @@ def train_epoch(model, opt, eeg, fnirs, labels, idx, device, bs):
     return tot_sum / n, ce_sum / n, hit / n
 
 
+def _split_checksum(trial_ids):
+    """Short, order-independent fingerprint of a validation split, so the SAME line printed by the
+    TSFNet run can be eyeballed against this one. Two runs that hold out the same trials print the
+    same checksum; anything else means the splits differ and the comparison is confounded."""
+    import hashlib
+    return hashlib.sha1(",".join(str(int(t)) for t in sorted(trial_ids)).encode()).hexdigest()[:8]
+
+
+def param_groups(model):
+    """Adam parameter groups honouring --weight-decay / --decay-scalars.
+
+    With --decay-scalars off (the default) every 1-D parameter is exempt from L2: biases,
+    BatchNorm weight/bias, and STA-Net's two learned scalars -- FGSA's residual_para (the
+    EEG-vs-guided-EEG balance, Eq. 3) and EGTA's positional embedding `pos`. Decaying those
+    does not regularise anything; it just drags a learned balance toward zero and shrinks the
+    positional code, which is why the usual practice -- and your TSFNet --no-decay-scalars run --
+    exempts them. With weight decay 0 (STA-Net's official Keras setting) the split is a no-op and
+    a single group is returned."""
+    wd = args.weight_decay
+    if wd == 0.0:
+        return model.parameters()
+    if args.decay_scalars == "on":
+        return [{"params": list(model.parameters()), "weight_decay": wd}]
+    # Exempt: every 1-D parameter (biases, BatchNorm weight/bias, FGSA's scalar residual_para) AND the
+    # EGTA positional embedding, which is 3-D (1, seg_len, 512) and so would NOT be caught by the ndim
+    # rule -- positional embeddings are conventionally decay-exempt for the same reason biases are: they
+    # are a learned code, not a weight whose magnitude controls capacity, and decaying one just erases
+    # the lag ordering EGTA needs.
+    exempt_names = {"egta.pos"}
+    decay, no_decay = [], []
+    for name, prm in model.named_parameters():
+        if not prm.requires_grad:
+            continue
+        (no_decay if (prm.ndim <= 1 or name in exempt_names) else decay).append(prm)
+    return [{"params": decay, "weight_decay": wd},
+            {"params": no_decay, "weight_decay": 0.0}]
+
+
+def count_params(model):
+    tot = sum(p.numel() for p in model.parameters())
+    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    return tot, trainable
+
+
+
 def run_fold(eeg, fnirs, labels, sessions, trials, test_session, subject_id):
     test_session = int(test_session)
     dev = args.device
@@ -149,29 +213,36 @@ def run_fold(eeg, fnirs, labels, sessions, trials, test_session, subject_id):
     te = np.where(sessions == test_session)[0]
     print(f"\n=== {subject_id} | test session {test_session} ===")
     if args.val_mode == "trial":
-        tr, va = trial_level_split(trials, labels, tr_all, args.val_ratio, args.seed + test_session)
+        vseed = args.seed + test_session if args.val_seed is None else args.val_seed
+        tr, va = trial_level_split(trials, labels, tr_all, args.val_ratio, vseed)
         print(f"  [val_mode] 'trial' -- {args.val_ratio:.0%} of the training TRIALS (stratified) held out for "
               f"early stopping: train {len(tr)} / val {len(va)} / test {len(te)} windows (stage 2 uses all {len(tr_all)})")
+        vt = sorted(int(t) for t in np.unique(trials[va]))
+        print(f"  [val_split] seed={vseed} | val trials {vt} | checksum {_split_checksum(vt)}   "
+              f"<-- compare this line with the TSFNet run to verify both models hold out the SAME trials")
     else:
         vs = int(sessions[tr_all].min())
         tr, va = tr_all[sessions[tr_all] != vs], tr_all[sessions[tr_all] == vs]
         print(f"  [val_mode] 'cross_session' -- training session {vs} is the validation set: "
               f"train {len(tr)} / val {len(va)} / test {len(te)} windows (stage 2 uses all {len(tr_all)})")
-    print("  [stanet] EGTA temporal alignment (cross-attention over the 11 lagged fNIRS windows) + FGSA spatial "
-          "alignment; final decision = softmax-weighted fusion of the fusion and fNIRS heads")
+    print(f"  [stanet] EGTA temporal alignment (cross-attention over the {fnirs.shape[1]} lagged fNIRS windows) "
+          f"+ FGSA spatial alignment; final decision = softmax-weighted fusion of the fusion and fNIRS heads")
 
     set_seed(args.seed * 100 + test_session)
     model = STANet(NUM_CLASSES, seg_len=fnirs.shape[1]).to(dev)
-    opt = torch.optim.Adam(model.parameters(), lr=args.lr, eps=1e-7)      # keras Adam epsilon
+    opt = torch.optim.Adam(param_groups(model), lr=args.lr, eps=1e-7)     # keras Adam epsilon
 
-    best_val, best_ep, best_state, best_train_ce, wait = float("inf"), 0, None, None, 0
+    # stage-1 model selection: 'ce' minimises val class-CE, 'acc' maximises val accuracy (ties -> lower CE).
+    # Scoring as a tuple to MINIMISE keeps one comparison for both, with a deterministic tie-break either way.
+    score_of = (lambda ce, acc: (ce,)) if args.stop_metric == "ce" else (lambda ce, acc: (-acc, ce))
+    best_val, best_ep, best_state, best_train_ce, wait = (float("inf"),), 0, None, None, 0
     stopped_early = False
     for ep in range(1, args.stage1_max_epochs + 1):
         tr_loss, tr_ce, tr_acc = train_epoch(model, opt, eeg, fnirs, labels, tr, dev, args.batch_size)
         va_ce, va_pred, _, _, va_true, va_loss = evaluate(model, eeg, fnirs, labels, va, dev, return_total=True)
         va_acc, va_kap = float((va_pred == va_true).mean()), float(cohen_kappa(va_true, va_pred))
-        if va_ce < best_val:
-            best_val, best_ep, best_train_ce, wait = va_ce, ep, tr_ce, 0
+        if score_of(va_ce, va_acc) < best_val:
+            best_val, best_ep, best_train_ce, wait = score_of(va_ce, va_acc), ep, tr_ce, 0
             best_state = copy.deepcopy(model.state_dict())
         else:
             wait += 1
@@ -184,8 +255,9 @@ def run_fold(eeg, fnirs, labels, sessions, trials, test_session, subject_id):
     if not stopped_early:
         print(f"  [stage1] reached max epochs ({args.stage1_max_epochs}) without early stopping")
     model.load_state_dict(best_state)
-    print(f"  [stage1] best val_ce {best_val:.4f} at epoch {best_ep} restored "
-          f"(train_ce there = {best_train_ce:.4f}, the stage-2 target)")
+    _bs = f"val_ce {best_val[0]:.4f}" if args.stop_metric == "ce" else f"val_acc {-best_val[0]:.4f}"
+    print(f"  [stage1] best {_bs} at epoch {best_ep} restored (selection metric = {args.stop_metric!r}; "
+          f"train_ce there = {best_train_ce:.4f}, the stage-2 target)")
 
     s2_epochs = 0
     if args.stage2_stop == "none":
@@ -306,9 +378,28 @@ def main():
               f"lr={args.lr} (Adam eps=1e-7) | stage1 max/patience={args.stage1_max_epochs}/{args.stage1_patience} "
               f"| stage2 max={args.stage2_max_epochs} stop={args.stage2_stop!r} | adabn={args.adabn} "
               f"(transductive; STA-Net default OFF) | diagnostics={args.diagnostics}")
+        print(f"[OPTIM] weight_decay={args.weight_decay:g}"
+              + (f" (decay_scalars={args.decay_scalars}: 1-D params -- biases, BatchNorm, FGSA residual_para, "
+                 f"EGTA pos -- are {'INCLUDED' if args.decay_scalars == 'on' else 'EXEMPT'})"
+                 if args.weight_decay else " (STA-Net official setting: no L2)")
+              + f" | stage-1 selection metric = val_{args.stop_metric}"
+              + (" (STA-Net default)" if args.stop_metric == "ce" else " (matched to a TSFNet accuracy-selected run)")
+              + f" | val-split seed = {'seed + test_session' if args.val_seed is None else args.val_seed}")
+        print(f"[LOSS] STA-Net's own objective, deliberately NOT replaced: CE(p_final) + CE(p_eeg) + "
+              f"3x(1 - |PCC|). The comparison equalises the DATA and the PROTOCOL, never each method's "
+              f"own objective -- swapping those would compare two different methods, not two architectures.")
         print(f"[PROTOCOL] subject-dependent, leave-one-session-out (3 folds/subject), 3 classes, "
               f"test session never used for early stopping / model selection / normalisation")
         print(f"Subjects: {len(SUBJECTS)} | device={args.device} | data_root={args.data_root}")
+        try:   # parameter count, for the comparison table (seg_len does not change it except for `pos`)
+            import stanet_common as _sc
+            _probe = _sc.build_model(seg_len=11, device="cpu")
+            _tot, _trn = count_params(_probe)
+            print(f"[MODEL] STANet parameters: {_tot:,} total ({_trn:,} trainable) at seg_len=11; the EGTA "
+                  f"positional embedding adds 512 per extra lagged window, so seg_len=21 is {_tot + 512 * 10:,}.")
+            del _probe
+        except Exception as _e:
+            print(f"[MODEL] parameter count unavailable ({type(_e).__name__})")
         print(f"Summary CSV : {csv_path}\nSummary JSON: {json_path}\nCheckpoints/per-subject JSON: {RESULTS_DIR}\n")
         run_t0 = time.time()
         for i, sid in enumerate(SUBJECTS, 1):
@@ -412,7 +503,53 @@ def main():
                 print(f"{sid}: SKIPPED (no preprocessed data)")
             else:
                 print(f"{sid}: FAILED ({r.get('error', 'unknown error')})")
-        print(f"\nFull results: {csv_path}\n             {json_path}")
+        # --- comparison manifest: every knob that must match the TSFNet run, in one file, so the
+        # --- thesis table is filled from a record rather than from memory. Diff the two manifests.
+        ok_rows = [r for r in rows.values() if r.get("status") == "ok"]
+        manifest = {
+            "model": "STA-Net", "run_tag": RUN_TAG, "timestamp": datetime.datetime.now().isoformat(timespec="seconds"),
+            "data": {"data_root": args.data_root, "n_subjects_requested": len(SUBJECTS),
+                     "n_subjects_ok": len(ok_rows), "fnirs_scale": args.fnirs_scale},
+            "protocol": {"scheme": "subject-dependent leave-one-session-out", "folds_per_subject": 3,
+                         "n_classes": NUM_CLASSES, "val_mode": args.val_mode, "val_ratio": args.val_ratio,
+                         "val_seed": args.val_seed, "seed": args.seed,
+                         "per_fold_seed_formula": "seed * 100 + test_session",
+                         "adabn": args.adabn},
+            "optimisation": {"optimizer": "Adam", "lr": args.lr, "adam_eps": 1e-7,
+                             "batch_size": args.batch_size, "weight_decay": args.weight_decay,
+                             "decay_scalars": args.decay_scalars,
+                             "stage1_max_epochs": args.stage1_max_epochs,
+                             "stage1_patience": args.stage1_patience,
+                             "stage1_selection_metric": f"val_{args.stop_metric}",
+                             "stage2_max_epochs": args.stage2_max_epochs, "stage2_stop": args.stage2_stop},
+            "method_kept_unchanged": {
+                "loss": "CE(p_final) + CE(p_eeg) + 3 * (1 - |PCC|)  -- STA-Net's own objective",
+                "architecture": "STANet, unmodified",
+                "temporal_kernels": "as published (13/stride 6, then 5/stride 2) -- designed for a 3 s EEG "
+                                    "window and deliberately NOT retuned for a longer one",
+            },
+            "results": {
+                "mean_acc": (statistics.mean(r["mean_acc"] for r in ok_rows) if ok_rows else None),
+                "sd_acc_across_subjects": (statistics.stdev([r["mean_acc"] for r in ok_rows])
+                                           if len(ok_rows) > 1 else None),
+                "mean_kappa": (statistics.mean(r["mean_kappa"] for r in ok_rows) if ok_rows else None),
+                "mean_eeg_only_acc": (statistics.mean(r["eeg_only_acc"] for r in ok_rows) if ok_rows else None),
+                "mean_fnirs_only_acc": (statistics.mean(r["fnirs_only_acc"] for r in ok_rows) if ok_rows else None),
+                "mean_fusion_only_acc": (statistics.mean(r["fusion_only_acc"] for r in ok_rows) if ok_rows else None),
+            },
+            "caveats_to_report": [
+                "The EEG window is longer than the one STA-Net's kernels were designed for; the architecture "
+                "was run unchanged, which is a deliberate choice and a limitation to state.",
+                "Preprocessing z-score with scope=subject uses statistics that include the held-out session, "
+                "and the per-session normalisation is transductive. Both are label-free and IDENTICAL for the "
+                "two models, so the comparison is fair, but neither is strictly leak-free in absolute terms.",
+                "Single seed unless repeated; report the seed and say so under limitations.",
+            ],
+        }
+        man_path = os.path.join(RESULTS_DIR, f"comparison_manifest_{RUN_TAG}.json")
+        with open(man_path, "w", encoding="utf-8") as fh:
+            json.dump(manifest, fh, indent=2)
+        print(f"\nFull results: {csv_path}\n             {json_path}\n             {man_path}")
 
 
 if __name__ == "__main__":
