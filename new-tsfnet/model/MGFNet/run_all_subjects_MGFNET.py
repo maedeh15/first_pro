@@ -41,7 +41,7 @@ DATA_ROOT = r"E:\kntu\Thesis\codes\Results\MGFNET_PAPER_EXACT_nback_28ch"
 ALL_SUBJECTS = [f"VP{n:03d}" for n in range(1, 27)]
 
 PAPER_DEFAULTS = dict(lr=1e-3, weight_decay=1e-3, max_epochs=60, batch_size=64,
-                      selection="cv5", cv_folds=5)
+                      selection="tsfnet", cv_folds=5, es_max_epochs=100, es_patience=20)
 
 
 def parse_args(argv=None):
@@ -56,8 +56,12 @@ def parse_args(argv=None):
     ap.add_argument("--max-epochs", type=int, default=PAPER_DEFAULTS["max_epochs"])
     ap.add_argument("--lr", type=float, default=PAPER_DEFAULTS["lr"])
     ap.add_argument("--weight-decay", type=float, default=PAPER_DEFAULTS["weight_decay"])
-    ap.add_argument("--selection", choices=["cv5", "fixed"], default=PAPER_DEFAULTS["selection"],
-                    help="cv5 (default): 5-fold trial-level CV inside the training sessions "
+    ap.add_argument("--es-max-epochs", type=int, default=PAPER_DEFAULTS["es_max_epochs"],
+                    help="tsfnet protocol: max epochs (TSFNet stage1_max_epochs=100)")
+    ap.add_argument("--es-patience", type=int, default=PAPER_DEFAULTS["es_patience"],
+                    help="tsfnet protocol: early-stopping patience (TSFNet stage1_patience=20)")
+    ap.add_argument("--selection", choices=["tsfnet", "cv5", "fixed"], default=PAPER_DEFAULTS["selection"],
+                    help="tsfnet (default): TSFNet protocol (80/20 trial split seed 42, early stopping, best ckpt). cv5: 5-fold trial-level CV inside the training sessions "
                          "selects the epoch budget, then retrain on all training data. "
                          "fixed: train exactly --max-epochs on all training data.")
     ap.add_argument("--cv-folds", type=int, default=PAPER_DEFAULTS["cv_folds"])
@@ -87,7 +91,9 @@ def variant_tag(args):
                                ("ep", args.max_epochs, PAPER_DEFAULTS["max_epochs"]),
                                ("bs", args.batch_size, PAPER_DEFAULTS["batch_size"]),
                                ("sel", args.selection, PAPER_DEFAULTS["selection"]),
-                               ("cvk", args.cv_folds, PAPER_DEFAULTS["cv_folds"])):
+                               ("cvk", args.cv_folds, PAPER_DEFAULTS["cv_folds"]),
+                               ("esmax", args.es_max_epochs, PAPER_DEFAULTS["es_max_epochs"]),
+                               ("espat", args.es_patience, PAPER_DEFAULTS["es_patience"])):
         if val != default:
             parts.append(f"{name}{val}")
     if args.no_deterministic:
@@ -196,7 +202,8 @@ def main(argv=None):
     # eeg_channels / nirs_channels are read from the data on disk inside
     # run_subject_loso_mgfnet, so they can never disagree with preprocessing.
     train_kw = dict(lr=args.lr, weight_decay=args.weight_decay, max_epochs=args.max_epochs,
-                    selection=args.selection, n_cv_folds=args.cv_folds)
+                    selection=args.selection, n_cv_folds=args.cv_folds,
+                    es_max_epochs=args.es_max_epochs, es_patience=args.es_patience)
 
     tag_full = variant_tag(args)
     tag_hash = hashlib.md5(tag_full.encode()).hexdigest()[:10]

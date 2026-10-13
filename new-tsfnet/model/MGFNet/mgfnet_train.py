@@ -34,6 +34,7 @@ REPRODUCIBILITY: every model gets its own seed derived from
 (base seed, subject, held-out session, CV fold), so a subject run alone
 reproduces exactly what it gives inside the full 26-subject sweep.
 """
+import copy
 import json
 import math
 import os
@@ -45,7 +46,8 @@ from torch.utils.data import DataLoader, Subset
 
 from mgfnet_model import MGFNet, mgfnet_deep_supervision_loss
 from mgfnet_dataset import (MGFNBackDataset, ChannelNormalizer, _unpack_mgf_batch,
-                            session_holdout_split, stratified_trial_kfold)
+                            session_holdout_split, stratified_trial_kfold,
+                            trial_level_train_val_split)
 
 try:
     import mgfnet_diagnostics as _diagnostics
@@ -292,12 +294,16 @@ def select_epoch_cv(curves_acc, curves_loss):
 def run_fold_mgfnet(full, train_idx, test_idx, subject_id, test_session, device,
                     model_kwargs, base_seed=42, batch_size=64, max_epochs=60,
                     lr=1e-3, weight_decay=1e-3, lambda_hyb=0.4, lambda_aux=0.1,
-                    selection="cv5", n_cv_folds=5, ckpt_path=None, log_fn=print,
-                    eeg_fs=200.0):
+                    selection="tsfnet", n_cv_folds=5, ckpt_path=None, log_fn=print,
+                    eeg_fs=200.0, es_max_epochs=100, es_patience=20):
     hp = dict(lr=lr, weight_decay=weight_decay, lambda_hyb=lambda_hyb, lambda_aux=lambda_aux)
     labels_np = full.labels.numpy()
     cv_info = None
 
+    if selection == "tsfnet":
+        return _run_fold_tsfnet_protocol(full, train_idx, test_idx, subject_id, test_session, device,
+                                         model_kwargs, base_seed, batch_size, es_max_epochs,
+                                         es_patience, hp, ckpt_path, log_fn, eeg_fs)
     if selection == "cv5":
         folds = stratified_trial_kfold(full.trial_ids[train_idx], labels_np[train_idx],
                                        n_splits=n_cv_folds,
@@ -360,6 +366,87 @@ def run_fold_mgfnet(full, train_idx, test_idx, subject_id, test_session, device,
     return report, model
 
 
+def _run_fold_tsfnet_protocol(full, train_idx, test_idx, subject_id, test_session, device,
+                              model_kwargs, base_seed, batch_size, max_epochs, patience, hp,
+                              ckpt_path, log_fn, eeg_fs):
+    """The TSFNet project's LOSO protocol (tsfnet_model_notebook.py,
+    run_subject_cross_session + train_one_fold stage 1, stage 2 = 'none'):
+      * the two training sessions are split ONCE into train/val with
+        trial_level_train_val_split(val_ratio=0.2, seed=42) -- the identical
+        function and seed, hence the identical validation trials;
+      * train up to max_epochs (100), validate every epoch, keep the
+        checkpoint with the best val accuracy (strictly greater), stop after
+        `patience` (20) epochs without improvement;
+      * test the best checkpoint once on the held-out session.
+    MGFNet's own optimiser settings (Adam, lr 1e-3, wd 1e-3, batch 64,
+    deep-supervision loss) are kept -- the protocol is matched, the model's
+    training recipe is MGFNet's."""
+    labels_np = full.labels.numpy()
+    tr_pos, va_pos = trial_level_train_val_split(full.trial_ids[train_idx], labels_np[train_idx])
+    tr, va = train_idx[tr_pos], train_idx[va_pos]
+    seed = derive_seed(base_seed, subject_id, test_session, -1)
+    set_seed(seed)
+    norm = ChannelNormalizer.fit(full, tr)
+    model = MGFNet(**model_kwargs).to(device)
+    opt = torch.optim.Adam(model.parameters(), lr=hp["lr"], weight_decay=hp["weight_decay"])
+    train_loader = _make_loader(full, tr, batch_size, True, seed)
+    val_loader = _make_loader(full, va, batch_size, False, seed)
+    log_fn(f"[split] trial_level_train_val_split(val_ratio=0.2, seed=42), as in TSFNet -> "
+           f"{len(np.unique(full.trial_ids[tr]))} train trials ({len(tr)} windows) / "
+           f"{len(np.unique(full.trial_ids[va]))} val trials ({len(va)} windows): "
+           f"val trials {sorted(int(t) for t in np.unique(full.trial_ids[va]))}")
+
+    best_val_acc, best_epoch, no_improve, best_state, history = -1.0, 0, 0, None, []
+    for epoch in range(1, max_epochs + 1):
+        model.train()
+        ep_loss, n_seen, n_correct = 0.0, 0, 0
+        for batch in train_loader:
+            x_eeg, x_hbo, x_hbr, y = _to_device(batch, device, norm)
+            opt.zero_grad(set_to_none=True)
+            y_hyb, y_aux, _ = model(x_eeg, x_hbo, x_hbr)
+            loss = mgfnet_deep_supervision_loss(y_hyb, y_aux, y, hp["lambda_hyb"], hp["lambda_aux"])
+            if not torch.isfinite(loss):
+                raise FloatingPointError(f"non-finite loss at epoch {epoch}")
+            loss.backward()
+            opt.step()
+            ep_loss += loss.item() * y.size(0); n_seen += y.size(0)
+            n_correct += (y_hyb.argmax(dim=-1) == y).sum().item()
+        v_loss, v_acc, v_kap = evaluate_loss_acc(model, val_loader, device, norm,
+                                                 hp["lambda_hyb"], hp["lambda_aux"])
+        rec = {"epoch": epoch, "train_loss": ep_loss / max(n_seen, 1),
+               "train_acc": n_correct / max(n_seen, 1), "val_loss": v_loss, "val_acc": v_acc,
+               "val_kappa": v_kap}
+        history.append(rec)
+        log_fn(f"[stage1] epoch {epoch} | train_loss={rec['train_loss']:.4f} "
+               f"train_acc={rec['train_acc']:.4f} | val_loss={v_loss:.4f} val_acc={v_acc:.4f} "
+               f"val_kappa={v_kap:.4f}")
+        if v_acc > best_val_acc:
+            best_val_acc, best_epoch, no_improve = v_acc, epoch, 0
+            best_state = copy.deepcopy(model.state_dict())
+        else:
+            no_improve += 1
+            if no_improve >= patience:
+                log_fn(f"[stage1] early stop at epoch {epoch} (no improvement for {patience} epochs)")
+                break
+    model.load_state_dict(best_state)
+    log_fn(f"[stage2] skipped (as in TSFNet's stage2_stop_mode='none') -- using stage 1's best "
+           f"checkpoint (epoch {best_epoch}, val_acc={best_val_acc:.4f}) as the final model.")
+    if ckpt_path:
+        torch.save({"model_state_dict": model.state_dict(), "normalizer": norm.state_dict(),
+                    "model_kwargs": model_kwargs, "test_session": int(test_session),
+                    "n_epochs": best_epoch}, ckpt_path)
+    window_s = full.eeg.shape[-1] / eeg_fs
+    report = detailed_test_report_mgfnet(
+        model, _make_loader(full, test_idx, batch_size, False, seed), device, norm,
+        decision_time_s=window_s)
+    report.update({"window_s": window_s, "selection": "tsfnet", "epochs_trained": len(history),
+                   "best_epoch": best_epoch, "best_val_acc": best_val_acc,
+                   "overfitting_gap_val_vs_test": best_val_acc - report["test_accuracy_final"],
+                   "final_train_acc": history[-1]["train_acc"], "cv": None,
+                   "history_final": history})
+    return report, model
+
+
 def run_subject_loso_mgfnet(subject_dir, subject_id, device, batch_size=64,
                             results_dir=None, model_kwargs=None, train_kwargs=None,
                             base_seed=42, log_fn=print):
@@ -385,7 +472,7 @@ def run_subject_loso_mgfnet(subject_dir, subject_id, device, batch_size=64,
     for test_session in sessions:
         log_fn(f"\n=== {subject_id} | test session {test_session} ===")
         if test_session == sessions[0]:
-            sel = train_kwargs.get("selection", "cv5")
+            sel = train_kwargs.get("selection", "tsfnet")
             log_fn(f"[protocol] leave-one-session-out -- train on sessions "
                    f"{[s for s in sessions if s != test_session]} (per fold: the 2 other sessions), "
                    f"test once on the held-out session; no test data used for training, "
@@ -393,7 +480,11 @@ def run_subject_loso_mgfnet(subject_dir, subject_id, device, batch_size=64,
             log_fn(f"[selection] {sel} -- " + (
                 f"{train_kwargs.get('n_cv_folds', 5)}-fold TRIAL-level CV inside the training sessions "
                 f"picks the epoch budget, then one model is retrained on all training data"
-                if sel == "cv5" else "fixed epoch budget, no validation"))
+                if sel == "cv5" else
+                "TSFNet protocol: one trial-level 80/20 train/val split (seed 42, same trials as TSFNet), "
+                "early stopping on val accuracy (patience "
+                f"{train_kwargs.get('es_patience', 20)}, max {train_kwargs.get('es_max_epochs', 100)} epochs), "
+                "best checkpoint tested" if sel == "tsfnet" else "fixed epoch budget, no validation"))
             log_fn(f"[normalisation] per-channel z-score fitted on the training windows of each model "
                    f"only (inductive -- no AdaBN, no per-session statistics from the test session)")
             log_fn(f"[model] MGFNet | EEG {model_kwargs['eeg_channels']} ch, fNIRS "

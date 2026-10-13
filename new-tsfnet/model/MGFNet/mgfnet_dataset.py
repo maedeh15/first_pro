@@ -151,3 +151,25 @@ def stratified_trial_kfold(trial_ids, labels, n_splits=5, seed=42):
             raise ValueError(f"fold {k} is empty -- too few trials for {n_splits}-fold CV")
         folds.append((tr_pos, val_pos))
     return folds
+
+
+def trial_level_train_val_split(trial_ids, labels, val_ratio=0.2, seed=42):
+    """VERBATIM copy of tsfnet_model_notebook.py's function of the same name
+    (TSFNet Sec. 3.6): a single 4:1 TRIAL-level train/val split, stratified by
+    class, fixed seed 42. With the same trial_ids/labels it selects exactly
+    the same validation trials as the TSFNet runs, so both models are trained
+    and validated on identical partitions of every LOSO fold."""
+    rng = np.random.default_rng(seed)
+    unique_trials = np.unique(trial_ids)
+    trial_to_label = {}
+    for t in unique_trials:
+        trial_to_label[t] = labels[trial_ids == t][0]
+    val_trials = []
+    for cls in np.unique(labels):
+        cls_trials = [t for t in unique_trials if trial_to_label[t] == cls]
+        rng.shuffle(cls_trials)
+        n_val = max(1, int(round(len(cls_trials) * val_ratio)))
+        val_trials.extend(cls_trials[:n_val])
+    val_trials = set(val_trials)
+    val_mask = np.isin(trial_ids, list(val_trials))
+    return np.where(~val_mask)[0], np.where(val_mask)[0]
