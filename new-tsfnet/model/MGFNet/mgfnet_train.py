@@ -53,6 +53,7 @@ except ImportError:          # optional companion file
     _diagnostics = None
 
 BRANCH_KEYS = ("1", "2", "3", "12", "13", "23")
+GATE_NAMES = {"1": "EEG", "2": "HbO", "3": "HbR", "12": "EEG-HbO", "13": "EEG-HbR", "23": "HbO-HbR"}
 CLASS_NAMES = ("0-back", "2-back", "3-back")
 
 
@@ -150,15 +151,17 @@ def _to_device(batch, device, norm):
 @torch.no_grad()
 def evaluate_loss_acc(model, loader, device, norm, lambda_hyb, lambda_aux):
     model.eval()
-    tot_loss, n, correct = 0.0, 0, 0
+    tot_loss, n = 0.0, 0
+    ys, ps = [], []
     for batch in loader:
         x_eeg, x_hbo, x_hbr, y = _to_device(batch, device, norm)
         y_hyb, y_aux, _ = model(x_eeg, x_hbo, x_hbr)
         loss = mgfnet_deep_supervision_loss(y_hyb, y_aux, y, lambda_hyb, lambda_aux)
         tot_loss += loss.item() * y.size(0)
         n += y.size(0)
-        correct += (y_hyb.argmax(dim=-1) == y).sum().item()
-    return tot_loss / max(n, 1), correct / max(n, 1)
+        ys.append(y.cpu().numpy()); ps.append(y_hyb.argmax(dim=-1).cpu().numpy())
+    y_true, y_pred = np.concatenate(ys), np.concatenate(ps)
+    return tot_loss / max(n, 1), float((y_true == y_pred).mean()), cohen_kappa(y_true, y_pred)
 
 
 def train_model(model, train_loader, device, norm, n_epochs, lr=1e-3,
@@ -186,12 +189,13 @@ def train_model(model, train_loader, device, norm, n_epochs, lr=1e-3,
             n_correct += (y_hyb.argmax(dim=-1) == y).sum().item()
         rec = {"epoch": epoch, "train_loss": ep_loss / max(n_seen, 1),
                "train_acc": n_correct / max(n_seen, 1)}
-        msg = (f"  {log_prefix}[epoch {epoch:3d}] train_loss={rec['train_loss']:.4f} "
+        msg = (f"[{log_prefix.strip()}] epoch {epoch} | train_loss={rec['train_loss']:.4f} "
                f"train_acc={rec['train_acc']:.4f}")
         if val_loader is not None:
-            rec["val_loss"], rec["val_acc"] = evaluate_loss_acc(
+            rec["val_loss"], rec["val_acc"], rec["val_kappa"] = evaluate_loss_acc(
                 model, val_loader, device, norm, lambda_hyb, lambda_aux)
-            msg += f" val_loss={rec['val_loss']:.4f} val_acc={rec['val_acc']:.4f}"
+            msg += (f" | val_loss={rec['val_loss']:.4f} val_acc={rec['val_acc']:.4f} "
+                    f"val_kappa={rec['val_kappa']:.4f}")
         history.append(rec)
         log_fn(msg)
     return history
@@ -308,7 +312,7 @@ def run_fold_mgfnet(full, train_idx, test_idx, subject_id, test_session, device,
             hist = train_model(model, _make_loader(full, tr, batch_size, True, seed), device,
                                norm, max_epochs,
                                val_loader=_make_loader(full, va, batch_size, False, seed),
-                               log_fn=log_fn, log_prefix=f"cv{k + 1}/{n_cv_folds} ", **hp)
+                               log_fn=log_fn, log_prefix=f"cv{k + 1}/{n_cv_folds}", **hp)
             curves_acc.append([h["val_acc"] for h in hist])
             curves_loss.append([h["val_loss"] for h in hist])
             del model
@@ -317,10 +321,14 @@ def run_fold_mgfnet(full, train_idx, test_idx, subject_id, test_session, device,
                    "cv_mean_val_acc_at_selected": float(mean_acc[n_epochs - 1]),
                    "cv_mean_val_acc_curve": mean_acc.round(5).tolist(),
                    "cv_mean_val_loss_curve": mean_loss.round(5).tolist()}
-        log_fn(f"  [cv] selected epoch {n_epochs} "
-               f"(mean val acc {mean_acc[n_epochs - 1]:.4f} over {n_cv_folds} folds)")
+        log_fn(f"[cv] selected epoch {n_epochs} of {max_epochs} (mean over {n_cv_folds} trial-level "
+               f"folds: val_acc={mean_acc[n_epochs - 1]:.4f} val_loss={mean_loss[n_epochs - 1]:.4f}) "
+               f"-> retraining ONE model on ALL training sessions for {n_epochs} epoch(s), constant LR, "
+               f"no early stopping (paper Sec. 3.5)")
     elif selection == "fixed":
         n_epochs = max_epochs
+        log_fn(f"[selection] fixed -- training ONE model on ALL training sessions for {n_epochs} "
+               f"epochs, no validation, constant LR, no early stopping (paper Sec. 3.5)")
     else:
         raise ValueError(f"unknown selection mode {selection!r}")
 
@@ -330,7 +338,7 @@ def run_fold_mgfnet(full, train_idx, test_idx, subject_id, test_session, device,
     norm = ChannelNormalizer.fit(full, train_idx)
     model = MGFNet(**model_kwargs)
     hist = train_model(model, _make_loader(full, train_idx, batch_size, True, seed), device,
-                       norm, n_epochs, log_fn=log_fn, log_prefix="final ", **hp)
+                       norm, n_epochs, log_fn=log_fn, log_prefix="final", **hp)
     if ckpt_path:
         torch.save({"model_state_dict": model.state_dict(),
                     "normalizer": norm.state_dict(),
@@ -375,7 +383,23 @@ def run_subject_loso_mgfnet(subject_dir, subject_id, device, batch_size=64,
 
     fold_reports = []
     for test_session in sessions:
-        log_fn(f"\n=== {subject_id} | test session {test_session} (MGFNet, LOSO) ===")
+        log_fn(f"\n=== {subject_id} | test session {test_session} ===")
+        if test_session == sessions[0]:
+            sel = train_kwargs.get("selection", "cv5")
+            log_fn(f"[protocol] leave-one-session-out -- train on sessions "
+                   f"{[s for s in sessions if s != test_session]} (per fold: the 2 other sessions), "
+                   f"test once on the held-out session; no test data used for training, "
+                   f"normalisation or model selection")
+            log_fn(f"[selection] {sel} -- " + (
+                f"{train_kwargs.get('n_cv_folds', 5)}-fold TRIAL-level CV inside the training sessions "
+                f"picks the epoch budget, then one model is retrained on all training data"
+                if sel == "cv5" else "fixed epoch budget, no validation"))
+            log_fn(f"[normalisation] per-channel z-score fitted on the training windows of each model "
+                   f"only (inductive -- no AdaBN, no per-session statistics from the test session)")
+            log_fn(f"[model] MGFNet | EEG {model_kwargs['eeg_channels']} ch, fNIRS "
+                   f"{model_kwargs['nirs_channels']} ch | CGSCR={'ON (sample-specific 6-way gate)' if model_kwargs.get('use_cgscr', True) else 'OFF (static concatenation)'} | "
+                   f"cross-modal={model_kwargs.get('use_cross_modal', True)} | "
+                   f"intra-modal={model_kwargs.get('use_intra_modal', True)}")
         train_idx, test_idx = session_holdout_split(session_ids, test_session)
         assert not set(full.trial_ids[train_idx]) & set(full.trial_ids[test_idx]), \
             "a trial appears in both the training and the held-out session"
@@ -400,14 +424,23 @@ def run_subject_loso_mgfnet(subject_dir, subject_id, device, batch_size=64,
             if diag is not None:
                 report["diagnostics"] = diag
 
-        log_fn(f"  -> session {test_session}: acc={report['test_accuracy_final']:.4f} "
-               f"P={report['precision_macro']:.4f} R={report['recall_macro']:.4f} "
-               f"F1={report['f1_macro']:.4f} kappa={report['kappa_final']:.4f} "
-               f"ITR={report['itr_bits_per_min']:.2f} bits/min")
+        ab, lw = report["ablation"], report["learned_weights"]
+        fmt = lambda v: "n/a" if v is None else f"{v:.3f}"
+        line = (f"-> test_acc={report['test_accuracy_final']:.4f} test_kappa={report['kappa_final']:.4f} "
+                f"P={report['precision_macro']:.4f} R={report['recall_macro']:.4f} "
+                f"F1={report['f1_macro']:.4f} ITR={report['itr_bits_per_min']:.2f} bits/min | "
+                f"ablation: eeg={fmt(ab['eeg_only'])} fnirs={fmt(ab['fnirs_only'])} "
+                f"fusion(cross-modal)={fmt(ab['fusion_only'])}")
+        if lw.get("cgscr_w_1") is not None:
+            line += (" | gate: " + " ".join(f"{GATE_NAMES[k]}={lw[f'cgscr_w_{k}']:.3f}" for k in BRANCH_KEYS)
+                     + f" | router entropy={lw['cgscr_selection_entropy_bits']:.2f} bits")
+        log_fn(line)
 
         results_path = os.path.join(results_dir, f"results_{subject_id}_session{test_session}_mgf.json")
         with open(results_path, "w", encoding="utf-8") as f:
             json.dump(report, f, indent=2)
+        log_fn(f"results saved to: {results_path}")
+        log_fn(f"checkpoint saved to: {ckpt_path}")
         fold_reports.append(report)
         del model
         if torch.cuda.is_available():
@@ -416,6 +449,16 @@ def run_subject_loso_mgfnet(subject_dir, subject_id, device, batch_size=64,
     def _ms(key):
         v = np.array([r[key] for r in fold_reports], dtype=float)
         return float(v.mean()), float(v.std())
+
+    def _std_or_none(path):
+        vals = []
+        for r in fold_reports:
+            v = r
+            for k in path:
+                v = v.get(k) if isinstance(v, dict) else None
+            if v is not None:
+                vals.append(v)
+        return float(np.std(vals)) if vals else None
 
     def _mean_or_none(path):
         vals = []
@@ -449,6 +492,9 @@ def run_subject_loso_mgfnet(subject_dir, subject_id, device, batch_size=64,
             "eeg_only_mean": _mean_or_none(["ablation", "eeg_only"]),
             "fnirs_only_mean": _mean_or_none(["ablation", "fnirs_only"]),
             "fusion_only_mean": _mean_or_none(["ablation", "fusion_only"]),
+            "eeg_only_std": _std_or_none(["ablation", "eeg_only"]),
+            "fnirs_only_std": _std_or_none(["ablation", "fnirs_only"]),
+            "fusion_only_std": _std_or_none(["ablation", "fusion_only"]),
         },
         "cgscr_routing_stats": {
             **{f"cgscr_w_{k}_mean": _mean_or_none(["learned_weights", f"cgscr_w_{k}"])
@@ -459,8 +505,20 @@ def run_subject_loso_mgfnet(subject_dir, subject_id, device, batch_size=64,
         "confusion_matrix_summed": cm_summed.tolist(),
         "per_class_recall": per_class_recall,
     }
-    log_fn(f"\n{subject_id} FINAL (MGFNet, LOSO): acc={mean_acc:.4f}+-{std_acc:.4f}  "
-           f"F1={summary['final_average_f1']:.4f}  kappa={summary['final_average_kappa']:.4f}")
+    ba = summary["branch_accuracy"]
+    fm = lambda m, sd: "n/a" if m is None else f"{m:.4f}+-{sd:.4f}"
+    log_fn(f"\n{subject_id} FINAL: acc={mean_acc:.4f}+-{std_acc:.4f} "
+           f"kappa={summary['final_average_kappa']:.4f}+-{summary['final_std_kappa']:.4f} "
+           f"F1={summary['final_average_f1']:.4f} ITR={summary['final_average_itr']:.2f} bits/min")
+    log_fn(f"{subject_id} BRANCH ACCURACY (mean over {len(fold_reports)} folds): "
+           f"eeg={fm(ba['eeg_only_mean'], ba['eeg_only_std'])} "
+           f"fnirs={fm(ba['fnirs_only_mean'], ba['fnirs_only_std'])} "
+           f"fusion(cross-modal)={fm(ba['fusion_only_mean'], ba['fusion_only_std'])}")
+    cg = summary["cgscr_routing_stats"]
+    if cg.get("cgscr_w_1_mean") is not None:
+        log_fn(f"{subject_id} CGSCR GATE WEIGHTS (mean over {len(fold_reports)} folds, 6-way softmax, "
+               f"uniform=0.167): " + " ".join(f"{GATE_NAMES[k]}={cg[f'cgscr_w_{k}_mean']:.4f}"
+                                              for k in BRANCH_KEYS))
     summary_path = os.path.join(results_dir, f"cross_session_{subject_id}_mgf_summary.json")
     with open(summary_path, "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)

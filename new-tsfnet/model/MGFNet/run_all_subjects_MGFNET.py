@@ -117,6 +117,61 @@ def _fmt_cm(cm):
     return "\n".join(out)
 
 
+GATE_NAMES = {"1": "EEG", "2": "HbO", "3": "HbR", "12": "EEG-HbO", "13": "EEG-HbR", "23": "HbO-HbR"}
+GATE_KEYS = ("1", "2", "3", "12", "13", "23")
+
+
+def _subject_line(s):
+    ba, cg = s["branch_accuracy"], s["cgscr_routing_stats"]
+    f = lambda v: "n/a" if v is None else f"{v:.4f}"
+    line = (f"acc={s['final_average_accuracy']:.4f}+-{s['final_std_accuracy']:.4f} "
+            f"kappa={s['final_average_kappa']:.4f}+-{s['final_std_kappa']:.4f} "
+            f"F1={s['final_average_f1']:.4f} | branch acc: eeg={f(ba['eeg_only_mean'])} "
+            f"fnirs={f(ba['fnirs_only_mean'])} fusion(cross-modal)={f(ba['fusion_only_mean'])}")
+    if cg.get("cgscr_w_1_mean") is not None:
+        line += " | gate: " + " ".join(f"{GATE_NAMES[k]}={cg[f'cgscr_w_{k}_mean']:.4f}" for k in GATE_KEYS)
+    return line
+
+
+def _print_grand_summary(summaries, n_total, tag_full):
+    bar = "=" * 70
+    ids = sorted(summaries)
+    print(f"\n{bar}\nRUN COMPLETE [{tag_full}]: {len(ids)}/{n_total} subjects finished successfully")
+    if not ids:
+        return
+    g = lambda key: np.array([summaries[s][key] for s in ids], dtype=float)
+    acc, kap = g("final_average_accuracy"), g("final_average_kappa")
+    print(f"Grand mean accuracy across subjects: {acc.mean():.4f} (+-{acc.std():.4f})")
+    print(f"Grand mean kappa across subjects: {kap.mean():.4f} (+-{kap.std():.4f})")
+    print(f"Grand mean macro F1: {g('final_average_f1').mean():.4f} | precision: "
+          f"{g('final_average_precision').mean():.4f} | recall: {g('final_average_recall').mean():.4f} | "
+          f"ITR: {g('final_average_itr').mean():.2f} bits/min")
+
+    def gm(path):
+        vals = [summaries[s][path[0]][path[1]] for s in ids if summaries[s][path[0]][path[1]] is not None]
+        return "n/a" if not vals else f"{np.mean(vals):.4f}"
+    print(f"Grand mean branch accuracy: eeg={gm(('branch_accuracy', 'eeg_only_mean'))} "
+          f"fnirs={gm(('branch_accuracy', 'fnirs_only_mean'))} "
+          f"fusion(cross-modal)={gm(('branch_accuracy', 'fusion_only_mean'))}")
+    if summaries[ids[0]]["cgscr_routing_stats"].get("cgscr_w_1_mean") is not None:
+        print("Grand mean CGSCR gate weights: " + " ".join(
+            f"{GATE_NAMES[k]}={gm(('cgscr_routing_stats', f'cgscr_w_{k}_mean'))}" for k in GATE_KEYS))
+
+    cm = np.sum([np.asarray(summaries[s]["confusion_matrix_summed"]) for s in ids], axis=0)
+    print(f"\n{bar}\nGRAND CONFUSION MATRIX (summed over {len(ids)} subjects x 3 folds)")
+    print(_fmt_cm(cm.tolist()))
+    n, correct = int(cm.sum()), int(np.trace(cm))
+    errors = n - correct
+    c23 = int(cm[1, 2] + cm[2, 1])
+    print(f"overall accuracy from matrix: {correct / n * 100:.2f}% (n={n} windows)")
+    print(f"2-back <-> 3-back confusions: {c23} of {errors} total errors "
+          f"({(c23 / errors * 100) if errors else 0:.1f}% of all errors)")
+
+    print(f"\n{bar}\nPER-SUBJECT RESULTS ({len(ids)} completed / {n_total} total)")
+    for s in ids:
+        print(f"{s}: " + _subject_line(summaries[s]))
+
+
 def _blank(v):
     return "" if v is None else v
 
@@ -161,7 +216,7 @@ def main(argv=None):
                 w.writeheader()
             w.writerow(row)
 
-    all_results = {}
+    all_results, summaries = {}, {}
     with CrashSafeLogger(os.path.join(results_dir, f"mgfnet_run_log_{run_tag}.txt"),
                          experiment_tag=f"MGFNET_{tag_full.upper()}"):
         print(f"===== MGFNet LOSO RUN started {run_tag} (seed={args.seed}) =====")
@@ -174,7 +229,7 @@ def main(argv=None):
         for i, subject_id in enumerate(subjects, 1):
             subject_dir = os.path.join(data_root, subject_id)
             print(f"\n{'=' * 70}\n[{i}/{len(subjects)}] {subject_id}  "
-                  f"({time.time() - run_t0:.1f}s elapsed)\n{'=' * 70}")
+                  f"({time.time() - run_t0:.1f}s elapsed so far)\n{'=' * 70}")
             row = {k: "" for k in CSV_FIELDS}
             row["subject_id"] = subject_id
 
@@ -193,12 +248,10 @@ def main(argv=None):
                                             train_kwargs=train_kw, base_seed=args.seed,
                                             log_fn=print)
                 cm = s["confusion_matrix_summed"]
-                print(f"\n{subject_id} BRANCH ACCURACY (mean over folds): "
-                      f"eeg={s['branch_accuracy']['eeg_only_mean']} "
-                      f"fnirs(HbO+HbR)={s['branch_accuracy']['fnirs_only_mean']} "
-                      f"cross-modal={s['branch_accuracy']['fusion_only_mean']}")
-                print(f"{subject_id} CGSCR routing: {s['cgscr_routing_stats']}")
-                print(f"{subject_id} confusion matrix (summed over session-folds):")
+                summaries[subject_id] = s
+                print(f"\n[{subject_id}] DONE in {(time.time() - t0) / 60.0:.1f} min | "
+                      + _subject_line(s))
+                print("confusion matrix (summed over 3 session-folds):")
                 print(_fmt_cm(cm))
 
                 cg = s["cgscr_routing_stats"]
@@ -231,17 +284,13 @@ def main(argv=None):
             all_results[subject_id] = row
             append_row(row)
 
-        ok = [r for r in all_results.values() if r["status"] == "ok"]
-        if ok:
-            accs = np.array([r["mean_acc"] for r in ok], dtype=float)
-            f1s = np.array([r["mean_f1"] for r in ok], dtype=float)
-            print(f"\n===== ACROSS {len(ok)} SUBJECTS: acc={accs.mean():.4f}+-{accs.std():.4f} "
-                  f"F1={f1s.mean():.4f} =====")
         with open(summary_json, "w", encoding="utf-8") as f:
             json.dump(all_results, f, indent=2)
+        _print_grand_summary(summaries, len(subjects), tag_full)
         print(f"\n===== MGFNet LOSO RUN finished in {(time.time() - run_t0) / 60.0:.1f} min =====")
-        print(f"Summary CSV: {summary_csv}")
-        print(f"Summary JSON: {summary_json}")
+        print("Full results:")
+        print(summary_csv)
+        print(summary_json)
 
 
 if __name__ == "__main__":
