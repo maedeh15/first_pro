@@ -46,12 +46,16 @@ os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 
 import argparse
 import json
+import multiprocessing as mp
 import traceback
 
 import numpy as np
 import scipy.io as sio
 from scipy.signal import butter, filtfilt, resample
 
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import mne
 
 mne.set_log_level("ERROR")
@@ -117,13 +121,31 @@ EXPECTED_EOG_CHANNELS = ("HEOG", "VEOG")
 EXPECTED_FNIRS_CHANNELS = 36
 
 _LOG_PATH = None
+_LOG_LOCK = None
+
+# QC figures -- the same set Preproc_tsfnet_nback_badch.py saves per subject
+# (into the subject's output folder): EEG single-channel before/after, all-
+# channels stacked before/after (full + 10-30 s zoom), PSD before/after, PSD
+# heatmaps before/after, per-channel band power, fNIRS before/after.
+# (TSFNet's AutoReject figures have no counterpart: this pipeline has no
+# AutoReject step.)  --no-qc disables them.
+SAVE_QC = True
+
+# Subject-level parallelism, as in the TSFNet script (its default is 4).
+# ICA dominates the run time; each worker needs ~1.5-2.5 GB RAM.
+N_WORKERS = 4
 
 
 def log_message(msg):
     print(msg, flush=True)
     if _LOG_PATH:
-        with open(_LOG_PATH, "a", encoding="utf-8") as f:
-            f.write(msg + "\n")
+        if _LOG_LOCK is not None:
+            with _LOG_LOCK:
+                with open(_LOG_PATH, "a", encoding="utf-8") as f:
+                    f.write(msg + "\n")
+        else:
+            with open(_LOG_PATH, "a", encoding="utf-8") as f:
+                f.write(msg + "\n")
 
 
 # ============================================================================
@@ -232,6 +254,157 @@ def marker_onset_diagnostic(events, sfreq):
             "stimulus_codes": sorted(set(codes))}
 
 
+
+# ============================================================================
+# QC FIGURES (same plots as Preproc_tsfnet_nback_badch.py)
+# ============================================================================
+def _compute_psd_from_raw(raw_obj, fmin=0.5, fmax=49.0):
+    """(ch_names, freqs, psd_db) for the EEG channels, dB = 10log10(uV^2/Hz)."""
+    raw_eeg = raw_obj.copy().pick("eeg")
+    spectrum = raw_eeg.compute_psd(method="welch", fmin=fmin, fmax=fmax,
+                                   n_fft=int(raw_eeg.info["sfreq"] * 4), verbose=False)
+    psd, freqs = spectrum.get_data(return_freqs=True)
+    return raw_eeg.ch_names, freqs, 10 * np.log10(np.maximum(psd, 1e-24) * 1e12)
+
+
+def _plot_psd_before_after(raw_before, filtered, subject_id):
+    _, f_b, p_b = _compute_psd_from_raw(raw_before)
+    _, f_a, p_a = _compute_psd_from_raw(filtered)
+    fig, axes = plt.subplots(1, 2, figsize=(16, 6), sharey=True)
+    for i in range(p_b.shape[0]):
+        axes[0].plot(f_b, p_b[i], linewidth=0.6, alpha=0.6)
+    axes[0].set_title(f"{subject_id} - PSD RAW (all channels overlaid)")
+    axes[0].set_xlabel("Frequency (Hz)")
+    axes[0].set_ylabel("Power (dB, 10log10 uV^2/Hz)")
+    axes[0].axvline(50, color="k", linestyle="--", linewidth=0.8, label="50Hz line noise")
+    axes[0].legend(fontsize=8)
+    for i in range(p_a.shape[0]):
+        axes[1].plot(f_a, p_a[i], linewidth=0.6, alpha=0.6)
+    axes[1].set_title(f"{subject_id} - PSD PREPROCESSED (all channels overlaid)")
+    axes[1].set_xlabel("Frequency (Hz)")
+    axes[1].axvline(50, color="k", linestyle="--", linewidth=0.8)
+    plt.tight_layout()
+    return fig
+
+
+def _plot_psd_heatmap(raw_obj, subject_id, title_suffix):
+    ch_names, freqs, psd_db = _compute_psd_from_raw(raw_obj)
+    fig, ax = plt.subplots(figsize=(12, max(6, 0.3 * len(ch_names))))
+    im = ax.imshow(psd_db, aspect="auto", origin="lower", cmap="viridis",
+                   extent=[freqs[0], freqs[-1], 0, len(ch_names)])
+    ax.set_yticks(np.arange(len(ch_names)) + 0.5)
+    ax.set_yticklabels(ch_names, fontsize=6)
+    ax.set_xlabel("Frequency (Hz)")
+    ax.set_ylabel("Channel")
+    ax.set_title(f"{subject_id} - PSD Heatmap ({title_suffix})")
+    fig.colorbar(im, ax=ax, label="Power (dB, 10log10 uV^2/Hz)")
+    plt.tight_layout()
+    return fig
+
+
+def _plot_band_power_bars(raw_obj, subject_id, title_suffix):
+    ch_names, freqs, psd_db = _compute_psd_from_raw(raw_obj, fmin=0.5, fmax=49.0)
+    bands = {"delta(0.5-4)": (0.5, 4), "theta(4-8)": (4, 8), "alpha(8-13)": (8, 13),
+             "beta(13-30)": (13, 30), "gamma(30-49)": (30, 49)}
+    fig, ax = plt.subplots(figsize=(max(12, 0.35 * len(ch_names)), 6))
+    x = np.arange(len(ch_names))
+    width = 0.8 / len(bands)
+    for i, (name, (lo, hi)) in enumerate(bands.items()):
+        m = (freqs >= lo) & (freqs < hi)
+        vals = psd_db[:, m].mean(axis=1) if m.any() else np.full(len(ch_names), np.nan)
+        ax.bar(x + i * width, vals, width=width, label=name)
+    ax.set_xticks(x + width * (len(bands) - 1) / 2)
+    ax.set_xticklabels(ch_names, rotation=90, fontsize=6)
+    ax.set_ylabel("Power (dB, 10log10 uV^2/Hz)")
+    ax.set_title(f"{subject_id} - Per-channel band power ({title_suffix})")
+    ax.legend(fontsize=8, ncol=5, loc="upper center", bbox_to_anchor=(0.5, 1.15))
+    plt.tight_layout()
+    return fig
+
+
+def _plot_all_channels_stacked(raw_obj, title, color, tmin=None, tmax=None):
+    """One row per EEG channel (EOG excluded, as in the TSFNet QC plots)."""
+    raw_eeg = raw_obj.copy().pick("eeg")
+    sf = raw_eeg.info["sfreq"]
+    start = int((tmin or 0.0) * sf)
+    stop = int(tmax * sf) if tmax is not None else None
+    data = raw_eeg.get_data(start=start, stop=stop)
+    t = (np.arange(data.shape[1]) + start) / sf
+    spread = np.median(np.abs(data - np.median(data, axis=1, keepdims=True))) * 30 + 1e-12
+    n = data.shape[0]
+    fig, ax = plt.subplots(figsize=(14, max(6, 0.5 * n)))
+    for i in range(n):
+        ax.plot(t, data[i] + (n - 1 - i) * spread, color=color, linewidth=0.4)
+    ax.set_yticks([(n - 1 - i) * spread for i in range(n)])
+    ax.set_yticklabels(raw_eeg.ch_names, fontsize=6)
+    ax.set_xlabel("Time (s)")
+    ax.set_ylabel("Channel")
+    ax.set_title(title)
+    plt.tight_layout()
+    return fig
+
+
+def save_eeg_qc_plots(raw_before, filtered, subject_id, qc_dir):
+    """Every EEG figure TSFNet's preprocess_eeg() saves, for this pipeline's
+    1-40 Hz + ICA cleaning. Never raises: a plotting failure is logged only."""
+    desc = f"{EEG_BP_LOW:g}-{EEG_BP_HIGH:g}Hz + ICA"
+    n_ch = len(mne.pick_types(filtered.info, eeg=True, eog=False))
+    try:
+        os.makedirs(qc_dir, exist_ok=True)
+        ch0 = filtered.copy().pick("eeg").ch_names[0]
+        fig, axes = plt.subplots(2, 1, figsize=(12, 6))
+        axes[0].plot(raw_before.times, raw_before.get_data(picks=[ch0])[0], color="tab:red", linewidth=0.5)
+        axes[0].set_title(f"{subject_id} - EEG RAW ({ch0})")
+        axes[1].plot(filtered.times, filtered.get_data(picks=[ch0])[0], color="tab:blue", linewidth=0.5)
+        axes[1].set_title(f"{subject_id} - EEG PREPROCESSED ({desc}) ({ch0})")
+        plt.tight_layout()
+        fig.savefig(os.path.join(qc_dir, f"{subject_id}_eeg_before_after.png"), dpi=150)
+        plt.close(fig)
+    except Exception as e:
+        log_message(f"  {subject_id}: could not save EEG single-channel QC plot: {e}")
+    try:
+        for tag, obj, col, lab in (("before", raw_before, "tab:red", "RAW"),
+                                   ("after", filtered, "tab:blue", f"PREPROCESSED ({desc})")):
+            fig = _plot_all_channels_stacked(
+                obj, f"{subject_id} - EEG {lab} - All {n_ch} Channels, EOG excluded", col)
+            fig.savefig(os.path.join(qc_dir, f"{subject_id}_eeg_{tag}_allchannels.png"), dpi=150)
+            plt.close(fig)
+            fig = _plot_all_channels_stacked(
+                obj, f"{subject_id} - EEG {lab} - All {n_ch} Channels, EOG excluded (10-30s)",
+                col, tmin=10.0, tmax=30.0)
+            fig.savefig(os.path.join(qc_dir, f"{subject_id}_eeg_{tag}_allchannels_zoom10_30.png"), dpi=150)
+            plt.close(fig)
+        log_message(f"  {subject_id}: saved EEG all-channels QC plots (before/after, full+zoomed)")
+    except Exception as e:
+        log_message(f"  {subject_id}: could not save EEG all-channels QC plots: {e}")
+    try:
+        for fig, name in ((_plot_psd_before_after(raw_before, filtered, subject_id), "psd_before_after"),
+                          (_plot_psd_heatmap(raw_before, subject_id, "RAW"), "psd_heatmap_before"),
+                          (_plot_psd_heatmap(filtered, subject_id, "PREPROCESSED"), "psd_heatmap_after"),
+                          (_plot_band_power_bars(filtered, subject_id, "PREPROCESSED"), "band_power_after")):
+            fig.savefig(os.path.join(qc_dir, f"{subject_id}_{name}.png"), dpi=150)
+            plt.close(fig)
+        log_message(f"  {subject_id}: saved PSD QC plots (before/after, heatmaps, band power)")
+    except Exception as e:
+        log_message(f"  {subject_id}: could not save PSD QC plots: {e}")
+
+
+def save_fnirs_qc_plot(oxy_raw, fs_raw, hbo, subject_id, qc_dir):
+    try:
+        os.makedirs(qc_dir, exist_ok=True)
+        fig, axes = plt.subplots(2, 1, figsize=(12, 6))
+        axes[0].plot(np.arange(oxy_raw.shape[0]) / fs_raw, oxy_raw[:, 0], color="tab:red", linewidth=0.5)
+        axes[0].set_title(f"{subject_id} - fNIRS RAW HbO (ch 0)")
+        axes[1].plot(np.arange(hbo.shape[0]) / SFREQ_FNIRS, hbo[:, 0], color="tab:blue", linewidth=0.5)
+        axes[1].set_title(f"{subject_id} - fNIRS PREPROCESSED HbO (Beer-Lambert + "
+                          f"{FNIRS_LP_HIGH:g}Hz low-pass)")
+        plt.tight_layout()
+        fig.savefig(os.path.join(qc_dir, f"{subject_id}_fnirs_before_after.png"), dpi=150)
+        plt.close(fig)
+    except Exception as e:
+        log_message(f"  {subject_id}: could not save fNIRS QC plot: {e}")
+
+
 # ============================================================================
 # FILTERING
 # ============================================================================
@@ -246,7 +419,7 @@ def fnirs_lowpass(data, fs, high=FNIRS_LP_HIGH, order=FNIRS_LP_DESIGN_ORDER):
     return filtfilt(b, a, data, axis=0)
 
 
-def preprocess_eeg(raw, subject_id):
+def preprocess_eeg(raw, subject_id, qc_dir=None):
     """1-40 Hz band-pass (scalp + EOG channels), then ICA-based EOG
     correction of the scalp channels.  # AMBIGUITY-P6
 
@@ -283,13 +456,17 @@ def preprocess_eeg(raw, subject_id):
                 f"effective order {EEG_BP_EFFECTIVE_ORDER}, zero-phase); "
                 f"ICA removed {n_excluded} ocular component(s).")
 
+    if SAVE_QC and qc_dir:
+        save_eeg_qc_plots(raw, filt, subject_id, qc_dir)
+
     picks = mne.pick_types(filt.info, eeg=True, eog=EEG_INCLUDE_EOG_CHANNELS)
     ch_names = [filt.ch_names[i] for i in picks]
     return filt.get_data(picks=picks), ch_names, n_excluded
 
 
-def preprocess_fnirs(subject_id):
+def preprocess_fnirs(subject_id, qc_dir=None):
     oxy, deoxy, fs, ev_time, ev_code = load_fnirs_data(subject_id)
+    oxy_raw, fs_raw = oxy.copy(), fs
     if not DATASET_ALREADY_BEER_LAMBERT:
         raise NotImplementedError(
             "This dataset copy ships oxy/deoxy already Beer-Lambert converted. "
@@ -304,6 +481,8 @@ def preprocess_fnirs(subject_id):
     hbr = fnirs_lowpass(deoxy, SFREQ_FNIRS)
     log_message(f"  {subject_id}: fNIRS low-pass {FNIRS_LP_HIGH} Hz "
                 f"(design order {FNIRS_LP_DESIGN_ORDER}, effective {FNIRS_LP_EFFECTIVE_ORDER}).")
+    if SAVE_QC and qc_dir:
+        save_fnirs_qc_plot(oxy_raw, fs_raw, hbo, subject_id, qc_dir)
     # returned as (36, n_samples) to match the EEG (C, n_times) convention
     return hbo.T, hbr.T, ev_time, ev_code
 
@@ -406,8 +585,10 @@ def process_subject(subject_num):
                     f"to sit {TASK_TMIN} s before the first stimulus. Check TASK_TMIN "
                     f"(--task-tmin) before training.")
 
-    eeg, ch_names, n_ica = preprocess_eeg(raw, subject_id)
-    hbo, hbr, ev_t, ev_c = preprocess_fnirs(subject_id)
+    out_dir = os.path.join(OUTPUT_PATH, subject_id)
+    os.makedirs(out_dir, exist_ok=True)
+    eeg, ch_names, n_ica = preprocess_eeg(raw, subject_id, qc_dir=out_dir)
+    hbo, hbr, ev_t, ev_c = preprocess_fnirs(subject_id, qc_dir=out_dir)
     if hbo.shape[0] != EXPECTED_FNIRS_CHANNELS:
         log_message(f"  {subject_id}: WARNING - {hbo.shape[0]} fNIRS channels, "
                     f"expected {EXPECTED_FNIRS_CHANNELS}.")
@@ -422,8 +603,6 @@ def process_subject(subject_num):
         log_message(f"  {subject_id}: NO windows produced -- nothing saved.")
         return {"subject_id": subject_id, "status": "no_windows"}
 
-    out_dir = os.path.join(OUTPUT_PATH, subject_id)
-    os.makedirs(out_dir, exist_ok=True)
     np.save(os.path.join(out_dir, f"{subject_id}_mgf_eeg.npy"), E)
     np.save(os.path.join(out_dir, f"{subject_id}_mgf_hbo.npy"), O)
     np.save(os.path.join(out_dir, f"{subject_id}_mgf_hbr.npy"), R)
@@ -463,8 +642,28 @@ def process_subject(subject_num):
     return {"subject_id": subject_id, "status": "ok", **meta}
 
 
+_CONFIG_KEYS = ("BASE_DATASET_PATH", "OUTPUT_PATH", "TASK_TMIN", "EEG_INCLUDE_EOG_CHANNELS",
+                "SAVE_QC", "_LOG_PATH")
+
+
+def _init_worker(config, lock):
+    """Spawned workers (Windows) re-import this file with its DEFAULT globals;
+    copy the parent's CLI-adjusted configuration into each worker."""
+    global _LOG_LOCK
+    globals().update(config)
+    _LOG_LOCK = lock
+
+
+def _process_subject_safe(n):
+    try:
+        return process_subject(n)
+    except Exception:
+        log_message(f"  VP{n:03d}: FAILED\n{traceback.format_exc()}")
+        return {"subject_id": f"VP{n:03d}", "status": "failed"}
+
+
 def main():
-    global _LOG_PATH, SUBJECTS, BASE_DATASET_PATH, OUTPUT_PATH, TASK_TMIN, EEG_INCLUDE_EOG_CHANNELS
+    global _LOG_PATH, SUBJECTS, BASE_DATASET_PATH, OUTPUT_PATH, TASK_TMIN, SAVE_QC, N_WORKERS, EEG_INCLUDE_EOG_CHANNELS
     ap = argparse.ArgumentParser()
     ap.add_argument("--subjects", type=str, default=None,
                     help="comma-separated subject numbers, e.g. 1 or 1,2,3")
@@ -473,6 +672,10 @@ def main():
     ap.add_argument("--include-eog", action="store_true",
                     help="keep HEOG/VEOG as network inputs (30 channels, the paper's "
                          "literal setting). Default: 28 scalp channels only.")
+    ap.add_argument("--workers", type=int, default=None,
+                    help=f"parallel subject workers (default {N_WORKERS}, as in the TSFNet script; "
+                         f"use 1-2 if RAM is short)")
+    ap.add_argument("--no-qc", action="store_true", help="skip the QC figures")
     ap.add_argument("--task-tmin", type=float, default=None,
                     help="seconds from trial marker to task onset (default 2.0)")
     args = ap.parse_args()
@@ -489,18 +692,25 @@ def main():
         SUBJECTS = [int(s) for s in args.subjects.split(",")]
     if args.task_tmin is not None:
         TASK_TMIN = args.task_tmin
+    if args.workers is not None:
+        N_WORKERS = max(1, args.workers)
+    if args.no_qc:
+        SAVE_QC = False
 
     os.makedirs(OUTPUT_PATH, exist_ok=True)
     _LOG_PATH = os.path.join(OUTPUT_PATH, "mgfnet_preprocessing_log.txt")
-    log_message(f"MGFNet preprocessing | subjects={SUBJECTS} | out={OUTPUT_PATH}")
+    n_workers = min(N_WORKERS, len(SUBJECTS))
+    log_message(f"MGFNet preprocessing | subjects={SUBJECTS} | out={OUTPUT_PATH} | "
+                f"workers={n_workers} | QC figures={SAVE_QC}")
 
-    results = []
-    for n in SUBJECTS:
-        try:
-            results.append(process_subject(n))
-        except Exception:
-            log_message(f"  VP{n:03d}: FAILED\n{traceback.format_exc()}")
-            results.append({"subject_id": f"VP{n:03d}", "status": "failed"})
+    if n_workers <= 1:
+        results = [_process_subject_safe(n) for n in SUBJECTS]
+    else:
+        config = {k: globals()[k] for k in _CONFIG_KEYS}
+        lock = mp.Lock()
+        with mp.Pool(processes=n_workers, initializer=_init_worker,
+                     initargs=(config, lock)) as pool:
+            results = list(pool.imap(_process_subject_safe, SUBJECTS))
 
     ok = [r for r in results if r.get("status") == "ok"]
     log_message(f"\n===== DONE: {len(ok)}/{len(results)} subjects =====")
