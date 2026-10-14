@@ -149,34 +149,36 @@ def hsic_linear(h_i: torch.Tensor, h_j: torch.Tensor) -> torch.Tensor:
     """
     Compute HSIC between two attention heads' outputs using a linear kernel.
 
-    h_i, h_j: (B, d_k)  -- per-head compact feature (averaged over channels),
-              where d_k = d_spatial / H (per-head dimension), B = batch size.
-              M = B is the "samples" dimension contracted when forming the
-              Gram matrix.
+    h_i, h_j: (B, CH, d_k) -- the i-th / j-th head output of Eq. 5 for each
+              sample (CH tokens x d_k features). Nothing is averaged away.
 
     HSIC(G_i, G_j) = 1/(d_k-1)^2 * tr(G_i H G_j H)   [Eq. 25]
-    where G_i = h_i^T @ h_i  (d_k x d_k),  H = I_dk - (1/d_k) * 11^T
+    where G_i = kappa(h_i, h_i) = h_i^T h_i  (d_k x d_k, linear kernel),
+          H   = I_dk - (1/d_k) 11^T.
+    Computed per sample, then averaged over the batch.
     """
-    d_k = h_i.shape[1]
+    d_k = h_i.shape[-1]
 
-    # Gram matrices: (d_k, d_k) -- contract over the M (sample) dimension
-    G_i = h_i.T @ h_i   # linear kernel: kappa(x,y) = x^T y
-    G_j = h_j.T @ h_j
+    # Gram matrices per sample: (B, d_k, d_k), contracted over the CH tokens
+    G_i = h_i.transpose(1, 2) @ h_i
+    G_j = h_j.transpose(1, 2) @ h_j
 
     # Centering matrix H_dk: (d_k, d_k), per paper definition exactly
-    H = torch.eye(d_k, device=h_i.device) - (1.0 / d_k) * torch.ones(d_k, d_k, device=h_i.device)
+    H = torch.eye(d_k, device=h_i.device, dtype=h_i.dtype) \
+        - (1.0 / d_k) * torch.ones(d_k, d_k, device=h_i.device, dtype=h_i.dtype)
 
-    # HSIC = 1/(dk-1)^2 * tr(G_i H G_j H)
+    # HSIC = 1/(dk-1)^2 * tr(G_i H G_j H), averaged over the batch
     denom = max((d_k - 1) ** 2, 1)
-    hsic_val = torch.trace(G_i @ H @ G_j @ H) / denom
-    return hsic_val
+    prod = (G_i @ H) @ (G_j @ H)
+    hsic_val = prod.diagonal(dim1=-2, dim2=-1).sum(-1) / denom
+    return hsic_val.mean()
 
 
 def mhs_loss_from_heads(head_outputs: list) -> torch.Tensor:
     """
     Compute average pairwise HSIC over all H*(H-1)/2 head pairs. [Eq. 28]
-    head_outputs: list of H tensors, each (B, d_k) -- per-head compact
-                  feature (averaged over channels in the SFEM layer).
+    head_outputs: list of H tensors, each (B, CH, d_k) -- per-head output
+                  of the last SFEM layer (Eq. 5).
     Returns scalar HSIC average.
     """
     H = len(head_outputs)
@@ -246,7 +248,7 @@ class SpatialFeatureExtractionModule(nn.Module):
         x: (B, n_ch, d_spatial)
         Returns (out, head_outputs_last_layer)
           out: (B, n_ch, d_spatial)
-          head_outputs: list of n_heads tensors, each (B, d_k)
+          head_outputs: list of n_heads tensors, each (B, n_ch, d_k)
                         — from the LAST transformer layer's MHSA
                         — used for HSIC loss computation
         """
@@ -327,16 +329,10 @@ class _TransformerEncoderLayer(nn.Module):
         # head output h_i: (B, n_heads, n_ch, d_k)
         head_out = torch.matmul(attn, V)
 
-        # Store per-head outputs for HSIC loss: paper says h_i^(N) is "the
-        # output feature of the i-th head" (a single compact representation
-        # per head), so we average over the channel/token dimension n_ch to
-        # get one d_k-vector per (batch, head) -- shape (B, d_k).
-        # The Gram matrix G_i = h_i^T @ h_i (d_k x d_k, contracted over B) is
-        # then computed in hsic_linear(), matching H_dk being d_k x d_k.
-        head_outputs = [
-            head_out[:, h, :, :].mean(dim=1)   # (B, d_k)
-            for h in range(self.n_heads)
-        ]
+        # Store per-head outputs h_i^(N) (Eq. 5) for the HSIC loss, one
+        # (B, n_ch, d_k) tensor per head. hsic_linear() forms the d_k x d_k
+        # Gram matrix G_i = h_i^T h_i per sample, matching H_dk in Eq. 25.
+        head_outputs = [head_out[:, h] for h in range(self.n_heads)]
 
         # Concatenate heads: (B, n_ch, n_heads*d_k) [Eq. 6]
         multi = head_out.transpose(1, 2).contiguous().view(B, n_ch, self.n_heads * self.d_k)
@@ -386,37 +382,35 @@ class EEGTemporalFeatureExtractionModule(nn.Module):
         self.n_bands  = n_bands    # 5
         self.n_eeg_ch = n_eeg_ch  # 28
 
-        # One depthwise conv per scale, grouped by n_bands
-        # Input: (B, n_bands, n_eeg_ch, T_e) reshaped to (B, n_bands*n_eeg_ch, T_e)
-        # groups=n_bands: each band processed independently
+        # One grouped (depthwise) dilated Conv2d per scale on (B, 5, CH, T):
+        # groups=n_bands splits the input into the 5 frequency-band subsets
+        # (paper Sec 2.2.1); each band has ONE (1,k) kernel shared across all
+        # EEG channels, so output is again (B, 5, CH, T) per scale.
         self.scale_convs = nn.ModuleList()
         self.scale_bns   = nn.ModuleList()
 
         for k, d in self.SCALES:
             # Padding to maintain T_e: pad = dilation*(kernel-1)//2
             pad = d * (k - 1) // 2
-            conv = nn.Conv1d(
-                in_channels=n_bands * n_eeg_ch,
-                out_channels=n_bands * n_eeg_ch,
-                kernel_size=k,
-                dilation=d,
-                padding=pad,
-                groups=n_bands * n_eeg_ch,  # depthwise: each channel independently
-                bias=False,
+            conv = nn.Conv2d(
+                in_channels=n_bands,
+                out_channels=n_bands,
+                kernel_size=(1, k),
+                dilation=(1, d),
+                padding=(0, pad),
+                groups=n_bands,
+                bias=False,          # followed by BN (Eq. 1)
             )
             self.scale_convs.append(conv)
-            self.scale_bns.append(nn.BatchNorm1d(n_bands * n_eeg_ch))
+            self.scale_bns.append(nn.BatchNorm2d(n_bands))
 
-        # Pointwise conv: (B, 20*n_eeg_ch, T_e) → (B, 1*n_eeg_ch, T_e)
-        # = Conv2d(20, 1, 1×1) applied over the band dimension
-        # Input reshaped to (B, 20, n_eeg_ch, T_e), pw conv over dim-1
+        # Pointwise conv (Eq. 3): W in R^{1x20x1x1}, b in R^1 -> (B, 1, CH, T)
         self.pw_conv = nn.Conv2d(
             in_channels=4 * n_bands,   # 20 (4 scales × 5 bands)
             out_channels=1,
             kernel_size=(1, 1),
-            bias=False,
+            bias=True,
         )
-        self.bn_pw = nn.BatchNorm2d(1)
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -424,26 +418,15 @@ class EEGTemporalFeatureExtractionModule(nn.Module):
         x: (B, n_bands, n_eeg_ch, T_e)
         Returns: (B, n_eeg_ch, T_e)
         """
-        B, n_bands, CH, T = x.shape
-
-        # Reshape to (B, n_bands*CH, T) for grouped depthwise conv
-        x_flat = x.view(B, n_bands * CH, T)
-
-        # 4 parallel dilated depthwise convolutions [Eq. 1,2]
-        scale_outs = []
-        for conv, bn in zip(self.scale_convs, self.scale_bns):
-            out = conv(x_flat)          # (B, n_bands*CH, T)
-            out = bn(out)
-            out = F.elu(out)
-            out = out.contiguous().view(B, n_bands, CH, T)
-            scale_outs.append(out)
+        # 4 parallel dilated grouped convolutions [Eq. 1,2]
+        scale_outs = [F.elu(bn(conv(x)))        # (B, 5, CH, T) each
+                      for conv, bn in zip(self.scale_convs, self.scale_bns)]
 
         # Concat along band dim → (B, 4*n_bands=20, CH, T) [Eq. 2]
         x_cat = torch.cat(scale_outs, dim=1)   # (B, 20, CH, T)
 
         # Pointwise conv: reduce 20 bands → 1, then squeeze [Eq. 3]
         x_cat = self.pw_conv(x_cat)             # (B, 1, CH, T)
-        x_cat = self.bn_pw(x_cat)
         x_cat = self.dropout(x_cat)
         out = x_cat.squeeze(1)                  # (B, CH, T)  = F_eegt
         return out
@@ -485,26 +468,27 @@ class fNIRSTemporalFeatureExtractionModule(nn.Module):
 
         for k, d in self.SCALES:
             pad = d * (k - 1) // 2
-            conv = nn.Conv1d(
-                in_channels=n_hemo * n_fnirs_ch,
-                out_channels=n_hemo * n_fnirs_ch,
-                kernel_size=k,
-                dilation=d,
-                padding=pad,
-                groups=n_hemo * n_fnirs_ch,   # depthwise
-                bias=False,
+            # Same structure as E-TFEM: grouped by the 3 hemoglobin types,
+            # one (1,k) kernel per type shared across fNIRS channels.
+            conv = nn.Conv2d(
+                in_channels=n_hemo,
+                out_channels=n_hemo,
+                kernel_size=(1, k),
+                dilation=(1, d),
+                padding=(0, pad),
+                groups=n_hemo,
+                bias=False,          # followed by BN (Eq. 11)
             )
             self.scale_convs.append(conv)
-            self.scale_bns.append(nn.BatchNorm1d(n_hemo * n_fnirs_ch))
+            self.scale_bns.append(nn.BatchNorm2d(n_hemo))
 
-        # Pointwise: 6 -> 1
+        # Pointwise (Eq. 13): W in R^{1x6x1x1}, b in R^1
         self.pw_conv = nn.Conv2d(
             in_channels=len(self.SCALES) * n_hemo,   # 6
             out_channels=1,
             kernel_size=(1, 1),
-            bias=False,
+            bias=True,
         )
-        self.bn_pw  = nn.BatchNorm2d(1)
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -518,20 +502,11 @@ class fNIRSTemporalFeatureExtractionModule(nn.Module):
             f"HbT must be computed in preprocessing, not inside this module."
         )
 
-        # Flatten for grouped conv -- no HbT computation here anymore
-        x_flat = x.contiguous().view(B, self.N_HEMO_FULL * CH, T)
+        scale_outs = [F.elu(bn(conv(x)))        # (B, 3, CH, T) each [Eq. 11]
+                      for conv, bn in zip(self.scale_convs, self.scale_bns)]
 
-        scale_outs = []
-        for conv, bn in zip(self.scale_convs, self.scale_bns):
-            out = conv(x_flat)
-            out = bn(out)
-            out = F.elu(out)
-            out = out.contiguous().view(B, self.N_HEMO_FULL, CH, T)
-            scale_outs.append(out)
-
-        x_cat = torch.cat(scale_outs, dim=1)   # (B, 6, CH, T)
-        x_cat = self.pw_conv(x_cat)             # (B, 1, CH, T)
-        x_cat = self.bn_pw(x_cat)
+        x_cat = torch.cat(scale_outs, dim=1)   # (B, 6, CH, T) [Eq. 12]
+        x_cat = self.pw_conv(x_cat)             # (B, 1, CH, T) [Eq. 13]
         x_cat = self.dropout(x_cat)
         out = x_cat.squeeze(1)                  # (B, CH, T)
         return out
@@ -580,7 +555,7 @@ class EEGSpatialTemporalFeatureExtractionModule(nn.Module):
             kernel_size=(1, compress),   # W = n_eeg_ch (spatial), kernel_size_t = 20
             stride=(1, compress),        # stride=(spatial_stride=1, time_stride=20)
             groups=1,
-            bias=False,
+            bias=True,                   # b_st_dwconv_eeg in Eq. 8
         )
 
         # Pointwise conv: 1 -> KSS
@@ -588,7 +563,7 @@ class EEGSpatialTemporalFeatureExtractionModule(nn.Module):
             in_channels=1,
             out_channels=KSS,
             kernel_size=(1, 1),
-            bias=False,
+            bias=True,                   # b_st_pwconv in Eq. 9 / 15
         )
         self.bn  = nn.BatchNorm2d(KSS)
         self.drop = nn.Dropout(dropout)
@@ -648,7 +623,7 @@ class fNIRSSpatialTemporalFeatureExtractionModule(nn.Module):
             kernel_size=(1, k),
             padding=(0, pad),
             groups=1,
-            bias=False,
+            bias=True,                   # b_st_dwconv_fnirs in Eq. 14
         )
 
         # Pointwise: 1 → KSS
@@ -656,7 +631,7 @@ class fNIRSSpatialTemporalFeatureExtractionModule(nn.Module):
             in_channels=1,
             out_channels=KSS,
             kernel_size=(1, 1),
-            bias=False,
+            bias=True,                   # b_st_pwconv in Eq. 9 / 15
         )
         self.bn   = nn.BatchNorm2d(KSS)
         self.drop = nn.Dropout(dropout)
@@ -690,9 +665,8 @@ class MSTFDN(nn.Module):
     Inputs:
       eeg:   (B, n_bands, n_eeg_ch, T_e)
              For N-back: (B, 5, 28, 2000)
-      fnirs: (B, n_fnirs_seg, n_fnirs_ch, T_f, n_hemo)
-             For N-back: (B, 21, 36, 30, 2)
-             The model averages over fNIRS segments internally.
+      fnirs: (B, n_hemo=3, n_fnirs_ch, T_f)
+             For N-back: (B, 3, 36, 100)
     
     Outputs during training: (logits, head_outputs_e, head_outputs_f, head_outputs_ef)
     Outputs during inference: logits (B, n_class)
@@ -793,9 +767,9 @@ class MSTFDN(nn.Module):
 
         Returns:
           logits: (B, n_class)
-          heads_e:  list of n_heads tensors (B, d_k_e) -- for HSIC loss
-          heads_f:  list of n_heads tensors (B, d_k_f) -- for HSIC loss
-          heads_ef: list of n_heads tensors (B, d_k_ef) -- for HSIC loss
+          heads_e:  list of n_heads tensors (B, CH_e, d_k_e) -- for HSIC loss
+          heads_f:  list of n_heads tensors (B, CH_f, d_k_f) -- for HSIC loss
+          heads_ef: list of n_heads tensors (B, KSS*(CH_e+CH_f), d_k_ef) -- for HSIC loss
         """
         # ── EEG Branch ────────────────────────────────────────────────────
         # E-TFEM: multi-scale temporal features
@@ -861,7 +835,7 @@ class MSTFDNLoss(nn.Module):
         """
         logits:  (B, n_class) — raw logits (not softmaxed)
         targets: (B,)         — class indices
-        heads_*: lists of (B, d_k) tensors — MHSA head outputs from last SFEM layer
+        heads_*: lists of (B, CH, d_k) tensors — MHSA head outputs from last SFEM layer
         
         Returns (total_loss, ce_loss, l2_loss, mhs_loss) all as scalars.
         """
@@ -871,8 +845,10 @@ class MSTFDNLoss(nn.Module):
         # ── L2 norm regularization [Eq. 24] ──────────────────────────────
         # Loss_nw = lambda_nw * sum_i ||W_i||_2  — sum of L2 norms, NOT squared
         loss_l2 = torch.tensor(0.0, device=logits.device)
+        # "each weight matrix W_i": conv/linear weights only (dim > 1),
+        # not the 1-D affine gains of BatchNorm/LayerNorm.
         for name, param in self.model.named_parameters():
-            if 'weight' in name:
+            if 'weight' in name and param.dim() > 1:
                 loss_l2 = loss_l2 + param.norm(2)
         loss_l2 = self.cfg.lambda_nw * loss_l2
 

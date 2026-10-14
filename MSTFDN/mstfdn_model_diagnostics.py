@@ -60,6 +60,16 @@ def _should_run(subject_id):
 # ---------------------------------------------------------------------------
 # Embedding / probability extraction
 # ---------------------------------------------------------------------------
+def _heads_to_embedding(heads):
+    """MSTFDN returns each SFEM's last-layer MHSA output as a LIST of per-head
+    tensors (B, CH, d_k). Average over the CH tokens and concatenate heads ->
+    (B, H*d_k) = (B, d_spatial), one vector per window."""
+    if torch.is_tensor(heads):
+        return heads.flatten(1)
+    return torch.cat([h.mean(dim=1) if h.dim() == 3 else h.flatten(1)
+                      for h in heads], dim=1)
+
+
 @torch.no_grad()
 def extract_embeddings(model, loader, device, max_batches=None):
     """One forward pass collecting, per window:
@@ -84,9 +94,9 @@ def extract_embeddings(model, loader, device, max_batches=None):
         # silently produce meaningless confidence/ECE numbers.
         probs = F.softmax(logits, dim=-1)
 
-        he_all.append(he.detach().float().cpu().numpy().reshape(len(labels), -1))
-        hf_all.append(hf.detach().float().cpu().numpy().reshape(len(labels), -1))
-        hef_all.append(hef.detach().float().cpu().numpy().reshape(len(labels), -1))
+        he_all.append(_heads_to_embedding(he).detach().float().cpu().numpy())
+        hf_all.append(_heads_to_embedding(hf).detach().float().cpu().numpy())
+        hef_all.append(_heads_to_embedding(hef).detach().float().cpu().numpy())
         prob_all.append(probs.detach().float().cpu().numpy())
         y_all.append(labels.numpy())
 
