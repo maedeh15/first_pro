@@ -139,8 +139,9 @@ def plot_embedding_space(train_d, test_d, subject_id, fold_idx, out_dir,
     Xte_s, yte_s = Xte[idx_te], test_d["y_true"][idx_te]
 
     X = np.concatenate([Xtr, Xte_s])
-    if X.shape[1] > 50:
-        X = PCA(n_components=50, random_state=0).fit_transform(X)
+    n_pc = min(50, X.shape[0], X.shape[1])
+    if X.shape[1] > n_pc:
+        X = PCA(n_components=n_pc, random_state=0).fit_transform(X)
 
     if method == "tsne":
         from sklearn.manifold import TSNE
