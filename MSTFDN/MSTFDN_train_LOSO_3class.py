@@ -355,10 +355,14 @@ def evaluate(model, loader, loss_fn, device) -> dict:
     }
 
 
+CLASS_NAMES = ["0-back", "2-back", "3-back"]
+
+
 def train_fold(model, cfg, train_loader, val_loader,
                checkpoint_path: str, device: str) -> dict:
     """
-    Train one LOSO fold. Returns best val metrics.
+    Train one LOSO fold. Logs every epoch in the same layout as the TSFNet
+    log. Returns {'best_epoch', 'stopped_epoch', 'early_stopped', 'best_val'}.
     """
     loss_fn   = MSTFDNLoss(cfg, model)
     optimizer = torch.optim.Adam(model.parameters(),
@@ -369,41 +373,96 @@ def train_fold(model, cfg, train_loader, val_loader,
         eta_min=cfg.lr * cfg.eta_min_ratio)
 
     best_val_loss = float('inf')
+    best_epoch    = 0
     best_metrics  = {}
     patience_cnt  = 0
+    early_stopped = False
+    epoch_no      = 0
 
     for epoch in range(cfg.max_epochs):
+        epoch_no = epoch + 1
         warmup_lr(optimizer, epoch, cfg)
-        train_metrics = train_one_epoch(model, train_loader, optimizer, loss_fn, device)
-        val_metrics   = evaluate(model, val_loader, loss_fn, device)
+        tr = train_one_epoch(model, train_loader, optimizer, loss_fn, device)
+        va = evaluate(model, val_loader, loss_fn, device)
 
         if epoch >= cfg.warmup_epochs:
             scheduler.step()
 
-        if epoch % 20 == 0:
-            lr_now = optimizer.param_groups[0]['lr']
-            log(f"    Ep{epoch:4d} | LR={lr_now:.2e} | "
-                f"Train Loss={train_metrics['loss']:.4f} Acc={train_metrics['acc']:.4f} | "
-                f"Val Loss={val_metrics['loss']:.4f} Acc={val_metrics['acc']:.4f} "
-                f"F1={val_metrics['f1']:.4f}")
+        log(f"[train] epoch {epoch_no} | train_loss={tr['loss']:.4f} "
+            f"train_acc={tr['acc']:.4f} | val_loss={va['loss']:.4f} "
+            f"val_acc={va['acc']:.4f} val_kappa={va['kappa']:.4f}")
 
-        # early stopping
-        if val_metrics['loss'] < best_val_loss:
-            best_val_loss = val_metrics['loss']
-            best_metrics  = val_metrics.copy()
+        # early stopping on validation loss
+        if va['loss'] < best_val_loss:
+            best_val_loss = va['loss']
+            best_metrics  = va.copy()
+            best_epoch    = epoch_no
             patience_cnt  = 0
             torch.save({
-                'epoch':       epoch,
+                'epoch':       epoch_no,
                 'model_state': model.state_dict(),
-                'val_metrics': val_metrics,
+                'val_metrics': va,
             }, checkpoint_path)
         else:
             patience_cnt += 1
             if patience_cnt >= cfg.patience:
-                log(f"    Early stop at epoch {epoch}")
+                early_stopped = True
+                log(f"[train] early stop at epoch {epoch_no} "
+                    f"(no improvement for {cfg.patience} epochs)")
                 break
 
-    return best_metrics
+    if not early_stopped:
+        log(f"[train] reached max_epochs={cfg.max_epochs} without early stop")
+    return {'best_epoch': best_epoch, 'stopped_epoch': epoch_no,
+            'early_stopped': early_stopped, 'best_val': best_metrics}
+
+
+@torch.no_grad()
+def modality_ablation(model, loader, device) -> dict:
+    """Test accuracy with ONE modality's input set to zero (inputs are
+    z-scored, so zero = the per-segment mean).
+
+    MSTFDN has a single classifier head on the fused features, so TSFNet's
+    per-branch head accuracies do not exist here. This zero-input ablation
+    is the closest MSTFDN-native measurement of how much each modality
+    contributes. It is a DIFFERENT quantity from TSFNet's branch accuracy
+    and is labelled as such in the log, CSV and JSON.
+      eeg   = EEG kept, fNIRS zeroed
+      fnirs = fNIRS kept, EEG zeroed
+      fusion = both inputs (= the normal test accuracy)
+    """
+    model.eval()
+    hits = {'eeg': 0, 'fnirs': 0, 'fusion': 0}
+    n = 0
+    for eeg, fnirs, labels in loader:
+        eeg, fnirs, labels = eeg.to(device), fnirs.to(device), labels.to(device)
+        hits['eeg']    += (model(eeg, torch.zeros_like(fnirs))[0].argmax(1) == labels).sum().item()
+        hits['fnirs']  += (model(torch.zeros_like(eeg), fnirs)[0].argmax(1) == labels).sum().item()
+        hits['fusion'] += (model(eeg, fnirs)[0].argmax(1) == labels).sum().item()
+        n += labels.size(0)
+    return {k: v / max(n, 1) for k, v in hits.items()}
+
+
+def confusion(y_true, y_pred, k=3):
+    cm = np.zeros((k, k), dtype=np.int64)
+    for t, p in zip(y_true, y_pred):
+        cm[int(t), int(p)] += 1
+    return cm
+
+
+def format_confusion(cm) -> str:
+    lines = ["            " + " ".join(f"pred {c:>7}" for c in CLASS_NAMES)]
+    for i, c in enumerate(CLASS_NAMES):
+        row_n = cm[i].sum()
+        rec = 100.0 * cm[i, i] / row_n if row_n else float('nan')
+        lines.append(f"true {c:>7} " + " ".join(f"{v:>12d}" for v in cm[i])
+                     + f"   | recall {rec:.1f}%")
+    return "\n".join(lines)
+
+
+def _pm(values):
+    v = np.asarray(values, dtype=float)
+    return float(np.mean(v)), float(np.std(v))
 
 
 # ===========================================================================
@@ -411,48 +470,43 @@ def train_fold(model, cfg, train_loader, val_loader,
 # ===========================================================================
 def run_loso_subject(subject_id: str, cfg: MSTFDNConfig,
                      out_dir: str, device: str,
-                     val_mode: str = "trial", seed: int = 42) -> list:
+                     val_mode: str = "trial", seed: int = 42,
+                     print_config: bool = False) -> dict:
     """
     Run 3-fold LOSO for one subject.
-    Returns list of 3 dicts (one per fold) with metrics.
+    Returns a subject summary dict (with a 'folds' list), or None if the
+    subject produced no folds.
     """
-    log(f"\n{'='*55}")
-    log(f"Subject: {subject_id}  |  LOSO (3 folds)")
-    log(f"{'='*55}")
+    dataset = MSTFDNSubjectDataset(data_dir=PREPROCESSED_PATH, subject_id=subject_id)
 
-    # Load dataset
-    dataset = MSTFDNSubjectDataset(
-        data_dir=PREPROCESSED_PATH,
-        subject_id=subject_id,
-    )
-
-    session_ids = dataset.session_ids   # numpy (N,) values 1/2/3
-    sessions    = [1, 2, 3]
+    session_ids  = dataset.session_ids   # numpy (N,) values 1/2/3
+    sessions     = [1, 2, 3]
     fold_results = []
+    subj_cm      = np.zeros((3, 3), dtype=np.int64)
+    t_subj       = time.time()
 
     for fold_idx, test_session in enumerate(sessions, 1):
-        log(f"\n  Fold {fold_idx}/3 — Test session: S{test_session} | "
-            f"Train sessions: {[s for s in sessions if s != test_session]}")
+        log(f"=== {subject_id} | test session {test_session} ===")
+        if print_config and fold_idx == 1:
+            log(f"[config] val_mode={val_mode!r} -- validation is carved from the two "
+                f"TRAINING sessions only; the test session is never used for model "
+                f"selection")
+            log(f"[config] early stopping on val_loss, patience={cfg.patience}, "
+                f"max_epochs={cfg.max_epochs}, warmup={cfg.warmup_epochs}, "
+                f"lr={cfg.lr}, weight_decay={cfg.weight_decay}, batch={cfg.batch_size}")
+            log(f"[config] no AdaBN / no test-time adaptation -- BatchNorm uses "
+                f"training-set running statistics at test time (paper protocol)")
+            log(f"[config] ablation = zero-input modality ablation (MSTFDN has one "
+                f"fused classifier, no per-branch heads); fusion weights = n/a "
+                f"(feature-level fusion, no Eq.4 gates)")
 
-        # Split indices by session
         test_idx  = np.where(session_ids == test_session)[0]
         train_idx = np.where(session_ids != test_session)[0]
-
-        log(f"  Train windows: {len(train_idx)} | Test windows: {len(test_idx)}")
-
         if len(train_idx) == 0 or len(test_idx) == 0:
-            log(f"  WARNING: empty split for fold {fold_idx}, skipping")
+            log(f"WARNING: empty split for fold {fold_idx}, skipping")
             continue
 
-        # ===== FIX 1 (CRITICAL -- DATA LEAK): build a REAL validation set =====
-        # Previously test_loader was passed to train_fold as the validation
-        # loader, so the best epoch was selected by evaluating on the TEST
-        # set every epoch and keeping the best one. The reported number was
-        # therefore "max test accuracy reached during training", not
-        # performance on unseen data -- systematically optimistic and NOT
-        # comparable to TSFNet's number (which uses a held-out validation
-        # set). Validation is now carved out of the TRAINING sessions only;
-        # the test session is never looked at until the final evaluation.
+        # Validation is carved out of the TRAINING sessions only.
         if val_mode == "trial":
             if dataset.trial_ids is None:
                 raise ValueError(
@@ -462,95 +516,91 @@ def run_loso_subject(subject_id: str, cfg: MSTFDNConfig,
             tv_trials = dataset.trial_ids[train_idx]
             tv_labels = dataset.labels.numpy()[train_idx]
             sub_tr, sub_va = trial_level_train_val_split(tv_trials, tv_labels, seed=seed)
-            log(f"  [val_mode] 'trial' -- {len(np.unique(tv_trials[sub_va]))} validation "
-                f"trial(s) held out from the pooled training sessions "
-                f"({len(sub_tr)} train / {len(sub_va)} val windows). Matches TSFNet's "
-                f"own split, so the comparison adds no extra differing variable.")
+            split_msg = (f"{len(np.unique(tv_trials[sub_va]))} val trial(s) held out "
+                         f"from the pooled training sessions")
         else:  # 'cross_session'
             tv_sessions = np.unique(session_ids[train_idx])
             val_session = int(tv_sessions.min())
             sub_tr, sub_va = cross_session_train_val_split(session_ids[train_idx], val_session)
-            log(f"  [val_mode] 'cross_session' -- validating on session {val_session}, "
-                f"training on {[int(s) for s in tv_sessions if s != val_session]} "
-                f"({len(sub_tr)} train / {len(sub_va)} val windows). Validation is itself "
-                f"cross-session, matching the test regime; training data is halved.")
+            split_msg = f"validating on whole session {val_session}"
 
         fit_idx = train_idx[sub_tr]
         val_idx = train_idx[sub_va]
+        log(f"[split] train={len(fit_idx)} val={len(val_idx)} test={len(test_idx)} "
+            f"windows ({split_msg})")
 
-        train_ds = Subset(dataset, fit_idx)
-        val_ds   = Subset(dataset, val_idx)
-        test_ds  = Subset(dataset, test_idx)
-
-        train_loader = DataLoader(train_ds, batch_size=cfg.batch_size,
+        train_loader = DataLoader(Subset(dataset, fit_idx), batch_size=cfg.batch_size,
                                   shuffle=True, num_workers=0, pin_memory=True)
-        val_loader   = DataLoader(val_ds, batch_size=cfg.batch_size,
+        val_loader   = DataLoader(Subset(dataset, val_idx), batch_size=cfg.batch_size,
                                   shuffle=False, num_workers=0, pin_memory=True)
-        test_loader  = DataLoader(test_ds, batch_size=cfg.batch_size,
+        test_loader  = DataLoader(Subset(dataset, test_idx), batch_size=cfg.batch_size,
                                   shuffle=False, num_workers=0, pin_memory=True)
 
         # Fresh model for each fold (paper: "trained from scratch")
-        model    = MSTFDN(cfg).to(device)
-        ckpt_path = os.path.join(out_dir, f"best_model_{subject_id}_fold{fold_idx}.pt")
+        model     = MSTFDN(cfg).to(device)
+        ckpt_path = os.path.join(out_dir, f"{subject_id}_session{test_session}_best.pt")
 
         t0 = time.time()
         # Model selection uses VALIDATION only...
-        train_fold(model, cfg, train_loader, val_loader, ckpt_path, device)
+        tr_info = train_fold(model, cfg, train_loader, val_loader, ckpt_path, device)
         # ...then the best checkpoint is scored ONCE on the untouched test set.
         # The checkpoint is a dict {'epoch','model_state','val_metrics'};
         # weights_only=False because val_metrics holds numpy scalars
         # (PyTorch >= 2.6 defaults to weights_only=True).
         ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
         model.load_state_dict(ckpt['model_state'])
-        log(f"  Loaded best checkpoint from epoch {ckpt['epoch']}")
-        best_metrics = evaluate(model, test_loader, MSTFDNLoss(cfg, model), device)
+        log(f"[select] using best checkpoint (epoch {ckpt['epoch']}, lowest val_loss) "
+            f"as the final model")
+        test_m  = evaluate(model, test_loader, MSTFDNLoss(cfg, model), device)
+        abl     = modality_ablation(model, test_loader, device)
         elapsed = (time.time() - t0) / 60
 
-        # FIX 6: PER-CLASS recall, so the TSFNet-format CSV can carry the
-        # recall_0back / recall_2back / recall_3back columns. The existing
-        # 'recall' field is the MACRO average and hides which class the model
-        # actually fails on -- on the TSFNet side the per-class pattern turned
-        # out to differ sharply between subjects (sometimes 2-back collapses
-        # into 3-back, sometimes 0-back collapses), and that comparison is
-        # impossible without these three numbers.
-        _yt = np.asarray(best_metrics.get('labels', []))
-        _yp = np.asarray(best_metrics.get('preds', []))
-        _per_class_recall = []
-        for _c in range(3):
-            _m = (_yt == _c)
-            _per_class_recall.append(
-                float((_yp[_m] == _c).mean() * 100.0) if _m.any() else float('nan'))
+        cm = confusion(test_m['labels'], test_m['preds'])
+        subj_cm += cm
+        per_class_recall = [float(cm[c, c] / cm[c].sum()) if cm[c].sum() else float('nan')
+                            for c in range(3)]
 
-        fold_results.append({
-            'subject':   subject_id,
-            'fold':      fold_idx,
-            'test_session': test_session,
+        log(f"-> test_acc={test_m['acc']:.4f} test_kappa={test_m['kappa']:.4f} "
+            f"| ablation (zero-input): eeg={abl['eeg']:.3f} fnirs={abl['fnirs']:.3f} "
+            f"fusion={abl['fusion']:.3f} | weights: n/a (feature-level fusion)")
+
+        fold_rec = {
+            'subject':        subject_id,
+            'fold':           fold_idx,
+            'test_session':   test_session,
             'train_sessions': str([s for s in sessions if s != test_session]),
-            'n_train':   len(fit_idx),
-            'n_val':     len(val_idx),
-            'n_test':    len(test_idx),
-            'accuracy':  round(best_metrics.get('acc', 0) * 100, 2),
-            'kappa':     round(best_metrics.get('kappa', 0), 4),   # FIX 2
-            'recall':    round(best_metrics.get('recall', 0) * 100, 2),
-            'precision': round(best_metrics.get('precision', 0) * 100, 2),
-            'f1':        round(best_metrics.get('f1', 0) * 100, 2),
-            'recall_0back': round(_per_class_recall[0], 2),
-            'recall_2back': round(_per_class_recall[1], 2),
-            'recall_3back': round(_per_class_recall[2], 2),
-            'time_min':  round(elapsed, 2),
-        })
+            'n_train':        len(fit_idx),
+            'n_val':          len(val_idx),
+            'n_test':         len(test_idx),
+            'best_epoch':     int(ckpt['epoch']),
+            'stopped_epoch':  tr_info['stopped_epoch'],
+            'early_stopped':  tr_info['early_stopped'],
+            'best_val_loss':  float(tr_info['best_val'].get('loss', float('nan'))),
+            'best_val_acc':   float(tr_info['best_val'].get('acc', float('nan'))),
+            'best_val_kappa': float(tr_info['best_val'].get('kappa', float('nan'))),
+            'accuracy':       round(test_m['acc'] * 100, 2),
+            'kappa':          round(test_m['kappa'], 4),
+            'recall':         round(test_m['recall'] * 100, 2),
+            'precision':      round(test_m['precision'] * 100, 2),
+            'f1':             round(test_m['f1'] * 100, 2),
+            'recall_0back':   round(per_class_recall[0] * 100, 2),
+            'recall_2back':   round(per_class_recall[1] * 100, 2),
+            'recall_3back':   round(per_class_recall[2] * 100, 2),
+            'ablation_eeg_acc':    round(abl['eeg'], 4),
+            'ablation_fnirs_acc':  round(abl['fnirs'], 4),
+            'ablation_fusion_acc': round(abl['fusion'], 4),
+            'time_min':       round(elapsed, 2),
+        }
+        fold_results.append(fold_rec)
 
-        log(f"  Fold {fold_idx} done in {elapsed:.1f} min | "
-            f"Acc={best_metrics.get('acc',0)*100:.2f}% "
-            f"Kappa={best_metrics.get('kappa',0):.4f} "
-            f"F1={best_metrics.get('f1',0)*100:.2f}%")
+        res_path = os.path.join(out_dir, f"results_{subject_id}_session{test_session}.json")
+        with open(res_path, "w", encoding="utf-8") as f:
+            json.dump({**fold_rec, 'confusion_matrix': cm.tolist(),
+                       'class_names': CLASS_NAMES}, f, indent=2)
+        log(f"results saved to: {res_path}")
+        log(f"checkpoint saved to: {ckpt_path}")
 
         # ===== diagnostics + XAI, whitelist-gated (same design as TSFNet) =====
-        # Runs only for the handful of subjects in DIAGNOSTIC_SUBJECTS, since
-        # rendering these for 26 subjects x 3 folds is slow and produces files
-        # nobody reads. Both are wrapped so a plotting failure can never kill a
-        # multi-hour training run, and ImportError is tolerated so the trainer
-        # still works if these optional modules are absent.
         try:
             from mstfdn_model_diagnostics import run_fold_diagnostics, _should_run
             if _should_run(subject_id):
@@ -567,15 +617,48 @@ def run_loso_subject(subject_id: str, cfg: MSTFDNConfig,
         except ImportError:
             pass
         except Exception as _diag_exc:
-            log(f"  [diagnostics] WARNING: skipped for {subject_id} fold {fold_idx}: {_diag_exc}")
+            log(f"[diagnostics] WARNING: skipped for {subject_id} fold {fold_idx}: {_diag_exc}")
 
-        # Free memory between folds
-        del model, train_ds, val_ds, test_ds, train_loader, val_loader, test_loader
+        del model, train_loader, val_loader, test_loader
         gc.collect()
         if device == 'cuda':
             torch.cuda.empty_cache()
 
-    return fold_results
+    if not fold_results:
+        return None
+
+    acc_m, acc_s = _pm([r['accuracy'] / 100 for r in fold_results])
+    kap_m, kap_s = _pm([r['kappa'] for r in fold_results])
+    abl_stats = {k: _pm([r[f'ablation_{k}_acc'] for r in fold_results])
+                 for k in ('eeg', 'fnirs', 'fusion')}
+
+    log(f"{subject_id} FINAL: acc={acc_m:.4f}+-{acc_s:.4f} kappa={kap_m:.4f}+-{kap_s:.4f}")
+    log(f"{subject_id} ABLATION ACCURACY (zero-input, mean over {len(fold_results)} folds): "
+        + " ".join(f"{k}={m:.4f}+-{s:.4f}" for k, (m, s) in abl_stats.items()))
+    log(f"{subject_id} LEARNED FUSION WEIGHTS: n/a (MSTFDN fuses at feature level)")
+
+    summary = {
+        'subject_id': subject_id,
+        'mean_acc': acc_m, 'std_acc': acc_s,
+        'mean_kappa': kap_m, 'std_kappa': kap_s,
+        'ablation': {k: {'mean': m, 'std': s} for k, (m, s) in abl_stats.items()},
+        'confusion_matrix': subj_cm.tolist(),
+        'class_names': CLASS_NAMES,
+        'elapsed_min': (time.time() - t_subj) / 60,
+        'folds': fold_results,
+    }
+    sum_path = os.path.join(out_dir, f"cross_session_{subject_id}_summary.json")
+    with open(sum_path, "w", encoding="utf-8") as f:
+        json.dump(summary, f, indent=2)
+    log(f"Full cross-session summary saved to: {sum_path}")
+
+    log(f"[{subject_id}] DONE in {summary['elapsed_min']:.1f} min | "
+        f"acc={acc_m:.4f}+-{acc_s:.4f} kappa={kap_m:.4f}+-{kap_s:.4f} | "
+        f"ablation acc: eeg={abl_stats['eeg'][0]:.4f} fnirs={abl_stats['fnirs'][0]:.4f} "
+        f"fusion={abl_stats['fusion'][0]:.4f} | fusion weights: n/a")
+    log(f"confusion matrix (summed over {len(fold_results)} session-folds):\n"
+        + format_confusion(subj_cm))
+    return summary
 
 
 # ===========================================================================
@@ -584,7 +667,6 @@ def run_loso_subject(subject_id: str, cfg: MSTFDNConfig,
 def main():
     global LOG_FILE
 
-    # ===== FIX 3: reproducible seed control, matching TSFNet's own protocol =====
     import argparse, random
     ap = argparse.ArgumentParser()
     ap.add_argument("--seed", type=int, default=42,
@@ -595,11 +677,8 @@ def main():
                     help="How the validation set is carved out of the two TRAINING "
                          "sessions (the test session is never touched either way). "
                          "'trial' (default): hold out ~20%% of TRIALS pooled across both "
-                         "training sessions -- identical in kind to TSFNet's own split, so "
-                         "a TSFNet-vs-MSTFDN comparison adds no extra differing variable. "
-                         "'cross_session': hold out one WHOLE training session -> ~3x more "
-                         "validation trials AND cross-session validation matching the test "
-                         "regime, at the cost of halving the training data.")
+                         "training sessions -- identical in kind to TSFNet's own split. "
+                         "'cross_session': hold out one WHOLE training session.")
     args = ap.parse_args()
 
     SEED = args.seed
@@ -610,13 +689,16 @@ def main():
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-    # FIX 5 support: results of different configs must never share a folder.
+    # Results of different configs must never share a folder.
     out_root = os.path.join(OUTPUT_PATH, f"seed{SEED}_val{VAL_MODE}")
     os.makedirs(out_root, exist_ok=True)
     LOG_FILE = os.path.join(out_root, "training_log.txt")
+    run_tag = f"MSTFDN_LOSO_3CLASS_PAPER_EXACT_VAL{VAL_MODE.upper()}_SEED{SEED}"
+    stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    log("=" * 55)
-    log("MSTFDN — Cross-Session LOSO Training")
+    log(f"===== CrashSafeLogger started [{run_tag}] "
+        f"{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} =====")
+    log("MSTFDN -- Cross-Session LOSO Training (3-class N-back)")
     log(f"Device : {DEVICE}")
     if DEVICE == 'cuda':
         log(f"GPU    : {torch.cuda.get_device_name(0)}")
@@ -625,163 +707,161 @@ def main():
     log(f"Preprocessed data: {PREPROCESSED_PATH}")
     log(f"Output: {out_root}")
     log(f"[SEED CONTROL] seed={SEED} (python/numpy/torch seeded, cuDNN deterministic)")
-    log(f"[CONFIG] val_mode={VAL_MODE!r}  "
-        f"(validation carved from TRAINING sessions only -- the test session is never "
-        f"used for model selection; this is the fix for the earlier test-as-validation leak)")
-    log("=" * 55)
 
     cfg = get_config()
-    all_fold_results = []
-
+    summaries, failed = [], []
     total_t0 = time.time()
+    n_sub = len(ALL_SUBJECTS)
 
-    for subject_id in ALL_SUBJECTS:
+    for i, subject_id in enumerate(ALL_SUBJECTS, 1):
+        log("=" * 70)
+        log(f"[{i}/{n_sub}] {subject_id} ({time.time() - total_t0:.1f}s elapsed so far)")
         sub_dir = os.path.join(PREPROCESSED_PATH, subject_id)
         if not os.path.exists(sub_dir):
             log(f"SKIPPED {subject_id}: data not found")
+            failed.append((subject_id, "data not found"))
             continue
-
         try:
-            fold_results = run_loso_subject(subject_id, cfg, out_root, DEVICE,
-                                            val_mode=VAL_MODE, seed=SEED)
-            all_fold_results.extend(fold_results)
-
-            # per-subject average across 3 folds
-            if fold_results:
-                avg_acc  = np.mean([r['accuracy']  for r in fold_results])
-                avg_rec  = np.mean([r['recall']    for r in fold_results])
-                avg_prec = np.mean([r['precision'] for r in fold_results])
-                avg_f1   = np.mean([r['f1']        for r in fold_results])
-                log(f"\n  {subject_id} LOSO average → "
-                    f"Acc={avg_acc:.2f}% Recall={avg_rec:.2f}% "
-                    f"Precision={avg_prec:.2f}% F1={avg_f1:.2f}%")
-
+            s = run_loso_subject(subject_id, cfg, out_root, DEVICE,
+                                 val_mode=VAL_MODE, seed=SEED, print_config=(i == 1))
+            if s is None:
+                failed.append((subject_id, "no folds"))
+            else:
+                summaries.append(s)
         except Exception as e:
             log(f"ERROR {subject_id}: {e}")
             import traceback; traceback.print_exc()
-
+            failed.append((subject_id, str(e)))
         finally:
             gc.collect()
             if DEVICE == 'cuda':
                 torch.cuda.empty_cache()
 
-    # ── Save results ──────────────────────────────────────────────────────
-    if not all_fold_results:
+    log("=" * 70)
+    if not summaries:
         log("No results to save.")
+        log(f"===== CrashSafeLogger stopped [{run_tag}] "
+            f"{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} =====")
         return
 
-    df_folds = pd.DataFrame(all_fold_results)
-    df_folds.to_csv(os.path.join(out_root, "results_per_subject.csv"), index=False)
-    log(f"\nSaved: results_per_subject.csv")
+    log(f"BASELINE RUN COMPLETE: {len(summaries)}/{n_sub} subjects finished successfully")
+    for sid, why in failed:
+        log(f"  FAILED {sid}: {why}")
 
-    # Per-subject summary (mean ± std across 3 folds)
+    accs   = [s['mean_acc'] for s in summaries]
+    kappas = [s['mean_kappa'] for s in summaries]
+    log(f"Grand mean accuracy across subjects: {np.mean(accs):.4f} (+-{np.std(accs):.4f})")
+    log(f"Grand mean kappa across subjects: {np.mean(kappas):.4f} (+-{np.std(kappas):.4f})")
+    log("Grand mean ablation accuracy (zero-input): " + " ".join(
+        f"{k}={np.mean([s['ablation'][k]['mean'] for s in summaries]):.4f}"
+        for k in ('eeg', 'fnirs', 'fusion')))
+    log("Grand mean learned fusion weights: n/a (feature-level fusion)")
+
+    grand_cm = sum(np.asarray(s['confusion_matrix']) for s in summaries)
+    n_win = int(grand_cm.sum())
+    n_err = n_win - int(np.trace(grand_cm))
+    c23 = int(grand_cm[1, 2] + grand_cm[2, 1])
+    log("=" * 70)
+    log(f"GRAND CONFUSION MATRIX (summed over {len(summaries)} subjects x 3 folds)\n"
+        + format_confusion(grand_cm))
+    log(f"overall accuracy from matrix: {100.0 * np.trace(grand_cm) / max(n_win, 1):.2f}% "
+        f"(n={n_win} windows)")
+    log(f"2-back <-> 3-back confusions: {c23} of {n_err} total errors "
+        f"({100.0 * c23 / max(n_err, 1):.1f}% of all errors)")
+
+    log("=" * 70)
+    log(f"PER-SUBJECT RESULTS ({len(summaries)} completed / {n_sub} total)")
+    for s in summaries:
+        a = s['ablation']
+        log(f"{s['subject_id']}: acc={s['mean_acc']:.4f} +- {s['std_acc']:.4f} "
+            f"kappa={s['mean_kappa']:.4f} +- {s['std_kappa']:.4f} | ablation acc: "
+            f"eeg={a['eeg']['mean']:.4f} fnirs={a['fnirs']['mean']:.4f} "
+            f"fusion={a['fusion']['mean']:.4f} | fusion weights: n/a")
+
+    # ── Save results ──────────────────────────────────────────────────────
+    all_folds = [r for s in summaries for r in s['folds']]
+    df_folds = pd.DataFrame(all_folds)
+    p_folds = os.path.join(out_root, "results_per_subject.csv")
+    df_folds.to_csv(p_folds, index=False)
+
     summary_rows = []
     for sub in df_folds['subject'].unique():
         sub_df = df_folds[df_folds['subject'] == sub]
         summary_rows.append({
-            'subject':       sub,
-            'acc_mean':      round(sub_df['accuracy'].mean(), 2),
-            'acc_std':       round(sub_df['accuracy'].std(), 2),
-            'recall_mean':   round(sub_df['recall'].mean(), 2),
-            'recall_std':    round(sub_df['recall'].std(), 2),
-            'precision_mean':round(sub_df['precision'].mean(), 2),
-            'precision_std': round(sub_df['precision'].std(), 2),
-            'f1_mean':       round(sub_df['f1'].mean(), 2),
-            'f1_std':        round(sub_df['f1'].std(), 2),
-            'kappa_mean':    round(sub_df['kappa'].mean(), 4),   # FIX 2
-            'kappa_std':     round(sub_df['kappa'].std(), 4),
+            'subject':        sub,
+            'acc_mean':       round(sub_df['accuracy'].mean(), 2),
+            'acc_std':        round(sub_df['accuracy'].std(), 2),
+            'recall_mean':    round(sub_df['recall'].mean(), 2),
+            'recall_std':     round(sub_df['recall'].std(), 2),
+            'precision_mean': round(sub_df['precision'].mean(), 2),
+            'precision_std':  round(sub_df['precision'].std(), 2),
+            'f1_mean':        round(sub_df['f1'].mean(), 2),
+            'f1_std':         round(sub_df['f1'].std(), 2),
+            'kappa_mean':     round(sub_df['kappa'].mean(), 4),
+            'kappa_std':      round(sub_df['kappa'].std(), 4),
         })
-
     df_summary = pd.DataFrame(summary_rows)
-
-    # All-subject average (final reported number — paper Table 2)
-    overall = {
-        'subject':       'ALL_SUBJECTS_AVG',
-        'acc_mean':      round(df_summary['acc_mean'].mean(), 2),
-        'acc_std':       round(df_summary['acc_mean'].std(), 2),
-        'recall_mean':   round(df_summary['recall_mean'].mean(), 2),
-        'recall_std':    round(df_summary['recall_mean'].std(), 2),
-        'precision_mean':round(df_summary['precision_mean'].mean(), 2),
-        'precision_std': round(df_summary['precision_mean'].std(), 2),
-        'f1_mean':       round(df_summary['f1_mean'].mean(), 2),
-        'f1_std':        round(df_summary['f1_mean'].std(), 2),
-        'kappa_mean':    round(df_summary['kappa_mean'].mean(), 4),
-        'kappa_std':     round(df_summary['kappa_mean'].std(), 4),
-    }
+    overall = {'subject': 'ALL_SUBJECTS_AVG'}
+    for col in ('acc', 'recall', 'precision', 'f1', 'kappa'):
+        nd = 4 if col == 'kappa' else 2
+        overall[f'{col}_mean'] = round(df_summary[f'{col}_mean'].mean(), nd)
+        overall[f'{col}_std']  = round(df_summary[f'{col}_mean'].std(), nd)
     df_summary = pd.concat([df_summary, pd.DataFrame([overall])], ignore_index=True)
-    df_summary.to_csv(os.path.join(out_root, "results_summary.csv"), index=False)
-    log(f"Saved: results_summary.csv")
+    p_summary = os.path.join(out_root, "results_summary.csv")
+    df_summary.to_csv(p_summary, index=False)
 
-    # ===== FIX 5: emit a CSV in TSFNet's OWN format =====
-    # retroactive_significance_check.py / ensemble tooling expect exactly the
-    # columns subject_id, mean_acc, mean_kappa, with accuracy as a FRACTION
-    # (0-1), not a percentage. Writing this file means MSTFDN results can be
-    # fed straight into the same paired Wilcoxon test used for every TSFNet
-    # comparison -- no manual reformatting, no risk of a unit mismatch
-    # (percent vs fraction) silently corrupting the statistics.
-    # FIX 6: emit the FULL 17-column TSFNet contract, not just three columns.
-    #
-    # Three of those columns cannot be filled for this architecture, and are
-    # written EMPTY rather than dropped (project rule 7: a parallel function
-    # must keep the consumer's key set, putting None where a value is
-    # meaningless, instead of silently removing the key):
-    #
-    #   eeg_only_acc / fnirs_only_acc / fusion_only_acc
-    #       TSFNet has THREE separate classifier heads (y_eeg, y_fnirs,
-    #       y_fusion), so each branch has its own accuracy and an oracle
-    #       accuracy can be computed over them. MSTFDN's forward returns
-    #       (logits, he, hf, hef) where he/hf/hef are hidden FEATURE
-    #       representations feeding a SINGLE classifier -- there is no
-    #       per-branch prediction to score. Filling these with a proxy
-    #       (e.g. a linear probe trained post-hoc on he/hf) would produce a
-    #       different quantity from TSFNet's and make the comparison
-    #       misleading, so they are deliberately left blank.
-    #
-    #   w_eeg / w_fusion / w_fnirs
-    #       Decision-level fusion weights are specific to TSFNet's Eq.4
-    #       combination. MSTFDN fuses at the FEATURE level, so no equivalent
-    #       scalar exists.
-    #
-    # Consequence to state in the thesis: the oracle-accuracy and
-    # branch-agreement analyses reported for TSFNet cannot be replicated for
-    # MSTFDN. Accuracy, kappa and the per-class recalls ARE fully comparable.
+    # TSFNet-format CSV (same 17 columns, accuracy as a FRACTION) so MSTFDN
+    # results feed straight into the same paired Wilcoxon test.
+    # eeg/fnirs/fusion_only_acc and w_* are left EMPTY on purpose: MSTFDN has
+    # no per-branch heads and no Eq.4 gates. The zero-input ablation is a
+    # different quantity and lives in its own columns in
+    # results_per_subject.csv and the JSON, never in TSFNet's columns.
     tsfnet_rows = []
-    for sub in df_folds['subject'].unique():
-        sub_df = df_folds[df_folds['subject'] == sub]
+    for s in summaries:
+        f = pd.DataFrame(s['folds'])
         tsfnet_rows.append({
-            'subject_id':      sub,
+            'subject_id':      s['subject_id'],
             'status':          'ok',
-            'mean_acc':        sub_df['accuracy'].mean() / 100.0,   # percent -> fraction
-            'std_acc':         sub_df['accuracy'].std() / 100.0,
-            'mean_kappa':      sub_df['kappa'].mean(),
-            'std_kappa':       sub_df['kappa'].std(),
-            'eeg_only_acc':    '',   # architecturally unavailable -- see note above
-            'fnirs_only_acc':  '',   # architecturally unavailable
-            'fusion_only_acc': '',   # architecturally unavailable
-            'w_eeg':           '',   # feature-level fusion: no decision weight
+            'mean_acc':        s['mean_acc'],
+            'std_acc':         s['std_acc'],
+            'mean_kappa':      s['mean_kappa'],
+            'std_kappa':       s['std_kappa'],
+            'eeg_only_acc':    '',
+            'fnirs_only_acc':  '',
+            'fusion_only_acc': '',
+            'w_eeg':           '',
             'w_fusion':        '',
             'w_fnirs':         '',
-            'recall_0back':    sub_df['recall_0back'].mean() / 100.0,
-            'recall_2back':    sub_df['recall_2back'].mean() / 100.0,
-            'recall_3back':    sub_df['recall_3back'].mean() / 100.0,
-            'elapsed_min':     sub_df['time_min'].sum(),
+            'recall_0back':    f['recall_0back'].mean() / 100.0,
+            'recall_2back':    f['recall_2back'].mean() / 100.0,
+            'recall_3back':    f['recall_3back'].mean() / 100.0,
+            'elapsed_min':     s['elapsed_min'],
             'error':           '',
         })
-    compat_path = os.path.join(
-        out_root, f"baseline_all_subjects_MSTFDN_seed{SEED}_val{VAL_MODE}.csv")
-    pd.DataFrame(tsfnet_rows).to_csv(compat_path, index=False)
-    log(f"Saved (TSFNet-compatible, for direct Wilcoxon comparison): "
-        f"{os.path.basename(compat_path)}")
+    for sid, why in failed:
+        tsfnet_rows.append({'subject_id': sid, 'status': 'failed', 'error': why})
+    base = f"baseline_all_subjects_{stamp}_MSTFDN_seed{SEED}_val{VAL_MODE}"
+    p_csv  = os.path.join(out_root, base + ".csv")
+    p_json = os.path.join(out_root, base + ".json")
+    pd.DataFrame(tsfnet_rows).to_csv(p_csv, index=False)
+    with open(p_json, "w", encoding="utf-8") as fh:
+        json.dump({
+            'run_tag': run_tag, 'seed': SEED, 'val_mode': VAL_MODE,
+            'n_completed': len(summaries), 'n_total': n_sub,
+            'failed': [{'subject_id': a, 'error': b} for a, b in failed],
+            'grand_mean_acc': float(np.mean(accs)), 'grand_std_acc': float(np.std(accs)),
+            'grand_mean_kappa': float(np.mean(kappas)), 'grand_std_kappa': float(np.std(kappas)),
+            'grand_confusion_matrix': grand_cm.tolist(), 'class_names': CLASS_NAMES,
+            'subjects': summaries,
+        }, fh, indent=2)
 
-    total_elapsed = (time.time() - total_t0) / 60
-    log(f"\n{'='*55}")
-    log(f"LOSO FINISHED in {total_elapsed:.1f} min")
-    log(f"Final — Acc: {overall['acc_mean']} ± {overall['acc_std']}%  "
-        f"F1: {overall['f1_mean']} ± {overall['f1_std']}%")
-    log(f"{'='*55}")
-
-    print("\n=== FINAL RESULTS ===")
-    print(df_summary.to_string(index=False))
+    log(f"Full results: {p_csv}")
+    log(f"              {p_json}")
+    log(f"              {p_folds}")
+    log(f"              {p_summary}")
+    log(f"Total time: {(time.time() - total_t0) / 60:.1f} min")
+    log(f"===== CrashSafeLogger stopped [{run_tag}] "
+        f"{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} =====")
 
 
 if __name__ == "__main__":
