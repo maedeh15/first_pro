@@ -141,8 +141,9 @@ def extract_windows_channel_space(eeg_full, sfreq_eeg, events, fnirs_ch, fnirs_e
         fnirs_times = times_ms[order] / 1000.0
         f_cls = np.array([T.FNIRS_TRIAL_LABEL_MAP[c] for c in codes[order]])
         e_cls = np.array([T.EEG_TRIAL_LABEL_MAP.get(int(ev[2]), -1) for ev in target])
-        n_common = min(len(f_cls), len(e_cls))
-        if len(fnirs_times) == len(target) and np.array_equal(f_cls[:n_common], e_cls[:n_common]):
+        # Same two-way test as TSFNet: equal trial counts AND identical class
+        # sequence (equal lengths, so a plain array_equal is enough).
+        if len(f_cls) == len(e_cls) and np.array_equal(f_cls, e_cls):
             sync_ok = True
         else:
             log(f"  {subject_id}: WARNING - fNIRS/EEG trial markers mismatch, "
@@ -214,9 +215,17 @@ def extract_windows_channel_space(eeg_full, sfreq_eeg, events, fnirs_ch, fnirs_e
 def per_session_normalization(E, O, R, sess, subject_id):
     """Channel-space equivalent of T.apply_per_session_normalization: within
     each session, per channel (and per chromophore for fNIRS), over all
-    windows and time points of that session. Like TSFNet's, it uses the
-    held-out session's own UNLABELLED statistics (transductive) -- keep it
-    identical to TSFNet for the comparison, and disclose it in the thesis."""
+    windows and time points of that session -- the same formula and axes
+    TSFNet applies to its channel-space copy (eeg_channel_space_windows,
+    axes (0, 2)); its 16x16 grid gets the analogous per-pixel version.
+
+    TRANSDUCTIVE: the held-out session is normalised with its OWN unlabelled
+    statistics BEFORE any training. This happens here, at preprocessing time,
+    so the train-fold-only ChannelNormalizer in mgfnet_train.py does NOT make
+    the MGFNet pipeline inductive on this data: test-session statistics have
+    already entered the inputs. No labels and no cross-session information
+    are used. Kept identical to TSFNet for the comparison; state in the thesis
+    that BOTH models are transductive here (TSFNet additionally uses AdaBN)."""
     E, O, R = E.copy(), O.copy(), R.copy()
     for s in np.unique(sess):
         m = sess == s
@@ -237,9 +246,15 @@ def per_session_normalization(E, O, R, sess, subject_id):
 def check_against_tsfnet(subject_id, out_dir, tsfnet_root):
     """Verifies the windows line up 1:1 with the TSFNet .npy files: same N,
     same labels/sessions/trials in the same order, and (if TSFNet saved its
-    channel-space EEG windows, ENABLE_EEG_CHANNEL_SPACE) the same EEG values --
-    expected max |diff| = 0.0, since both arrays go through the same
-    per-session normalisation."""
+    channel-space EEG windows, ENABLE_EEG_CHANNEL_SPACE) the same EEG values.
+
+    The EEG comparison is against TSFNet's CHANNEL-SPACE copy
+    ({sid}_eeg_channel_windows.npy), not its 16x16 grid. TSFNet normalises
+    that copy per session with the same per-channel formula as here (axes
+    (0, 2), +1e-8), so the expected max |diff| is ~0 (float32 rounding,
+    < 1e-4). The grid tensor is normalised per interpolated PIXEL and is not
+    comparable value-for-value -- only the windows/labels/order are. A
+    non-zero diff on the channel copy is therefore worth investigating."""
     tdir = os.path.join(tsfnet_root, subject_id)
     res = {"tsfnet_dir": tdir}
     try:
@@ -251,8 +266,16 @@ def check_against_tsfnet(subject_id, out_dir, tsfnet_root):
         if os.path.exists(ch_path):
             a = np.load(os.path.join(out_dir, f"{subject_id}_mgf_eeg.npy"), mmap_mode="r")
             b = np.load(ch_path, mmap_mode="r")
-            res["eeg_values_max_abs_diff"] = (float(np.max(np.abs(np.asarray(a[:50]) - np.asarray(b[:50]))))
-                                             if a.shape == b.shape else f"shape {a.shape} vs {b.shape}")
+            if a.shape == b.shape:
+                d = max(float(np.max(np.abs(np.asarray(a[i:i + 64], np.float64) - np.asarray(b[i:i + 64]))))
+                        for i in range(0, a.shape[0], 64))
+                res["eeg_values_max_abs_diff"] = d
+                res["eeg_values_match"] = bool(d < 1e-4)
+            else:
+                res["eeg_values_max_abs_diff"] = f"shape {a.shape} vs {b.shape}"
+                res["eeg_values_match"] = False
+        else:
+            res["eeg_values_max_abs_diff"] = "n/a (TSFNet channel-space windows not saved)"
         res["ok"] = all(res[k] for k in ("labels", "session_ids", "trial_ids"))
     except Exception as e:
         res.update({"ok": False, "error": str(e)})
@@ -336,6 +359,9 @@ def main():
                     help="TSFNet output root (folder holding VPxxx/): verify the windows match "
                          "1:1. Without a value, uses the TSFNet script's OUTPUT_PATH.")
     a = ap.parse_args()
+    if getattr(T, "ENABLE_AUTOREJECT_WINDOWS", False):
+        sys.exit("ERROR: ENABLE_AUTOREJECT_WINDOWS=True in the TSFNet script. AutoReject drops/repairs "
+                 "windows there and is NOT reproduced here, so the windows would no longer match.")
     if a.data_root:
         BASE_DATASET_PATH = a.data_root
         T.BASE_DATASET_PATH = a.data_root        # T.load_fnirs_data reads its own global
@@ -351,6 +377,9 @@ def main():
         f"fNIRS bandpass={T.ENABLE_FNIRS_BANDPASS}, baseline [{T.BASELINE_TMIN},{T.BASELINE_TMAX}] s | "
         f"window {T.WINDOW_LEN_EEG} s step {T.WINDOW_STEP} s slide [{T.SLIDE_TMIN},{T.SLIDE_TMAX}] s | "
         f"per-session norm={T.ENABLE_PER_SESSION_NORM}")
+    if T.ENABLE_PER_SESSION_NORM:
+        log("NOTE: per-session normalisation is TRANSDUCTIVE (held-out session normalised with its own "
+            "unlabelled statistics at preprocessing time) -- identical to TSFNet; disclose for both models.")
     results = []
     for n in SUBJECTS:
         try:
@@ -367,6 +396,10 @@ def main():
         mism = [r["subject_id"] for r in ok if not r.get("tsfnet_check", {}).get("ok")]
         log(f"TSFNet window check: {len(ok) - len(mism)}/{len(ok)} match" +
             (f"; MISMATCH: {mism}" if mism else ""))
+        diffs = [r["tsfnet_check"]["eeg_values_max_abs_diff"] for r in ok
+                 if isinstance(r.get("tsfnet_check", {}).get("eeg_values_max_abs_diff"), float)]
+        if diffs:
+            log(f"TSFNet EEG channel-space values: max |diff| over {len(diffs)} subject(s) = {max(diffs):.3g}")
     with open(os.path.join(OUTPUT_PATH, "preprocessing_summary.json"), "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2)
 
