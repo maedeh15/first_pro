@@ -671,6 +671,11 @@ def process_subject(subject_id):
     t0 = time.time()
     log_message(f"START processing {subject_id}")
 
+    done_file = os.path.join(OUTPUT_PATH, subject_id, f"{subject_id}_labels.npy")
+    if os.path.exists(done_file):
+        log_message(f"SKIPPED {subject_id}: already processed ({done_file})")
+        return
+
     eeg_folder = os.path.join(BASE_DATASET_PATH, f"{subject_id}-EEG")
     if not os.path.exists(eeg_folder):
         log_message(f"SKIPPED {subject_id}: EEG folder not found")
@@ -772,6 +777,9 @@ def process_subject(subject_id):
         log_message(f"ERROR processing {subject_id} after {elapsed:.1f} min: {str(e)}")
         import traceback
         traceback.print_exc()
+        # Re-raise so the parallel wrapper reports this subject as [ERR]
+        # instead of a misleading [OK].
+        raise
 
     finally:
         del raw_eeg
