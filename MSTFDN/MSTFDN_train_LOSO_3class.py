@@ -477,6 +477,17 @@ def run_loso_subject(subject_id: str, cfg: MSTFDNConfig,
     Returns a subject summary dict (with a 'folds' list), or None if the
     subject produced no folds.
     """
+    # RESUME (subject level): a finished subject already has its summary on
+    # disk -- reuse it instead of retraining (crash / restart safety).
+    sum_path = os.path.join(out_dir, f"cross_session_{subject_id}_summary.json")
+    if os.path.exists(sum_path):
+        with open(sum_path, encoding="utf-8") as f:
+            summary = json.load(f)
+        log(f"[resume] {subject_id} already finished -- loaded {sum_path} "
+            f"(acc={summary['mean_acc']:.4f}+-{summary['std_acc']:.4f} "
+            f"kappa={summary['mean_kappa']:.4f}+-{summary['std_kappa']:.4f})")
+        return summary
+
     dataset = MSTFDNSubjectDataset(data_dir=PREPROCESSED_PATH, subject_id=subject_id)
 
     session_ids  = dataset.session_ids   # numpy (N,) values 1/2/3
@@ -487,6 +498,20 @@ def run_loso_subject(subject_id: str, cfg: MSTFDNConfig,
 
     for fold_idx, test_session in enumerate(sessions, 1):
         log(f"=== {subject_id} | test session {test_session} ===")
+
+        # RESUME (fold level): a finished fold has its results json AND its
+        # best checkpoint on disk -- reuse it instead of retraining.
+        res_path  = os.path.join(out_dir, f"results_{subject_id}_session{test_session}.json")
+        ckpt_path = os.path.join(out_dir, f"{subject_id}_session{test_session}_best.pt")
+        if os.path.exists(res_path) and os.path.exists(ckpt_path):
+            with open(res_path, encoding="utf-8") as f:
+                rec = json.load(f)
+            subj_cm += np.asarray(rec.pop('confusion_matrix'), dtype=np.int64)
+            rec.pop('class_names', None)
+            fold_results.append(rec)
+            log(f"[resume] fold already finished -- loaded {res_path} "
+                f"(test_acc={rec['accuracy'] / 100:.4f} test_kappa={rec['kappa']:.4f})")
+            continue
         if print_config and fold_idx == 1:
             log(f"[config] val_mode={val_mode!r} -- validation is carved from the two "
                 f"TRAINING sessions only; the test session is never used for model "
@@ -538,7 +563,6 @@ def run_loso_subject(subject_id: str, cfg: MSTFDNConfig,
 
         # Fresh model for each fold (paper: "trained from scratch")
         model     = MSTFDN(cfg).to(device)
-        ckpt_path = os.path.join(out_dir, f"{subject_id}_session{test_session}_best.pt")
 
         t0 = time.time()
         # Model selection uses VALIDATION only...
@@ -593,10 +617,10 @@ def run_loso_subject(subject_id: str, cfg: MSTFDNConfig,
         }
         fold_results.append(fold_rec)
 
-        res_path = os.path.join(out_dir, f"results_{subject_id}_session{test_session}.json")
-        with open(res_path, "w", encoding="utf-8") as f:
+        with open(res_path + ".tmp", "w", encoding="utf-8") as f:
             json.dump({**fold_rec, 'confusion_matrix': cm.tolist(),
                        'class_names': CLASS_NAMES}, f, indent=2)
+        os.replace(res_path + ".tmp", res_path)
         log(f"results saved to: {res_path}")
         log(f"checkpoint saved to: {ckpt_path}")
 
@@ -647,9 +671,9 @@ def run_loso_subject(subject_id: str, cfg: MSTFDNConfig,
         'elapsed_min': (time.time() - t_subj) / 60,
         'folds': fold_results,
     }
-    sum_path = os.path.join(out_dir, f"cross_session_{subject_id}_summary.json")
-    with open(sum_path, "w", encoding="utf-8") as f:
+    with open(sum_path + ".tmp", "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)
+    os.replace(sum_path + ".tmp", sum_path)
     log(f"Full cross-session summary saved to: {sum_path}")
 
     log(f"[{subject_id}] DONE in {summary['elapsed_min']:.1f} min | "
@@ -707,6 +731,8 @@ def main():
     log(f"Preprocessed data: {PREPROCESSED_PATH}")
     log(f"Output: {out_root}")
     log(f"[SEED CONTROL] seed={SEED} (python/numpy/torch seeded, cuDNN deterministic)")
+    log("[resume] finished subjects/folds found in the output folder are loaded, "
+        "not retrained -- re-running this command continues an interrupted run")
 
     cfg = get_config()
     summaries, failed = [], []
