@@ -229,7 +229,7 @@ def train_one_epoch(model, loader, optimizer, loss_fn, device) -> dict:
         logits, he, hf, hef = model(eeg, fnirs)
         loss, ce, l2, mhs   = loss_fn(logits, labels, he, hf, hef)
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        # no gradient clipping: not part of the paper's training setup (Sec 3.3.2)
         optimizer.step()
 
         B = labels.size(0)

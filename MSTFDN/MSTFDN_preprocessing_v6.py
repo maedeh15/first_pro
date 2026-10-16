@@ -77,6 +77,8 @@ warnings.filterwarnings('ignore')
 # ============================================================
 BASE_DATASET_PATH = r"E:\kntu\Thesis\codes\DATA"
 OUTPUT_PATH        = r"E:\kntu\Thesis\codes\Results\MSTFDN_PREPROCESSED_NBACK_V3"
+# --out on the command line overrides this (also inside the spawned workers)
+OUTPUT_PATH        = os.environ.get("MSTFDN_OUTPUT_PATH", OUTPUT_PATH)
 
 SFREQ_EEG   = 200.0
 SFREQ_FNIRS = 10.0
@@ -118,6 +120,18 @@ AMPLITUDE_REJECT_THRESH = 120e-6   # V, EEG artifact rejection (only if PAPER_EX
 #   1188 class-balanced samples per subject).
 # Set False to use the extended cleaning pipeline (deviates from the paper).
 PAPER_EXACT = True
+
+# How each extracted segment is z-scored (paper: "z-score normalized",
+# without saying over which axis/statistics):
+#   'segment' -- each 42s/20s segment normalized by its OWN mean/std over
+#                time, per band/channel. Every segment then has unit variance
+#                in every band, so block-level band-power (EEG) and amplitude
+#                (fNIRS) differences between 0/2/3-back are removed.
+#   'session' -- one mean/std per band/channel (EEG) and per chromophore/
+#                channel (fNIRS), computed over all segments of the same
+#                session. Keeps those differences; uses only unlabeled
+#                inputs of each session (no labels, no cross-session data).
+ZSCORE_MODE = os.environ.get("MSTFDN_ZSCORE_MODE", 'segment')   # or --zscore on the command line
 
 # ============================================================
 #  LOGGING
@@ -577,83 +591,83 @@ def extract_windows_for_subject(eeg_band_data, raw_eeg_clean,
               f"(3 sessions x {TRIALS_PER_SESSION}); session_id = trial_idx // "
               f"{TRIALS_PER_SESSION} may be wrong for this subject.")
 
-    for trial_idx, ev in enumerate(target_ev):
-        ev_samp_eeg = ev[0]
-        raw_code    = ev[2]
-        label       = label_map.get(raw_code, -1)
+    def _cut_segments(trial_idx, ev):
+        """Raw (not yet normalized) task/rest segments of one trial, with the
+        paper's fNIRS baseline correction already applied. None if the trial
+        runs past the end of the recording."""
+        label = label_map.get(ev[2], -1)
         if label == -1:
-            continue
-
-        session_id = trial_idx // TRIALS_PER_SESSION + 1
-        eeg_t   = ev_samp_eeg / sfreq_eeg
+            return None
+        eeg_t   = ev[0] / sfreq_eeg
         fnirs_t = fnirs_trial_times[trial_idx] if fnirs_sync_ok else eeg_t
 
-        # ============================================================
         # TASK segment (42s) -- labels 0/1/2
-        # ============================================================
-        eeg_t0_samp = int(round(eeg_t * sfreq_eeg))
-        eeg_t1_samp = eeg_t0_samp + int(round(TASK_SEG_LEN * sfreq_eeg))
-        f_t0_samp   = int(round(fnirs_t * SFREQ_FNIRS))
-        f_t1_samp   = f_t0_samp + int(round(TASK_SEG_LEN * SFREQ_FNIRS))
-
-        if eeg_t1_samp > eeg_band_data.shape[-1] or f_t1_samp > fnirs_data.shape[0] or f_t0_samp < 0:
-            continue   # trial runs past end of recording, skip entirely
-
-        eeg_task_seg = eeg_band_data[:, :, eeg_t0_samp:eeg_t1_samp]   # (5, n_ch, 8400)
-        eeg_task_seg = _zscore(eeg_task_seg, axis=-1)                  # z-score per band, per channel
-
-        fnirs_task_raw = fnirs_data[f_t0_samp:f_t1_samp]               # (420, 3, 36)
-
+        eeg_t0 = int(round(eeg_t * sfreq_eeg))
+        eeg_t1 = eeg_t0 + int(round(TASK_SEG_LEN * sfreq_eeg))
+        f_t0   = int(round(fnirs_t * SFREQ_FNIRS))
+        f_t1   = f_t0 + int(round(TASK_SEG_LEN * SFREQ_FNIRS))
+        if eeg_t1 > eeg_band_data.shape[-1] or f_t1 > fnirs_data.shape[0] or f_t0 < 0:
+            return None
+        seg = {'label': label, 'session': trial_idx // TRIALS_PER_SESSION + 1,
+               'eeg_t0': eeg_t0,
+               'eeg_task': eeg_band_data[:, :, eeg_t0:eeg_t1]}          # (5, n_ch, 8400)
         # fNIRS baseline: mean of [-5s, 0s] BEFORE the task segment onset
-        bs0 = f_t0_samp - int(round(5.0 * SFREQ_FNIRS))
-        bs1 = f_t0_samp
-        if bs0 >= 0:
-            task_baseline = fnirs_data[bs0:bs1].mean(axis=0, keepdims=True)   # (1,3,36)
-        else:
-            task_baseline = 0.0   # first trial in recording: no pre-trial data available
-        fnirs_task_seg = fnirs_task_raw - task_baseline
-        fnirs_task_seg = _zscore(fnirs_task_seg, axis=0)                # z-score over time
+        bs0 = f_t0 - int(round(5.0 * SFREQ_FNIRS))
+        base = fnirs_data[bs0:f_t0].mean(axis=0, keepdims=True) if bs0 >= 0 else 0.0
+        seg['fnirs_task'] = fnirs_data[f_t0:f_t1] - base                  # (420, 3, 36)
 
-        _slide_windows(eeg_task_seg, fnirs_task_seg, eeg_t0_samp,
-                       TASK_SEG_LEN, label, session_id, trial_idx)
+        # REST segment (20s, right after the task segment) -- label REST_LABEL
+        # Baseline: mean of 35s-40s of THIS trial's task segment (paper).
+        r_eeg_t0, r_eeg_t1 = eeg_t1, eeg_t1 + int(round(REST_SEG_LEN * sfreq_eeg))
+        r_f_t0,   r_f_t1   = f_t1,   f_t1   + int(round(REST_SEG_LEN * SFREQ_FNIRS))
+        if r_eeg_t1 <= eeg_band_data.shape[-1] and r_f_t1 <= fnirs_data.shape[0]:
+            rb0 = f_t0 + int(round(35.0 * SFREQ_FNIRS))
+            rb1 = f_t0 + int(round(40.0 * SFREQ_FNIRS))
+            rbase = fnirs_data[rb0:rb1].mean(axis=0, keepdims=True)
+            seg['eeg_rest_t0'] = r_eeg_t0
+            seg['eeg_rest']    = eeg_band_data[:, :, r_eeg_t0:r_eeg_t1]
+            seg['fnirs_rest']  = fnirs_data[r_f_t0:r_f_t1] - rbase
+        return seg
 
-        del eeg_task_seg, fnirs_task_raw, fnirs_task_seg
+    segments = [(i, _cut_segments(i, ev)) for i, ev in enumerate(target_ev)]
+    segments = [(i, s) for i, s in segments if s is not None]
 
-        # ============================================================
-        # REST segment (effective 20s -> n=11 windows) -- label REST_LABEL
-        # Baseline: mean of the 35s-40s mark of THIS SAME trial's task
-        # segment (paper Sec 3.1.2), i.e. the last 5s of the task period,
-        # NOT relative to the rest segment's own onset.
-        # ============================================================
-        rest_eeg_t0_samp = eeg_t1_samp   # right after the 42s task segment
-        rest_eeg_t1_samp = rest_eeg_t0_samp + int(round(REST_SEG_LEN * sfreq_eeg))
-        rest_f_t0_samp   = f_t1_samp
-        rest_f_t1_samp   = rest_f_t0_samp + int(round(REST_SEG_LEN * SFREQ_FNIRS))
+    # ZSCORE_MODE='session': one mean/std per (band, channel) for EEG and per
+    # (chromophore, channel) for fNIRS, computed over all extracted segments
+    # of the SAME session. Keeps the between-class power/amplitude
+    # differences that a per-segment z-score erases.
+    sess_stats = {}
+    if ZSCORE_MODE == 'session':
+        for sid in sorted({s['session'] for _, s in segments}):
+            ss = [s for _, s in segments if s['session'] == sid]
+            e = np.concatenate([s['eeg_task'] for s in ss] +
+                               [s['eeg_rest'] for s in ss if 'eeg_rest' in s], axis=-1)
+            f = np.concatenate([s['fnirs_task'] for s in ss] +
+                               [s['fnirs_rest'] for s in ss if 'fnirs_rest' in s], axis=0)
+            sess_stats[sid] = (e.mean(-1, keepdims=True), e.std(-1, keepdims=True),
+                               f.mean(0, keepdims=True), f.std(0, keepdims=True))
+            del e, f
 
-        if rest_eeg_t1_samp > eeg_band_data.shape[-1] or rest_f_t1_samp > fnirs_data.shape[0]:
-            continue   # not enough data for the rest segment, skip
+    def _norm_eeg(x, sid):
+        if ZSCORE_MODE == 'session':
+            mu, sd = sess_stats[sid][0], sess_stats[sid][1]
+            return (x - mu) / (sd + 1e-8)
+        return _zscore(x, axis=-1)               # per band, per channel, over the segment
 
-        eeg_rest_seg = eeg_band_data[:, :, rest_eeg_t0_samp:rest_eeg_t1_samp]
-        eeg_rest_seg = _zscore(eeg_rest_seg, axis=-1)
+    def _norm_fnirs(x, sid):
+        if ZSCORE_MODE == 'session':
+            mu, sd = sess_stats[sid][2], sess_stats[sid][3]
+            return (x - mu) / (sd + 1e-8)
+        return _zscore(x, axis=0)                # per chromophore, per channel, over time
 
-        fnirs_rest_raw = fnirs_data[rest_f_t0_samp:rest_f_t1_samp]
-
-        # Rest baseline = mean of fNIRS data from t=35s to t=40s of the
-        # SAME trial (absolute segment coordinates -- inside the task
-        # period, 5s before it ends), not before the rest segment itself.
-        rb0 = f_t0_samp + int(round(35.0 * SFREQ_FNIRS))
-        rb1 = f_t0_samp + int(round(40.0 * SFREQ_FNIRS))
-        if rb1 <= fnirs_data.shape[0]:
-            rest_baseline = fnirs_data[rb0:rb1].mean(axis=0, keepdims=True)
-        else:
-            rest_baseline = 0.0
-        fnirs_rest_seg = fnirs_rest_raw - rest_baseline
-        fnirs_rest_seg = _zscore(fnirs_rest_seg, axis=0)
-
-        _slide_windows(eeg_rest_seg, fnirs_rest_seg, rest_eeg_t0_samp,
-                       REST_SEG_LEN, REST_LABEL, session_id, trial_idx)
-
-        del eeg_rest_seg, fnirs_rest_raw, fnirs_rest_seg
+    for trial_idx, s in segments:
+        sid = s['session']
+        _slide_windows(_norm_eeg(s['eeg_task'], sid), _norm_fnirs(s['fnirs_task'], sid),
+                       s['eeg_t0'], TASK_SEG_LEN, s['label'], sid, trial_idx)
+        if 'eeg_rest' in s:
+            _slide_windows(_norm_eeg(s['eeg_rest'], sid), _norm_fnirs(s['fnirs_rest'], sid),
+                           s['eeg_rest_t0'], REST_SEG_LEN, REST_LABEL, sid, trial_idx)
+    del segments, sess_stats
 
     eeg_windows   = np.array(eeg_windows,   dtype=np.float16) if eeg_windows else np.array([])
     fnirs_windows = np.array(fnirs_windows, dtype=np.float32) if fnirs_windows else np.array([])
@@ -759,6 +773,7 @@ def process_subject(subject_id):
             'sfreq_fnirs':         SFREQ_FNIRS,
             'spatial_mapping_in_preprocessing': False,
         'paper_exact_preprocessing': PAPER_EXACT,
+        'zscore_mode':         ZSCORE_MODE,
             'note': 'Matches paper Sec 3.2 exactly: 4-class N-back, '
                     'channel-space samples (no 16x16 grid stored), '
                     'fNIRS=HbO/HbR/HbT single 10s window (not 21-segment stack).',
@@ -867,8 +882,19 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--workers", type=int, default=N_WORKERS,
                     help=f"number of subjects processed in parallel (default {N_WORKERS})")
+    ap.add_argument("--zscore", choices=["segment", "session"], default=ZSCORE_MODE,
+                    help="segment-wise (default) or session-wise z-score normalization")
+    ap.add_argument("--out", default=None,
+                    help="output folder (default: OUTPUT_PATH in this file)")
     ap.add_argument("--subjects", nargs="+", default=None,
                     help="subset of subjects, e.g. --subjects VP001 VP002 (default: all 26)")
     args = ap.parse_args()
+    ZSCORE_MODE = args.zscore
+    if args.out:
+        OUTPUT_PATH = args.out
+        LOG_FILE = os.path.join(OUTPUT_PATH, "processing_log.txt")
+    # spawn-based workers re-import this module, so pass settings via env
+    os.environ["MSTFDN_ZSCORE_MODE"] = ZSCORE_MODE
+    os.environ["MSTFDN_OUTPUT_PATH"] = OUTPUT_PATH
     ALL_SUBJECTS = args.subjects or [f"VP{i:03d}" for i in range(1, 27)]
     run_parallel(ALL_SUBJECTS, n_workers=args.workers)
