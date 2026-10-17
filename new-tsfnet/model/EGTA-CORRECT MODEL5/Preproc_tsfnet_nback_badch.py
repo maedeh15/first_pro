@@ -161,6 +161,14 @@ _arg_parser.add_argument("--per-session-norm", type=str, default="on", choices=[
                                "per-session/per-segment re-normalization layer and no transductive "
                                "use of the held-out session's unlabeled inputs. 'off' writes to a "
                                "SEPARATE output folder.")
+_arg_parser.add_argument("--fnirs-bandpass", type=str, default="off", choices=["on", "off"],
+                          help="priority-ablation5 toggle (isolated variable): 'off' (default) = "
+                               "prior behavior bit-for-bit, ENABLE_FNIRS_BANDPASS=False (the "
+                               "project's current accepted baseline, per the MSTFDN large-"
+                               "receptive-field-conv-as-implicit-lowpass argument). 'on' re-enables "
+                               "the paper-spec 0.01-0.1Hz zero-phase Butterworth bandpass (STA-Net's "
+                               "own stated filter) on the HbO/HbR signal before windowing. 'on' "
+                               "writes to a SEPARATE output folder.")
 _cli_args, _ = _arg_parser.parse_known_args()
 
 # ============================================================================
@@ -230,6 +238,9 @@ if NORM_SCOPE != "session":
 _PER_SESSION_NORM_CLI = _cli_args.per_session_norm
 if _PER_SESSION_NORM_CLI == "off":
     OUTPUT_PATH = OUTPUT_PATH + "_noE3"
+_FNIRS_BANDPASS_CLI = _cli_args.fnirs_bandpass
+if _FNIRS_BANDPASS_CLI == "on":
+    OUTPUT_PATH = OUTPUT_PATH + "_fnirsBP"
 
 # NOTE (confirmed from Dataset_description_MATLAB.pdf / Shin et al. 2018, Sci Data): 26 subjects,
 # 3 sessions/subject, 9 trials/session (3 repeats x 0-/2-/3-back, counterbalanced order) -> 27
@@ -274,7 +285,7 @@ APPLY_NOTCH = False
 # rewritten) -- only whether it's CALLED is gated by this flag -- so ablation #6 (isolated
 # Baseline-correction test) can later toggle this same flag independently to get its
 # filter-on/off x baseline-on/off 2x2 factorial without any further code changes here.
-ENABLE_FNIRS_BANDPASS = False
+ENABLE_FNIRS_BANDPASS = (_FNIRS_BANDPASS_CLI == "on")
 FNIRS_BP_LOW = 0.01
 FNIRS_BP_HIGH = 0.1
 # EFFECTIVE (documented/intended) order of the zero-phase fNIRS bandpass. The paper does not
