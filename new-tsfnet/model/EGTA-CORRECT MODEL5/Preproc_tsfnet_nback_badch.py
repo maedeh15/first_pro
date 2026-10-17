@@ -169,6 +169,15 @@ _arg_parser.add_argument("--fnirs-bandpass", type=str, default="off", choices=["
                                "the paper-spec 0.01-0.1Hz zero-phase Butterworth bandpass (STA-Net's "
                                "own stated filter) on the HbO/HbR signal before windowing. 'on' "
                                "writes to a SEPARATE output folder.")
+_arg_parser.add_argument("--eeg-cov-align", type=str, default="off", choices=["off", "session"],
+                          help="priority-COVALIGN (isolated variable): 'off' (default) = prior "
+                               "behavior bit-for-bit. 'session' = per-session Euclidean Alignment of "
+                               "the EEG channel covariance (DGIFE-style covariance alignment, closed "
+                               "form, no learned parameters): after E3, every session's channels are "
+                               "whitened by that session's mean (trace-normalised) covariance^-1/2, "
+                               "and the 16x16 EEG grid is rebuilt from the aligned channels. "
+                               "Transductive like E3 (uses the held-out session's UNLABELED inputs "
+                               "only). Writes to a SEPARATE output folder (_covEA).")
 _cli_args, _ = _arg_parser.parse_known_args()
 
 # ============================================================================
@@ -238,6 +247,9 @@ if NORM_SCOPE != "session":
 _PER_SESSION_NORM_CLI = _cli_args.per_session_norm
 if _PER_SESSION_NORM_CLI == "off":
     OUTPUT_PATH = OUTPUT_PATH + "_noE3"
+_EEG_COV_ALIGN_CLI = _cli_args.eeg_cov_align
+if _EEG_COV_ALIGN_CLI == "session":
+    OUTPUT_PATH = OUTPUT_PATH + "_covEA"
 _FNIRS_BANDPASS_CLI = _cli_args.fnirs_bandpass
 if _FNIRS_BANDPASS_CLI == "on":
     OUTPUT_PATH = OUTPUT_PATH + "_fnirsBP"
@@ -378,6 +390,7 @@ ENABLE_EEG_CONNECTIVITY = False
 # controlled by --per-session-norm (on=True, the accepted baseline; off=
 # the original pre-E3 default).
 ENABLE_PER_SESSION_NORM = (_PER_SESSION_NORM_CLI == "on")
+ENABLE_EEG_COV_ALIGN = (_EEG_COV_ALIGN_CLI == "session")
 # priority-G2a: also save total haemoglobin HbT = HbO + HbR as a THIRD
 # chromophore channel, so fnirs_windows.npy becomes (N, S, 16, 16, T, 3)
 # instead of (N, S, 16, 16, T, 2). Requires the model to be built with
@@ -1555,6 +1568,50 @@ def apply_per_session_normalization(eeg_windows, fnirs_windows, eeg_channel_spac
     return eeg_out, fnirs_out, chan_out
 
 
+def grid_interpolation_matrix(eeg_pos_3d, grid_size=GRID_SIZE):
+    """(grid_size*grid_size, C) matrix W with grid = W @ channels. spatial_mapping() is exactly
+    linear in the channel values for fixed positions (Delaunay + Clough-Tocher with fill 0), so
+    mapping the identity recovers it; lets the grid be rebuilt from transformed channels."""
+    n_ch = eeg_pos_3d.shape[1]
+    cols = spatial_mapping(np.eye(n_ch, dtype=np.float64), eeg_pos_3d, grid_size=grid_size)   # (C, g, g)
+    return cols.reshape(n_ch, -1).T.astype(np.float64)
+
+
+def apply_covariance_alignment(eeg_windows, eeg_channel_space_windows, session_ids, eeg_pos_3d,
+                               subject_id, reg=1e-3):
+    """
+    priority-COVALIGN: per-session Euclidean Alignment of EEG channel covariance (closed form form of
+    the covariance alignment idea in DGIFE, Jin et al. 2026). For session s, with window covariances
+    C_i (trace-normalised) and mean Cbar_s, every window becomes  x' = Cbar_s^-1/2 x  so the session's
+    mean covariance is the identity; the 16x16 grid is then REBUILT as W @ x' (W =
+    grid_interpolation_matrix) and re-standardised per grid cell within the session, exactly like
+    E3's grid step. Mirrors check_covariance_alignment.py (EA applied after E3). Uses only the
+    session's unlabeled inputs (transductive, same caveat as E3).
+    """
+    chan = eeg_channel_space_windows.astype(np.float64)
+    n, c, t = chan.shape
+    W = grid_interpolation_matrix(eeg_pos_3d)
+    grid_new = np.empty_like(eeg_windows)
+    for sid in np.unique(session_ids):
+        m = np.where(session_ids == sid)[0]
+        x = chan[m] - chan[m].mean(-1, keepdims=True)
+        cov = np.einsum("nct,ndt->ncd", x, x) / t
+        cov /= np.trace(cov, axis1=1, axis2=2)[:, None, None]
+        cbar = cov.mean(0) + reg * np.eye(c) / c
+        w, v = np.linalg.eigh(cbar)
+        r = (v * (np.maximum(w, 1e-12) ** -0.5)) @ v.T
+        r *= np.sqrt(np.trace(cbar) / c)            # keep average channel variance ~ unit scale
+        chan[m] = np.einsum("cd,ndt->nct", r, chan[m])
+        g = np.einsum("gc,nct->ngt", W, chan[m]).reshape(len(m), eeg_windows.shape[1],
+                                                         eeg_windows.shape[2], t)
+        gm = g.mean(axis=(0, 3), keepdims=True)
+        gs = g.std(axis=(0, 3), keepdims=True) + 1e-8
+        grid_new[m] = ((g - gm) / gs).astype(np.float32)
+    log_message(f"  {subject_id}: applied PER-SESSION covariance alignment (priority-COVALIGN) over "
+                f"{len(np.unique(session_ids))} session(s); grid rebuilt from aligned channels")
+    return grid_new, chan.astype(np.float32)
+
+
 def extract_windows(eeg_raw_filtered, eeg_pos_3d, events, fnirs_grid, fnirs_ev_time, fnirs_ev_code, subject_id, qc_dir=None):
     sfreq_eeg = eeg_raw_filtered.info["sfreq"]
 
@@ -2104,6 +2161,10 @@ def process_subject(subject_id):
         if eeg_windows.size == 0:
             log_message(f"  {subject_id}: no windows extracted, skipping save.")
             return
+
+        if ENABLE_EEG_COV_ALIGN:
+            eeg_windows, eeg_channel_space_final = apply_covariance_alignment(
+                eeg_windows, eeg_channel_space_final, session_ids, eeg_pos_3d, subject_id)
 
         # NOTE: no normalization is applied here anymore. Per-channel, per-subject z-score
         # normalization is now applied earlier in the pipeline -- inside preprocess_eeg() (on the
