@@ -689,7 +689,7 @@ def run_loso_subject(subject_id: str, cfg: MSTFDNConfig,
 #  MAIN — run all subjects
 # ===========================================================================
 def main():
-    global LOG_FILE
+    global LOG_FILE, PREPROCESSED_PATH, OUTPUT_PATH, ALL_SUBJECTS
 
     import argparse, random
     ap = argparse.ArgumentParser()
@@ -703,7 +703,20 @@ def main():
                          "'trial' (default): hold out ~20%% of TRIALS pooled across both "
                          "training sessions -- identical in kind to TSFNet's own split. "
                          "'cross_session': hold out one WHOLE training session.")
+    ap.add_argument("--data", default=None,
+                    help="preprocessed folder (default: PREPROCESSED_PATH in this file)")
+    ap.add_argument("--out", default=None,
+                    help="results folder (default: OUTPUT_PATH in this file)")
+    ap.add_argument("--subjects", nargs="+", default=None,
+                    help="subset of subjects, e.g. --subjects VP001 VP002 (default: all 26)")
     args = ap.parse_args()
+
+    if args.data:
+        PREPROCESSED_PATH = args.data
+    if args.out:
+        OUTPUT_PATH = args.out
+    if args.subjects:
+        ALL_SUBJECTS = args.subjects
 
     SEED = args.seed
     VAL_MODE = args.val_mode
