@@ -290,6 +290,27 @@ _arg_parser.add_argument("--class-count-level", type=str, default="window",
                                "behavior). 'trial': verified to be a no-op on this dataset "
                                "(trial-level counts are always exactly [6,6,6] per fold, by "
                                "fixed experimental design) -- kept only for completeness.")
+_arg_parser.add_argument("--fnirs-input-gate", type=str, default="none",
+                          choices=["none", "soft", "soft_prior"],
+                          help="priority-FNIRSGATE isolated variable: a SOFT, LEARNABLE "
+                               "weighting of the raw fNIRS input over the w (posterior.."
+                               "anterior) and chromophore axes. 'none' (default) creates no "
+                               "parameters and leaves forward() untouched -- bit-exact with "
+                               "every prior run. 'soft' zero-initialises both logit vectors, "
+                               "so the gate is exactly 1.0 at step 0 and any weighting is "
+                               "LEARNED (same idiom as --egta-k-init zero). 'soft_prior' "
+                               "starts biased toward anterior and toward HbO by "
+                               "--fnirs-gate-prior-strength, injecting the prior measured by "
+                               "map_fnirs_prior.py (anterior HbO: 2v3 0.603 vs 0.579, broad "
+                               "plateau over w>=6..12, but paired p=0.136 and a -0.020 "
+                               "3-class cost) while leaving the model free to undo it. "
+                               "REGISTERED PREDICTION: the expected effect is higher 2-back "
+                               "and 3-back RECALL in the confusion matrix, not necessarily "
+                               "higher overall accuracy.")
+_arg_parser.add_argument("--fnirs-gate-prior-strength", type=float, default=0.5,
+                          help="priority-FNIRSGATE: logit offset used by --fnirs-input-gate "
+                               "soft_prior. 0.5 gives a gate range of about 0.76..1.24 per "
+                               "axis (deliberately mild). Ignored for the other modes.")
 _arg_parser.add_argument("--fnirs-chroma-mode", type=str, default="both",
                           choices=["both", "hbo_only", "hbr_only", "hbt_only", "hbo_hbr", "cbsi"],
                           help="priority-A4 isolated variable: which fNIRS chromophore "
@@ -766,6 +787,8 @@ CAFE_D_MODEL = SEED_ARGS.cafe_d_model
 FNIRS_NUM_SEGMENTS = SEED_ARGS.fnirs_num_segments
 CLASS_COUNT_LEVEL = SEED_ARGS.class_count_level
 FNIRS_CHROMA_MODE = SEED_ARGS.fnirs_chroma_mode
+FNIRS_INPUT_GATE = SEED_ARGS.fnirs_input_gate          # priority-FNIRSGATE
+FNIRS_GATE_PRIOR_STRENGTH = SEED_ARGS.fnirs_gate_prior_strength
 MHS_LAMBDA = SEED_ARGS.mhs_lambda
 EFGF_LAMBDA = SEED_ARGS.efgf_lambda
 CAFE_LAMBDA = SEED_ARGS.cafe_lambda
@@ -1008,6 +1031,10 @@ if ORDINAL_REG_LAMBDA > 0:
 _LAMBDA_SUBTAG = (f"_lam{LAMBDA_EEG}-{LAMBDA_FNIRS}"
                   if (LAMBDA_EEG != 0.2 or LAMBDA_FNIRS != 0.2) else "")
 _CHROMA_SUBTAG = f"_{FNIRS_CHROMA_MODE}" if FNIRS_CHROMA_MODE != "both" else ""
+_FNIRSGATE_SUBTAG = ("" if FNIRS_INPUT_GATE == "none"
+                     else f"_fgate-{FNIRS_INPUT_GATE}"
+                          + (f"{FNIRS_GATE_PRIOR_STRENGTH:g}"
+                             if FNIRS_INPUT_GATE == "soft_prior" else ""))
 _CHROMO_SUBTAG = f"_chr{FNIRS_NUM_CHROMOPHORES}" if FNIRS_NUM_CHROMOPHORES != 2 else ""
 _ESP_SUBTAG = (f"_esp{EEG_SPATIAL_MODE}L{EEG_SPATIAL_LAYERS}H{EEG_SPATIAL_HEADS}"
                if EEG_SPATIAL_MODE not in ("none", "bandtok") else "")
@@ -1105,7 +1132,7 @@ else:
     _SWA_SUBTAG = ""
 import hashlib
 _VARIANT_TAG_FULL = (f"{FUSION_COMBINATION}_{_CLIP_SUBTAG}_{_CW_SUBTAG}_{_OS_SUBTAG}"
-                     f"_{_EEG_SUBTAG}_{_CAFE_SUBTAG}_{_ASYM_SUBTAG}{_LAMBDA_SUBTAG}{_CHROMA_SUBTAG}{_MHS_SUBTAG}{_LS_SUBTAG}{_DA_SUBTAG}{_FC_SUBTAG}{_ADABN_SUBTAG}{_TENT_SUBTAG}{_EGTA_SUBTAG}{_G1_SUBTAG}{_CHROMO_SUBTAG}{_ESP_SUBTAG}{_LABRAM_SUBTAG}{_BAND_SUBTAG}{_NORM_SUBTAG}{_EFGF_SUBTAG}{_YPREDNORM_SUBTAG}{_VALMODE_SUBTAG}{_NODECAY_SUBTAG}{_STAGE2_SUBTAG}{_EFGFINIT_SUBTAG}{_NOISEAWARE_SUBTAG}{_SWA_SUBTAG}{_PCCLAMBDA_SUBTAG}{_CONVDROP_SUBTAG}{_DATAROOT_SUBTAG}{_FNIRSINJECT_SUBTAG}{_PRETRAIN_SUBTAG}{_ERP_SUBTAG}")
+                     f"_{_EEG_SUBTAG}_{_CAFE_SUBTAG}_{_ASYM_SUBTAG}{_LAMBDA_SUBTAG}{_CHROMA_SUBTAG}{_MHS_SUBTAG}{_LS_SUBTAG}{_DA_SUBTAG}{_FC_SUBTAG}{_ADABN_SUBTAG}{_TENT_SUBTAG}{_EGTA_SUBTAG}{_G1_SUBTAG}{_CHROMO_SUBTAG}{_ESP_SUBTAG}{_LABRAM_SUBTAG}{_BAND_SUBTAG}{_NORM_SUBTAG}{_EFGF_SUBTAG}{_YPREDNORM_SUBTAG}{_VALMODE_SUBTAG}{_NODECAY_SUBTAG}{_STAGE2_SUBTAG}{_EFGFINIT_SUBTAG}{_NOISEAWARE_SUBTAG}{_SWA_SUBTAG}{_PCCLAMBDA_SUBTAG}{_CONVDROP_SUBTAG}{_DATAROOT_SUBTAG}{_FNIRSINJECT_SUBTAG}{_PRETRAIN_SUBTAG}{_ERP_SUBTAG}{_FNIRSGATE_SUBTAG}")
 _VARIANT_HASH = hashlib.md5(_VARIANT_TAG_FULL.encode()).hexdigest()[:10]
 _VARIANT_TAG = _VARIANT_HASH
 RUN_TAG = datetime.datetime.now().strftime("%Y%m%d_%H%M%S") + f"_seed{SEED}_{_VARIANT_TAG}"   # unique per run+seed+variant, so a later comparison run never overwrites this baseline
@@ -1184,6 +1211,7 @@ with CrashSafeLogger(os.path.join(RESULTS_DIR_VARIANT, f"baseline_run_log_{RUN_T
           f"(beta={EFFECTIVE_NUMBER_BETA} if effective_number, gamma={FOCAL_GAMMA} if focal) "
           f"| oversampling_scheme={OVERSAMPLING_SCHEME!r} (k={SMOTE_K_NEIGHBORS} if smote) "
           f"| fnirs_chroma_mode={FNIRS_CHROMA_MODE!r} (priority-A4 isolated variable) "
+          f"| fnirs_input_gate={FNIRS_INPUT_GATE!r} (priority-FNIRSGATE, prior_strength={FNIRS_GATE_PRIOR_STRENGTH:g}) "
           f"| fnirs_num_chromophores={FNIRS_NUM_CHROMOPHORES} (priority-G2a) "
           f"| eeg_spatial_mode={EEG_SPATIAL_MODE!r} (L={EEG_SPATIAL_LAYERS}, H={EEG_SPATIAL_HEADS}, priority-G4) "
           f"| eeg_band_mode={EEG_BAND_MODE!r} (d_model={EEG_BAND_D_MODEL}, "
@@ -1270,7 +1298,9 @@ with CrashSafeLogger(os.path.join(RESULTS_DIR_VARIANT, f"baseline_run_log_{RUN_T
                 class_count_level=CLASS_COUNT_LEVEL,     # "window" (legacy/verified) or "trial" (verified no-op)
                 lambda_eeg=LAMBDA_EEG,                    # ISOLATED ABLATION (priority-A3): paper default 0.2
                 lambda_fnirs=LAMBDA_FNIRS,                # paper default 0.2
-                fnirs_chroma_mode=FNIRS_CHROMA_MODE,      # ISOLATED ABLATION (priority-A4): "both" (default)/"hbo_only"/"hbr_only"
+                fnirs_chroma_mode=FNIRS_CHROMA_MODE,
+                fnirs_input_gate=FNIRS_INPUT_GATE,        # ISOLATED ABLATION (priority-FNIRSGATE)
+                fnirs_gate_prior_strength=FNIRS_GATE_PRIOR_STRENGTH,      # ISOLATED ABLATION (priority-A4): "both" (default)/"hbo_only"/"hbr_only"
                 mhs_lambda=MHS_LAMBDA,                    # ISOLATED ABLATION (priority-B1): CAFE multi-head HSIC diversity term, 0.0 (default) disables
                 efgf_lambda=EFGF_LAMBDA,                  # ISOLATED ABLATION (priority-PCCLAMBDA): 1.0 (default) = paper Eq. 5
                 cafe_lambda=CAFE_LAMBDA,                  # ISOLATED ABLATION (priority-PCCLAMBDA): 1.0 (default) = paper Eq. 5

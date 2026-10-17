@@ -1446,6 +1446,7 @@ class TSFNet(nn.Module):
                  eeg_temporal_mode="gap", eeg_lstm_hidden=64, eeg_readout_mode="h_n",
                  fnirs_num_segments=21, fnirs_chroma_mode="both",
                  fnirs_num_chromophores=2,
+                 fnirs_input_gate="none", fnirs_gate_prior_strength=0.5,
                  use_fc_features=False, fc_num_channels=28, fc_embed_dim=64,
                  eeg_spatial_mode="none", eeg_spatial_channels=28,
                  eeg_spatial_d_model=64, eeg_spatial_heads=4,
@@ -1737,6 +1738,74 @@ class TSFNet(nn.Module):
                 if c not in keep:
                     _chroma_mask[..., c] = 0.0
         self.register_buffer("_fnirs_chroma_mask", _chroma_mask)
+
+        # fnirs_input_gate: ISOLATED ABLATION PARAMETER (priority-FNIRSGATE).
+        # A SOFT, LEARNABLE weighting of the raw fNIRS input over two axes:
+        #   w (axis 3) -- posterior..anterior. Verified in
+        #       check_chromophore_region.py's --self-test that HIGH w = FRONTAL
+        #       (corr(y_3d, y_projected) = +0.996 through _azimuthal_projection).
+        #   C (axis 5) -- chromophore, 0 = HbO, 1 = HbR, 2 = HbT.
+        #
+        # WHY: map_fnirs_prior.py found, per-subject cross-session on all 26
+        # subjects, that restricting the fNIRS input to anterior HbO improves
+        # 2-back-vs-3-back (0.603 vs 0.579 for the full input, +0.024) with a
+        # smooth monotone rise and a broad plateau over cuts w>=6..12 -- the
+        # shape of a real spatial effect rather than selection noise -- but it
+        # COSTS 3-class (-0.020) and does not reach significance on its own
+        # (best paired p = 0.136, 18/26 subjects up). The sturdier result there
+        # was the chromophore one: HbR-only significantly hurts 3-class
+        # (p = 0.0176), i.e. HbO is the dominant carrier.
+        # That trade-off is FORCED in a single linear probe, which must use one
+        # feature set for every class. This model has separate branches and
+        # attention, so a SOFT gate lets it keep the full grid for the easy
+        # 0-back decision while emphasising anterior HbO for the hard 2/3 one.
+        # A hard mask could not do that, which is why this is a gate.
+        #
+        # PREDICTION REGISTERED IN ADVANCE (so this is a test, not a search):
+        # the expected effect is higher 2-back and 3-back RECALL in the
+        # confusion matrix, NOT necessarily higher overall accuracy.
+        #
+        # 'none'  (default) -- no parameters created, no RNG consumed, forward()
+        #                      untouched: bit-exact with every prior run (rule 5).
+        # 'soft'           -- both logit vectors zero-initialised, so
+        #                      2*sigmoid(0) = 1.0 exactly and the gate is the
+        #                      IDENTITY at step 0. The model equals the baseline
+        #                      at initialisation and any weighting is LEARNED
+        #                      (the same idiom as egta_k_init='zero').
+        # 'soft_prior'     -- initialised toward anterior and toward HbO by
+        #                      fnirs_gate_prior_strength, i.e. the measured
+        #                      prior is injected but stays fully learnable, so
+        #                      the model can undo it. Strength 0.5 gives a gate
+        #                      range of about 0.76..1.24 per axis -- deliberately
+        #                      mild.
+        # Both logit vectors are 1-D, so no_decay_scalars=True (this project's
+        # accepted baseline) already excludes them from weight decay via its
+        # p.dim() <= 1 rule -- no special-casing needed.
+        _GATE_MODES = ("none", "soft", "soft_prior")
+        if fnirs_input_gate not in _GATE_MODES:
+            raise ValueError(f"fnirs_input_gate must be one of {_GATE_MODES}, "
+                              f"got {fnirs_input_gate!r}")
+        self.fnirs_input_gate = fnirs_input_gate
+        if fnirs_input_gate != "none":
+            _grid_w = 16   # x_fnirs is (B, S, 16, 16, T, C); axis 3 is w
+            if fnirs_input_gate == "soft_prior":
+                s = float(fnirs_gate_prior_strength)
+                # smooth posterior -> anterior ramp in logit space
+                _w_logit = s * (torch.arange(_grid_w, dtype=torch.float32)
+                                 - (_grid_w - 1) / 2.0) / ((_grid_w - 1) / 2.0)
+                # favour HbO over HbR; any further chromophore starts neutral
+                _c_logit = torch.zeros(fnirs_num_chromophores)
+                _c_logit[0] = s
+                if fnirs_num_chromophores > 1:
+                    _c_logit[1] = -s
+            else:
+                _w_logit = torch.zeros(_grid_w)
+                _c_logit = torch.zeros(fnirs_num_chromophores)
+            # torch.zeros/arange consume NO RNG, so enabling this gate does not
+            # shift any other module's initialisation (rule 6 satisfied without
+            # needing a save/restore of the RNG state).
+            self.fnirs_gate_w_logit = nn.Parameter(_w_logit)
+            self.fnirs_gate_c_logit = nn.Parameter(_c_logit)
         # IMPORTANT: eeg_temporal_mode is applied ONLY to self.eeg_branch,
         # NOT to self.fusion_branch below, even though both are built from
         # the same EEGLikeBranch class. This matches the project's
@@ -1997,6 +2066,20 @@ class TSFNet(nn.Module):
         if norm_mode == "group":
             convert_batchnorm_to_groupnorm(self, num_groups=norm_groups)
 
+    def _apply_fnirs_input_gate(self, x_fnirs):
+        """priority-FNIRSGATE: soft (0,2)-bounded multiplicative gate over the
+        w (posterior..anterior) and chromophore axes of the raw fNIRS input.
+
+        2*sigmoid(logit) equals 1.0 at logit 0, so fnirs_input_gate='soft' is
+        the EXACT identity at initialisation and any weighting is learned.
+        Shapes broadcast against x_fnirs: (B, Segments, H, W, T, C).
+        """
+        gate_w = 2.0 * torch.sigmoid(self.fnirs_gate_w_logit)
+        gate_c = 2.0 * torch.sigmoid(self.fnirs_gate_c_logit)
+        return (x_fnirs
+                * gate_w.view(1, 1, 1, -1, 1, 1)
+                * gate_c.view(1, 1, 1, 1, 1, -1))
+
     def forward(self, x_eeg, x_fnirs, x_conn=None, x_chan=None):
         """
         x_eeg:   (B, 16, 16, 600)
@@ -2041,6 +2124,12 @@ class TSFNet(nn.Module):
             x_fnirs = apply_cbsi_transform(x_fnirs)
         else:
             x_fnirs = x_fnirs * self._fnirs_chroma_mask
+        if self.fnirs_input_gate != "none":                  # priority-FNIRSGATE
+            # Applied to the RAW input, at the same point as the chroma mask,
+            # so EVERY downstream consumer (FNIRSBranch, EFGF via fn_s1/fn_s2,
+            # CAFE via fn_pooled, and the chroma-split branches below) sees the
+            # same gated tensor. With 'soft' the gate is exactly 1.0 at step 0.
+            x_fnirs = self._apply_fnirs_input_gate(x_fnirs)
         fn_s1, fn_s2, fn_pooled = self.fnirs_branch(x_fnirs)
         if self.fnirs_chroma_split != "none":                 # priority-CHROMASPLIT
             # fn_pooled: (B, S, 32, 4, 4). Each extra branch's pooled map goes
@@ -4074,7 +4163,9 @@ def run_subject_cross_session(subject_dir, subject_id, device="cuda" if torch.cu
                                cafe_d_model=64, fnirs_num_segments=21,
                                asymmetric_hard_pairs=None, asymmetric_hard_weight=2.0,
                                ordinal_reg_lambda=0.0, class_count_level="window",
-                               fnirs_chroma_mode="both", mhs_lambda=0.0, label_smoothing=0.0,
+                               fnirs_chroma_mode="both",
+                               fnirs_input_gate="none", fnirs_gate_prior_strength=0.5,
+                               mhs_lambda=0.0, label_smoothing=0.0,
                                efgf_lambda=1.0, cafe_lambda=1.0,
                                domain_adapt_lambda=0.0,
                                use_fc_features=False, fc_num_channels=28, fc_embed_dim=64,
@@ -4498,6 +4589,8 @@ def run_subject_cross_session(subject_dir, subject_id, device="cuda" if torch.cu
                         eeg_readout_mode=eeg_readout_mode, cafe_d_model=cafe_d_model,
                         fnirs_num_segments=fnirs_num_segments,
                         fnirs_chroma_mode=fnirs_chroma_mode,
+                        fnirs_input_gate=fnirs_input_gate,
+                        fnirs_gate_prior_strength=fnirs_gate_prior_strength,
                         use_fc_features=use_fc_features, fc_num_channels=fc_num_channels,
                         fc_embed_dim=fc_embed_dim,
                         dropout=dropout, cafe_dropout=cafe_dropout,
