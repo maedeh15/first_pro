@@ -115,7 +115,7 @@ class MSTFDNConfig:
     n_hemo:      int = 3        # HbO, HbR, HbT -- ALL THREE arrive as model input
                                  # (paper: "the fNIRS input feature tensor for the
                                  # model is denoted as X_fnirs in R^{3xCHfxTf}")
-    n_class:     int = 4        # 0-back, 2-back, 3-back, rest (paper Sec 3.2)
+    n_class:     int = 3        # 0-back, 2-back, 3-back (3-category N-back)
 
     # ── Architecture ────────────────────────────────────────────────────────
     KSS:         int = 4        # pointwise output multiplier (spatial scaling factor)
@@ -1023,7 +1023,7 @@ class MSTFDNDataset(torch.utils.data.Dataset):
     Loads the preprocessed .npy arrays produced by MSTFDN_preprocessing_v3.py.
 
     CORRECTED: matches the paper's ACTUAL protocol -- no 16x16 spatial grid,
-    no 21-segment fNIRS stack, 4 classes (0-back, 2-back, 3-back, rest).
+    no 21-segment fNIRS stack, 3 classes (0-back, 2-back, 3-back).
 
     Expected files in data_dir/{subject_id}/:
       {subject_id}_eeg_windows.npy    (N, 5, 28, 2000)  float16 -- real 5-band data
@@ -1159,7 +1159,7 @@ def debug_forward_shapes(cfg: MSTFDNConfig = None, device: str = 'cpu'):
 if __name__ == "__main__":
     import sys
 
-    # -- 1. Config for N-back (MBI dataset-A, 4-class: 0/2/3-back + rest) --
+    # -- 1. Config for N-back (MBI dataset-A, 3-class: 0/2/3-back) --
     cfg = MSTFDNConfig()
     cfg.n_eeg_ch    = 28
     cfg.n_fnirs_ch  = 36
@@ -1167,7 +1167,7 @@ if __name__ == "__main__":
     cfg.T_f         = 100    # 10s x 10Hz -- single window, matches paper exactly
     cfg.n_bands     = 5
     cfg.n_hemo      = 3      # HbO, HbR, HbT -- all supplied as input
-    cfg.n_class     = 4      # 0-back, 2-back, 3-back, rest (paper Sec 3.2)
+    cfg.n_class     = 3      # 0-back, 2-back, 3-back
 
     # SFEM attention: T_e must be divisible by He, T_f must be divisible by Hf/Hef
     # T_e=2000 / He=8  = 250 (exact)

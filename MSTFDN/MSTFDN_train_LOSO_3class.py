@@ -80,10 +80,10 @@ def get_config() -> MSTFDNConfig:
     cfg.n_hemo      = 3       # HbO, HbR, HbT -- all supplied as model input
     cfg.n_class     = 3       # 0-back, 2-back, 3-back ONLY -- 3 cognitive
                               # workload levels. REST (label=3, from paper's
-                              # 4-class protocol) is EXCLUDED here, filtered
+                              # 4-class protocol) is EXCLUDED; current preprocessing no longer
                               # out at the dataset level (see
                               # MSTFDNSubjectDataset below) -- preprocessing
-                              # v3 still extracts all 4 classes on disk, we
+                              # extracts it, and older folders that do are filtered here, we
                               # just drop the rest-class windows at load time.
     cfg.He          = 8       # T_e/He = 2000/8 = 250 (exact)
     cfg.Hf          = 5       # T_f/Hf = 100/5 = 20 (exact)

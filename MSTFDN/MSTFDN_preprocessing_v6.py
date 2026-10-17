@@ -34,7 +34,9 @@ KEY CORRECTIONS vs the previous (v2/bands) implementation:
   5. fNIRS sample = ONE 10 s window (100 samples @ 10 Hz) with 3
      hemoglobin channels (HbO, HbR, HbT = HbO+HbR), matching the EEG
      window 1:1 -- NOT 21 stacked overlapping 3 s segments.
-  6. Expected total samples per subject: 1188 (99 x 4 classes x 3
+  6. THIS PROJECT USES THE 3-CLASS PROTOCOL (INCLUDE_REST=False): rest is
+     not extracted, expected 891 samples per subject (99 x 3 x 3 sessions).
+     With INCLUDE_REST=True: 1188 (99 x 4 classes x 3
      sessions), before any artifact-rejection dropouts.
 
 Dataset: Shin et al. 2018 -- 26 subjects (VP001-VP026), 30 EEG ch @200Hz,
@@ -106,7 +108,14 @@ N_REST_WINDOWS_EXPECTED = int((REST_SEG_LEN - WINDOW_LEN) / WINDOW_STEP) + 1   #
 # --- Marker codes (Shin 2018) ---
 EEG_TRIAL_LABEL_MAP   = {112: 0, 128: 1, 144: 2}   # 0-back, 2-back, 3-back
 FNIRS_TRIAL_LABEL_MAP = {7: 0,   8: 1,   9: 2}
-REST_LABEL = 3   # 4th class: rest
+REST_LABEL = 3   # rest (only extracted when INCLUDE_REST=True)
+
+# 3-class N-back (0-back / 2-back / 3-back), paper Table 2 "3-Category".
+# REST segments are NOT extracted and do NOT enter the session-wise
+# z-score statistics. Set True only for the 4-category protocol.
+INCLUDE_REST = False
+N_CLASSES    = 4 if INCLUDE_REST else 3
+N_EXPECTED   = 99 * N_CLASSES * 3     # 891 for 3 classes, 1188 for 4
 
 TRIALS_PER_SESSION = 9
 
@@ -117,7 +126,7 @@ AMPLITUDE_REJECT_THRESH = 120e-6   # V, EEG artifact rejection (only if PAPER_EX
 #   extraction -> z-score. NO notch, NO broadband filter, NO bad-channel
 #   interpolation, NO ICA, NO re-referencing (MBI is already referenced to
 #   TP9), and NO amplitude-based window rejection (the paper reports exactly
-#   1188 class-balanced samples per subject).
+#   99 class-balanced samples per class per session).
 # Set False to use the extended cleaning pipeline (deviates from the paper).
 PAPER_EXACT = True
 
@@ -557,7 +566,7 @@ def extract_windows_for_subject(eeg_band_data, raw_eeg_clean,
                 continue
 
             # Amplitude-based artifact rejection -- NOT in the paper (it
-            # would break the 1188 class-balanced samples), so only applied
+            # would break the class-balanced 99 samples per class per session), so only applied
             # when PAPER_EXACT is False.
             if not PAPER_EXACT:
                 w0_abs = eeg_t0_samp + w0_eeg_local
@@ -620,7 +629,7 @@ def extract_windows_for_subject(eeg_band_data, raw_eeg_clean,
         # Baseline: mean of 35s-40s of THIS trial's task segment (paper).
         r_eeg_t0, r_eeg_t1 = eeg_t1, eeg_t1 + int(round(REST_SEG_LEN * sfreq_eeg))
         r_f_t0,   r_f_t1   = f_t1,   f_t1   + int(round(REST_SEG_LEN * SFREQ_FNIRS))
-        if r_eeg_t1 <= eeg_band_data.shape[-1] and r_f_t1 <= fnirs_data.shape[0]:
+        if INCLUDE_REST and r_eeg_t1 <= eeg_band_data.shape[-1] and r_f_t1 <= fnirs_data.shape[0]:
             rb0 = f_t0 + int(round(35.0 * SFREQ_FNIRS))
             rb1 = f_t0 + int(round(40.0 * SFREQ_FNIRS))
             rbase = fnirs_data[rb0:rb1].mean(axis=0, keepdims=True)
@@ -708,7 +717,7 @@ def process_subject(subject_id):
         print(f"[{subject_id}] Loading fNIRS (channel-space, HbO/HbR/HbT)...")
         fnirs_data, fnirs_events_time, fnirs_events_code = load_fnirs_data(subject_id)
 
-        print(f"[{subject_id}] Preprocessing EEG (notch/bandpass/ICA/CAR)...")
+        print(f"[{subject_id}] Preprocessing EEG...")
         raw_eeg_clean = preprocess_eeg(raw_eeg, events)
 
         sub_out = os.path.join(OUTPUT_PATH, subject_id)
@@ -729,7 +738,7 @@ def process_subject(subject_id):
         gc.collect()
         print(f"[{subject_id}] EEG band stack: {eeg_band_stack.shape}")
 
-        print(f"[{subject_id}] Extracting task (42s->33win) + rest (20s->11win) windows...")
+        print(f"[{subject_id}] Extracting task (42s->33win) windows...")
         eeg_windows, fnirs_windows, labels, session_ids, trial_ids = \
             extract_windows_for_subject(
                 eeg_band_stack, raw_eeg_clean,
@@ -741,8 +750,8 @@ def process_subject(subject_id):
             return
 
         print(f"[{subject_id}] Extracted {len(labels)} windows. "
-              f"Class distribution: {np.bincount(labels, minlength=4)}")
-        print(f"[{subject_id}] Expected 1188 total (99 x 4 classes x 3 sessions) "
+              f"Class distribution: {np.bincount(labels, minlength=N_CLASSES)}")
+        print(f"[{subject_id}] Expected {N_EXPECTED} total (99 x {N_CLASSES} classes x 3 sessions) "
               f"before artifact-based dropout.")
 
         del eeg_band_stack, fnirs_data, raw_eeg_clean, raw_eeg
@@ -761,10 +770,12 @@ def process_subject(subject_id):
             'fnirs_shape':         list(fnirs_windows.shape),
             'eeg_bands':           EEG_BAND_NAMES,
             'fnirs_hemo_channels': ['HbO', 'HbR', 'HbT'],
-            'n_classes':           4,
-            'class_labels':        {'0': '0-back', '1': '2-back', '2': '3-back', '3': 'rest'},
-            'labels_distribution': np.bincount(labels, minlength=4).tolist(),
-            'expected_total':      1188,
+            'n_classes':           N_CLASSES,
+            'class_labels':        ({'0': '0-back', '1': '2-back', '2': '3-back', '3': 'rest'}
+                                    if INCLUDE_REST else
+                                    {'0': '0-back', '1': '2-back', '2': '3-back'}),
+            'labels_distribution': np.bincount(labels, minlength=N_CLASSES).tolist(),
+            'expected_total':      N_EXPECTED,
             'window_len_s':        WINDOW_LEN,
             'window_step_s':       WINDOW_STEP,
             'task_segment_s':      TASK_SEG_LEN,
@@ -774,7 +785,7 @@ def process_subject(subject_id):
             'spatial_mapping_in_preprocessing': False,
         'paper_exact_preprocessing': PAPER_EXACT,
         'zscore_mode':         ZSCORE_MODE,
-            'note': 'Matches paper Sec 3.2 exactly: 4-class N-back, '
+            'note': f'Matches paper Sec 3.2: {N_CLASSES}-class N-back, '
                     'channel-space samples (no 16x16 grid stored), '
                     'fNIRS=HbO/HbR/HbT single 10s window (not 21-segment stack).',
         }
@@ -785,7 +796,7 @@ def process_subject(subject_id):
         log_message(
             f"DONE {subject_id} in {elapsed:.1f} min | "
             f"EEG: {eeg_windows.shape} | fNIRS: {fnirs_windows.shape} | "
-            f"Labels: {np.bincount(labels, minlength=4)}")
+            f"Labels: {np.bincount(labels, minlength=N_CLASSES)}")
 
     except Exception as e:
         elapsed = (time.time() - t0) / 60
@@ -816,8 +827,8 @@ def process_subject(subject_id):
 #  PARALLEL ENTRY POINT
 #  Memory footprint is MUCH smaller now (channel-space samples,
 #  no 16x16 spatial grid, no 21-segment fNIRS stacking):
-#    EEG windows ~1188 x 5x28x2000 x2bytes(f16)  ~= 0.66 GB
-#    fNIRS windows ~1188 x 3x36x100 x4bytes(f32) ~= 0.05 GB
+#    EEG windows ~891 x 5x28x2000 x2bytes(f16)  ~= 0.66 GB
+#    fNIRS windows ~891 x 3x36x100 x4bytes(f32) ~= 0.05 GB
 #    5-band continuous EEG stack (before windowing) ~= 0.6 GB
 #  Peak per subject ~= 1.5-2 GB -> back up to 6 workers is safe.
 # ============================================================
@@ -854,14 +865,16 @@ def run_parallel(subjects: list, n_workers: int = N_WORKERS):
 
     log_message("=" * 55)
     log_message(f"PARALLEL PIPELINE v3 START - {len(subjects)} subjects, {n_workers} workers")
-    log_message("Protocol: 4-class N-back (0/2/3-back + rest), channel-space samples")
+    log_message(f"Protocol: {N_CLASSES}-class N-back (0/2/3-back"
+                f"{' + rest' if INCLUDE_REST else ''}), channel-space samples, "
+                f"zscore={ZSCORE_MODE}")
     log_message("=" * 55)
 
     print(f"\n{'='*55}")
     print(f"  MSTFDN Preprocessing v3 (paper-exact protocol)")
     print(f"  Subjects : {len(subjects)}")
     print(f"  Workers  : {n_workers}")
-    print(f"  Expected : ~1188 samples/subject, 4 classes")
+    print(f"  Expected : ~{N_EXPECTED} samples/subject, {N_CLASSES} classes")
     print(f"{'='*55}\n")
 
     ctx  = mp.get_context('spawn')
