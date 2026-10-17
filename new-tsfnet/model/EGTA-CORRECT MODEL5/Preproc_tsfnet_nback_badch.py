@@ -152,6 +152,15 @@ _arg_parser.add_argument("--norm-scope", type=str, default="session", choices=["
                                "pipeline rather than assumed from the MSTFDN result; expected direction "
                                "is WORSE, not better, than 'session'. A non-'session' value writes to a "
                                "SEPARATE output folder and is a no-op unless ENABLE_PER_SESSION_NORM=True.")
+_arg_parser.add_argument("--per-session-norm", type=str, default="on", choices=["on", "off"],
+                          help="priority-E3 toggle (isolated variable): 'on' (default) = prior "
+                               "behavior bit-for-bit, ENABLE_PER_SESSION_NORM=True (the project's "
+                               "current accepted baseline). 'off' reproduces the ORIGINAL pre-E3 "
+                               "default (ENABLE_PER_SESSION_NORM=False): only the per-subject, "
+                               "pooled-across-all-3-sessions z-score is applied, with no additional "
+                               "per-session/per-segment re-normalization layer and no transductive "
+                               "use of the held-out session's unlabeled inputs. 'off' writes to a "
+                               "SEPARATE output folder.")
 _cli_args, _ = _arg_parser.parse_known_args()
 
 # ============================================================================
@@ -218,6 +227,9 @@ if FNIRS_SEG_START != 0.0:
 NORM_SCOPE = _cli_args.norm_scope
 if NORM_SCOPE != "session":
     OUTPUT_PATH = OUTPUT_PATH + f"_normscope{NORM_SCOPE}"
+_PER_SESSION_NORM_CLI = _cli_args.per_session_norm
+if _PER_SESSION_NORM_CLI == "off":
+    OUTPUT_PATH = OUTPUT_PATH + "_noE3"
 
 # NOTE (confirmed from Dataset_description_MATLAB.pdf / Shin et al. 2018, Sci Data): 26 subjects,
 # 3 sessions/subject, 9 trials/session (3 repeats x 0-/2-/3-back, counterbalanced order) -> 27
@@ -351,8 +363,10 @@ ENABLE_EEG_CONNECTIVITY = False
 # held-out session's unlabeled inputs and must be disclosed as such in the
 # thesis. Default False reproduces prior behavior exactly. The GROUPING used
 # (session vs. trial/segment) is controlled by NORM_SCOPE (--norm-scope),
-# see apply_per_session_normalization().
-ENABLE_PER_SESSION_NORM = True
+# see apply_per_session_normalization(). Whether this layer runs at all is
+# controlled by --per-session-norm (on=True, the accepted baseline; off=
+# the original pre-E3 default).
+ENABLE_PER_SESSION_NORM = (_PER_SESSION_NORM_CLI == "on")
 # priority-G2a: also save total haemoglobin HbT = HbO + HbR as a THIRD
 # chromophore channel, so fnirs_windows.npy becomes (N, S, 16, 16, T, 3)
 # instead of (N, S, 16, 16, T, 2). Requires the model to be built with
