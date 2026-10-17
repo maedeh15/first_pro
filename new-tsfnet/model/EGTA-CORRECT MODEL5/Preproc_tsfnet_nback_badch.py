@@ -137,6 +137,21 @@ _arg_parser.add_argument("--fnirs-seg-start", type=float, default=0.0,
                                "the coverage earlier: less post-task recovery in late windows, more "
                                "pre-task time in early windows. Must be a multiple of the 1 s step. "
                                "A non-zero value writes to a SEPARATE output folder.")
+_arg_parser.add_argument("--norm-scope", type=str, default="session", choices=["session", "segment"],
+                          help="priority-NORMSCOPE (MSTFDN-inspired isolated variable): the GROUPING "
+                               "used by apply_per_session_normalization() when ENABLE_PER_SESSION_NORM "
+                               "is True. 'session' (default) = prior behavior bit-for-bit, re-normalizes "
+                               "each modality using statistics pooled over all windows of the SAME "
+                               "session (session_ids) -- each session mixes all 3 n-back classes, so "
+                               "between-class differences survive. 'segment' = statistics pooled over "
+                               "all windows of the SAME TRIAL (trial_ids) instead -- each trial is a "
+                               "SINGLE class, so this is the TSFNet analogue of MSTFDN's rejected "
+                               "'segment' z-score mode, which was found to erase between-class band-"
+                               "power/amplitude differences (the Sec.6 EEG-near-chance finding). "
+                               "Included here so that prediction can be tested directly on this "
+                               "pipeline rather than assumed from the MSTFDN result; expected direction "
+                               "is WORSE, not better, than 'session'. A non-'session' value writes to a "
+                               "SEPARATE output folder and is a no-op unless ENABLE_PER_SESSION_NORM=True.")
 _cli_args, _ = _arg_parser.parse_known_args()
 
 # ============================================================================
@@ -200,6 +215,9 @@ if abs(FNIRS_SEG_START - round(FNIRS_SEG_START)) > 1e-9:
     raise ValueError(f"--fnirs-seg-start must be a whole number of seconds, got {FNIRS_SEG_START}")
 if FNIRS_SEG_START != 0.0:
     OUTPUT_PATH = OUTPUT_PATH + f"_fnirsshift{FNIRS_SEG_START:+g}"
+NORM_SCOPE = _cli_args.norm_scope
+if NORM_SCOPE != "session":
+    OUTPUT_PATH = OUTPUT_PATH + f"_normscope{NORM_SCOPE}"
 
 # NOTE (confirmed from Dataset_description_MATLAB.pdf / Shin et al. 2018, Sci Data): 26 subjects,
 # 3 sessions/subject, 9 trials/session (3 repeats x 0-/2-/3-back, counterbalanced order) -> 27
@@ -331,7 +349,9 @@ ENABLE_EEG_CONNECTIVITY = False
 # behind. See apply_per_session_normalization() for the full rationale and,
 # importantly, its LEAKAGE ANALYSIS -- this is transductive w.r.t. the
 # held-out session's unlabeled inputs and must be disclosed as such in the
-# thesis. Default False reproduces prior behavior exactly.
+# thesis. Default False reproduces prior behavior exactly. The GROUPING used
+# (session vs. trial/segment) is controlled by NORM_SCOPE (--norm-scope),
+# see apply_per_session_normalization().
 ENABLE_PER_SESSION_NORM = True
 # priority-G2a: also save total haemoglobin HbT = HbO + HbR as a THIRD
 # chromophore channel, so fnirs_windows.npy becomes (N, S, 16, 16, T, 3)
@@ -1401,11 +1421,25 @@ def preprocess_fnirs(subject_id, qc_dir, grid_bbox=None):
 # WINDOW EXTRACTION (paper Sec. 2.3)
 # ============================================================================
 def apply_per_session_normalization(eeg_windows, fnirs_windows, eeg_channel_space_windows,
-                                     session_ids, subject_id):
+                                     session_ids, subject_id, group_ids=None, group_label="session"):
     """
     priority-E3 (stage 1): re-normalize each modality SEPARATELY WITHIN EACH
     SESSION, on top of the existing per-channel/per-subject z-score that
     preprocess_eeg()/preprocess_fnirs() already applied.
+
+    priority-NORMSCOPE: `group_ids`/`group_label` generalize the grouping
+    used below from "session" (pass session_ids, the default, prior
+    behavior bit-for-bit when group_ids is left None) to any other grouping
+    -- in particular "segment" (pass trial_ids instead), the TSFNet analogue
+    of MSTFDN's rejected per-segment z-score. Each session mixes all 3
+    n-back classes (3 trials each), so grouping by session cannot erase
+    between-class differences; each TRIAL is a single class, so grouping by
+    trial_ids (one trial == one ~42s task segment) CAN -- this is exactly
+    the mechanism MSTFDN's segment-wise z-score ablation found to erase
+    between-class band-power/amplitude differences. Included here to test
+    that prediction directly on this pipeline; expected direction is WORSE
+    (pushing EEG accuracy toward chance), not better, than the "session"
+    default -- do not assume a "segment" run will improve on baseline.
 
     WHY THIS IS NOT REDUNDANT with the existing normalization: the existing
     z-score computes one mean/std per channel over the subject's FULL
@@ -1457,13 +1491,14 @@ def apply_per_session_normalization(eeg_windows, fnirs_windows, eeg_channel_spac
                 if eeg_channel_space_windows is not None and eeg_channel_space_windows.size
                 else eeg_channel_space_windows)
 
-    for sess in np.unique(session_ids):
-        m = (session_ids == sess)
+    ids = session_ids if group_ids is None else group_ids
+    for grp in np.unique(ids):
+        m = (ids == grp)
         n_win = int(m.sum())
         if n_win < 2:
             # A single window can't define a std; leave it as-is (already
             # per-subject z-scored) rather than divide by ~0.
-            log_message(f"  {subject_id}: per-session norm SKIPPED for session {sess} "
+            log_message(f"  {subject_id}: per-{group_label} norm SKIPPED for {group_label} {grp} "
                         f"(only {n_win} window(s) -- std undefined)")
             continue
 
@@ -1488,10 +1523,10 @@ def apply_per_session_normalization(eeg_windows, fnirs_windows, eeg_channel_spac
             c_std = c.std(axis=(0, 2), keepdims=True) + 1e-8
             chan_out[m] = (c - c_mean) / c_std
 
-    log_message(f"  {subject_id}: applied PER-SESSION normalization (priority-E3 stage 1) "
-                f"over {len(np.unique(session_ids))} session(s) "
-                f"(sanity check, should be ~1.0 -- EEG std={float(eeg_out.std()):.6g}, "
-                f"fNIRS std={float(fnirs_out.std()):.6g})")
+    log_message(f"  {subject_id}: applied PER-{group_label.upper()} normalization "
+                f"(priority-E3 stage 1, NORM_SCOPE='{group_label}') over {len(np.unique(ids))} "
+                f"{group_label}(s) (sanity check, should be ~1.0 -- "
+                f"EEG std={float(eeg_out.std()):.6g}, fNIRS std={float(fnirs_out.std()):.6g})")
     return eeg_out, fnirs_out, chan_out
 
 
@@ -1631,9 +1666,16 @@ def extract_windows(eeg_raw_filtered, eeg_pos_3d, events, fnirs_grid, fnirs_ev_t
     # exactly the windows that will actually be trained/tested on, and are
     # not skewed by windows that get discarded moments later. Default OFF
     # (ENABLE_PER_SESSION_NORM=False) reproduces prior behavior exactly.
+    # priority-NORMSCOPE: NORM_SCOPE='session' (default) groups by
+    # session_ids, bit-for-bit identical to the original call below.
+    # NORM_SCOPE='segment' groups by trial_ids instead (one trial ~= one
+    # 42s single-class task segment) -- see apply_per_session_normalization()
+    # docstring for why this is expected to HURT, not help.
     if ENABLE_PER_SESSION_NORM:
+        _norm_group_ids = trial_ids if NORM_SCOPE == "segment" else session_ids
         eeg_windows, fnirs_windows, eeg_channel_space_windows = apply_per_session_normalization(
-            eeg_windows, fnirs_windows, eeg_channel_space_windows, session_ids, subject_id)
+            eeg_windows, fnirs_windows, eeg_channel_space_windows, session_ids, subject_id,
+            group_ids=_norm_group_ids, group_label=NORM_SCOPE)
 
     return (
         eeg_windows,
