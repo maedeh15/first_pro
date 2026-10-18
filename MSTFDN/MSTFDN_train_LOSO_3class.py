@@ -322,7 +322,7 @@ def cohen_kappa(y_true, y_pred, num_classes=3):
 @torch.no_grad()
 def evaluate(model, loader, loss_fn, device) -> dict:
     model.eval()
-    total_loss = 0.0
+    total_loss = ce_total = 0.0
     all_preds, all_labels = [], []
 
     for eeg, fnirs, labels in loader:
@@ -331,9 +331,10 @@ def evaluate(model, loader, loss_fn, device) -> dict:
         labels = labels.to(device)
 
         logits, he, hf, hef = model(eeg, fnirs)
-        loss, *_ = loss_fn(logits, labels, he, hf, hef)
+        loss, ce, *_ = loss_fn(logits, labels, he, hf, hef)
 
         total_loss += loss.item() * labels.size(0)
+        ce_total   += ce.item()   * labels.size(0)
         all_preds.extend(logits.argmax(1).cpu().tolist())
         all_labels.extend(labels.cpu().tolist())
 
@@ -344,7 +345,8 @@ def evaluate(model, loader, loss_fn, device) -> dict:
     f1     = f1_score(all_labels, all_preds, average='macro', zero_division=0)
 
     return {
-        'loss': total_loss / n,
+        'loss': total_loss / n,     # ce + L2 + HSIC (the trained objective)
+        'ce':   ce_total / n,       # cross-entropy alone (Eq. 23)
         'acc':  acc,
         'kappa': cohen_kappa(all_labels, all_preds),   # FIX 2: second acceptance metric
         'recall': recall,
@@ -358,12 +360,32 @@ def evaluate(model, loader, loss_fn, device) -> dict:
 CLASS_NAMES = ["0-back", "2-back", "3-back"]
 
 
+# How the best epoch is chosen on the validation set. 'loss' is the full
+# training objective (CE + L2 + HSIC); because Loss_nw starts an order of
+# magnitude above the CE term and shrinks monotonically as the weights decay,
+# it tracks weight shrinkage more than classification quality -- in the
+# recorded VP001 leak test, selecting on it picked a 27.9% epoch where the
+# best epoch of the same run was 41.1%, and over one fold loss and accuracy
+# were essentially uncorrelated (r = +0.11). 'ce' and 'kappa' look only at
+# the predictions. The paper does not say which was used.
+SELECT_CRITERIA = {
+    'loss':  (lambda m: m['loss'],   'validation total loss (CE + L2 + HSIC)'),
+    'ce':    (lambda m: m['ce'],     'validation cross-entropy'),
+    'kappa': (lambda m: -m['kappa'], "validation Cohen's kappa"),
+}
+
+
 def train_fold(model, cfg, train_loader, val_loader,
-               checkpoint_path: str, device: str) -> dict:
+               checkpoint_path: str, device: str,
+               select_on: str = 'ce') -> dict:
     """
     Train one LOSO fold. Logs every epoch in the same layout as the TSFNet
     log. Returns {'best_epoch', 'stopped_epoch', 'early_stopped', 'best_val'}.
+
+    select_on: which validation quantity decides the best epoch AND early
+    stopping -- 'ce' (default), 'loss' or 'kappa'. See SELECT_CRITERIA.
     """
+    score_of, score_name = SELECT_CRITERIA[select_on]
     loss_fn   = MSTFDNLoss(cfg, model)
     optimizer = torch.optim.Adam(model.parameters(),
                                   lr=cfg.lr, weight_decay=cfg.weight_decay)
@@ -372,7 +394,7 @@ def train_fold(model, cfg, train_loader, val_loader,
         T_max=cfg.max_epochs - cfg.warmup_epochs,
         eta_min=cfg.lr * cfg.eta_min_ratio)
 
-    best_val_loss = float('inf')
+    best_score    = float('inf')
     best_epoch    = 0
     best_metrics  = {}
     patience_cnt  = 0
@@ -390,11 +412,12 @@ def train_fold(model, cfg, train_loader, val_loader,
 
         log(f"[train] epoch {epoch_no} | train_loss={tr['loss']:.4f} "
             f"train_acc={tr['acc']:.4f} | val_loss={va['loss']:.4f} "
-            f"val_acc={va['acc']:.4f} val_kappa={va['kappa']:.4f}")
+            f"val_ce={va['ce']:.4f} val_acc={va['acc']:.4f} "
+            f"val_kappa={va['kappa']:.4f}")
 
-        # early stopping on validation loss
-        if va['loss'] < best_val_loss:
-            best_val_loss = va['loss']
+        # best epoch / early stopping, judged on `select_on` only
+        if score_of(va) < best_score:
+            best_score    = score_of(va)
             best_metrics  = va.copy()
             best_epoch    = epoch_no
             patience_cnt  = 0
@@ -402,6 +425,7 @@ def train_fold(model, cfg, train_loader, val_loader,
                 'epoch':       epoch_no,
                 'model_state': model.state_dict(),
                 'val_metrics': va,
+                'select_on':   select_on,
             }, checkpoint_path)
         else:
             patience_cnt += 1
@@ -471,7 +495,7 @@ def _pm(values):
 def run_loso_subject(subject_id: str, cfg: MSTFDNConfig,
                      out_dir: str, device: str,
                      val_mode: str = "trial", seed: int = 42,
-                     print_config: bool = False) -> dict:
+                     select_on: str = "ce", print_config: bool = False) -> dict:
     """
     Run 3-fold LOSO for one subject.
     Returns a subject summary dict (with a 'folds' list), or None if the
@@ -516,7 +540,8 @@ def run_loso_subject(subject_id: str, cfg: MSTFDNConfig,
             log(f"[config] val_mode={val_mode!r} -- validation is carved from the two "
                 f"TRAINING sessions only; the test session is never used for model "
                 f"selection")
-            log(f"[config] early stopping on val_loss, patience={cfg.patience}, "
+            log(f"[config] model selection + early stopping on "
+                f"{SELECT_CRITERIA[select_on][1]} (--select-on {select_on}), "
                 f"max_epochs={cfg.max_epochs}, warmup={cfg.warmup_epochs}, "
                 f"lr={cfg.lr}, weight_decay={cfg.weight_decay}, batch={cfg.batch_size}")
             log(f"[config] no AdaBN / no test-time adaptation -- BatchNorm uses "
@@ -566,15 +591,16 @@ def run_loso_subject(subject_id: str, cfg: MSTFDNConfig,
 
         t0 = time.time()
         # Model selection uses VALIDATION only...
-        tr_info = train_fold(model, cfg, train_loader, val_loader, ckpt_path, device)
+        tr_info = train_fold(model, cfg, train_loader, val_loader, ckpt_path, device,
+                             select_on=select_on)
         # ...then the best checkpoint is scored ONCE on the untouched test set.
         # The checkpoint is a dict {'epoch','model_state','val_metrics'};
         # weights_only=False because val_metrics holds numpy scalars
         # (PyTorch >= 2.6 defaults to weights_only=True).
         ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
         model.load_state_dict(ckpt['model_state'])
-        log(f"[select] using best checkpoint (epoch {ckpt['epoch']}, lowest val_loss) "
-            f"as the final model")
+        log(f"[select] using best checkpoint (epoch {ckpt['epoch']}, best "
+            f"{SELECT_CRITERIA[select_on][1]}) as the final model")
         test_m  = evaluate(model, test_loader, MSTFDNLoss(cfg, model), device)
         abl     = modality_ablation(model, test_loader, device)
         elapsed = (time.time() - t0) / 60
@@ -599,7 +625,9 @@ def run_loso_subject(subject_id: str, cfg: MSTFDNConfig,
             'best_epoch':     int(ckpt['epoch']),
             'stopped_epoch':  tr_info['stopped_epoch'],
             'early_stopped':  tr_info['early_stopped'],
+            'select_on':      select_on,
             'best_val_loss':  float(tr_info['best_val'].get('loss', float('nan'))),
+            'best_val_ce':    float(tr_info['best_val'].get('ce', float('nan'))),
             'best_val_acc':   float(tr_info['best_val'].get('acc', float('nan'))),
             'best_val_kappa': float(tr_info['best_val'].get('kappa', float('nan'))),
             'accuracy':       round(test_m['acc'] * 100, 2),
@@ -703,6 +731,15 @@ def main():
                          "'trial' (default): hold out ~20%% of TRIALS pooled across both "
                          "training sessions -- identical in kind to TSFNet's own split. "
                          "'cross_session': hold out one WHOLE training session.")
+    ap.add_argument("--select-on", type=str, default="ce",
+                    choices=["ce", "loss", "kappa"],
+                    help="What decides the best epoch and early stopping, measured on "
+                         "the VALIDATION set. 'ce' (default): cross-entropy alone. "
+                         "'loss': the full objective CE + L2 + HSIC -- the L2 term "
+                         "dominates it and tracks weight shrinkage rather than "
+                         "classification, so it can select a clearly worse epoch. "
+                         "'kappa': validation Cohen's kappa. The paper does not say "
+                         "which was used.")
     ap.add_argument("--data", default=None,
                     help="preprocessed folder (default: PREPROCESSED_PATH in this file)")
     ap.add_argument("--out", default=None,
@@ -720,6 +757,7 @@ def main():
 
     SEED = args.seed
     VAL_MODE = args.val_mode
+    SELECT_ON = args.select_on
     random.seed(SEED); np.random.seed(SEED); torch.manual_seed(SEED)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(SEED)
@@ -727,10 +765,14 @@ def main():
     torch.backends.cudnn.benchmark = False
 
     # Results of different configs must never share a folder.
-    out_root = os.path.join(OUTPUT_PATH, f"seed{SEED}_val{VAL_MODE}")
+    # 'loss' keeps the original folder name so runs started before --select-on
+    # existed still resume; any other criterion gets its own folder.
+    tag = f"seed{SEED}_val{VAL_MODE}" + ("" if SELECT_ON == "loss" else f"_sel{SELECT_ON}")
+    out_root = os.path.join(OUTPUT_PATH, tag)
     os.makedirs(out_root, exist_ok=True)
     LOG_FILE = os.path.join(out_root, "training_log.txt")
-    run_tag = f"MSTFDN_LOSO_3CLASS_PAPER_EXACT_VAL{VAL_MODE.upper()}_SEED{SEED}"
+    run_tag = (f"MSTFDN_LOSO_3CLASS_PAPER_EXACT_VAL{VAL_MODE.upper()}"
+               f"_SEL{SELECT_ON.upper()}_SEED{SEED}")
     stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
     log(f"===== CrashSafeLogger started [{run_tag}] "
@@ -744,6 +786,8 @@ def main():
     log(f"Preprocessed data: {PREPROCESSED_PATH}")
     log(f"Output: {out_root}")
     log(f"[SEED CONTROL] seed={SEED} (python/numpy/torch seeded, cuDNN deterministic)")
+    log(f"[SELECTION] best epoch + early stopping on "
+        f"{SELECT_CRITERIA[SELECT_ON][1]} (--select-on {SELECT_ON})")
     log("[resume] finished subjects/folds found in the output folder are loaded, "
         "not retrained -- re-running this command continues an interrupted run")
 
@@ -762,7 +806,8 @@ def main():
             continue
         try:
             s = run_loso_subject(subject_id, cfg, out_root, DEVICE,
-                                 val_mode=VAL_MODE, seed=SEED, print_config=(i == 1))
+                                 val_mode=VAL_MODE, seed=SEED, select_on=SELECT_ON,
+                                 print_config=(i == 1))
             if s is None:
                 failed.append((subject_id, "no folds"))
             else:
@@ -879,13 +924,14 @@ def main():
         })
     for sid, why in failed:
         tsfnet_rows.append({'subject_id': sid, 'status': 'failed', 'error': why})
-    base = f"baseline_all_subjects_{stamp}_MSTFDN_seed{SEED}_val{VAL_MODE}"
+    base = f"baseline_all_subjects_{stamp}_MSTFDN_{tag}"
     p_csv  = os.path.join(out_root, base + ".csv")
     p_json = os.path.join(out_root, base + ".json")
     pd.DataFrame(tsfnet_rows).to_csv(p_csv, index=False)
     with open(p_json, "w", encoding="utf-8") as fh:
         json.dump({
             'run_tag': run_tag, 'seed': SEED, 'val_mode': VAL_MODE,
+            'select_on': SELECT_ON,
             'n_completed': len(summaries), 'n_total': n_sub,
             'failed': [{'subject_id': a, 'error': b} for a, b in failed],
             'grand_mean_acc': float(np.mean(accs)), 'grand_std_acc': float(np.std(accs)),
