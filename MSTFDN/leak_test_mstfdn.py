@@ -182,6 +182,26 @@ def main():
         per_sub = df.groupby("subject")[col].mean()
         log(f"  {name:38s}: {per_sub.mean():.4f} (+-{per_sub.std(ddof=0):.4f})")
     log("  paper (Table 2, LOSO 3-class)        : 0.6902")
+
+    # The quantity the test exists to measure: what epoch selection on the
+    # test session BUYS over the honest protocol, fold by fold.
+    # Caveat printed with it: the two runs are not paired on training data --
+    # the leaky run trains on all 594 windows, the honest one on 495 after the
+    # validation split, and the RNG stream differs. The extra training data
+    # favours the leaky run, so a gain at or below zero is the stronger result.
+    g = df.dropna(subset=["honest_acc"])
+    if len(g):
+        log(f"  leak gain over honest, per fold (n={len(g)}):")
+        for col, name in (("leak_es_acc", "early stopping on TEST loss"),
+                          ("leak_max_acc", "best epoch picked on TEST acc")):
+            d = (g[col] - g["honest_acc"]).to_numpy()
+            # honest_acc comes from a CSV rounded to 0.01 percentage points,
+            # so anything under 1e-3 is a tie, not an improvement.
+            log(f"    {name:34s}: {d.mean():+.4f} (+-{d.std(ddof=0):.4f}) "
+                f"| improved in {(d > 1e-3).sum()}/{len(d)} folds "
+                f"| worst {d.min():+.4f} best {d.max():+.4f}")
+        log("    (not paired: leaky trains on 594 windows, honest on 495; "
+            "the extra data favours the leaky run)")
     log(f"saved: {os.path.join(out_dir, 'leak_test_results.csv')}")
 
     # test-accuracy curves, one panel per subject
