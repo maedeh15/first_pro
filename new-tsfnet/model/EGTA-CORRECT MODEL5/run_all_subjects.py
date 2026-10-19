@@ -692,7 +692,7 @@ _arg_parser.add_argument("--normalize-ypred", action="store_true",
                                "(confirmed: w_eeg/w_fusion/w_fnirs sit within ~0.001 of each "
                                "other for every one of 26 subjects, seed 42 reference run).")
 _arg_parser.add_argument("--val-mode", type=str, default="trial",
-                          choices=["trial", "cross_session"],
+                          choices=["trial", "cross_session", "test_leak"],
                           help="priority-XSVAL: how the stage-1 validation set is carved out of "
                                "the two training sessions. 'trial' (default) is the ORIGINAL "
                                "behavior, bit-exact: 20%% of TRIALS pooled across both training "
@@ -701,7 +701,11 @@ _arg_parser.add_argument("--val-mode", type=str, default="trial",
                                "'cross_session' holds out one WHOLE training session instead -> "
                                "9 validation trials AND cross-session validation, matching the "
                                "test regime. Trade-off: training data is halved (1 session "
-                               "instead of 2).")
+                               "instead of 2). 'test_leak' is a DELIBERATE-LEAKAGE DIAGNOSTIC, "
+                               "never a valid result: training data is IDENTICAL to 'trial', but "
+                               "best-epoch selection/early stopping use the held-out TEST session. "
+                               "Quantifies how optimistic selection on test would be (cf. the "
+                               "MSTFDN-paper reproduction gap). Requires --stage2-stop-mode none.")
 _arg_parser.add_argument("--no-decay-scalars", action="store_true",
                           help="priority-nodecay-scalars: exclude 1-D/scalar parameters "
                                "(gates, w_eeg/w_fusion/w_fnirs, BatchNorm/GroupNorm affine "
@@ -1065,7 +1069,7 @@ _NORM_SUBTAG = (f"_gn{NORM_GROUPS}" if NORM_MODE == "group" else "")
 # being caught; fixed now, before it happens again with real consequences.
 _EFGF_SUBTAG = f"_efgf{EFGF_GATE_MODE}" if EFGF_GATE_MODE != "clamp" else ""
 _YPREDNORM_SUBTAG = "_ypnorm" if NORMALIZE_YPRED else ""
-_VALMODE_SUBTAG = "_xsval" if VAL_MODE == "cross_session" else ""
+_VALMODE_SUBTAG = {"cross_session": "_xsval", "test_leak": "_TESTLEAK"}.get(VAL_MODE, "")
 _NODECAY_SUBTAG = "_nodecay" if NO_DECAY_SCALARS else ""
 _STAGE2_SUBTAG = ({"epoch_count": "_s2ep", "none": "_s2none"}.get(STAGE2_STOP_MODE, "")
                   + "_s2reset")   # CRITICAL: the stage-2 optimizer lr/state reset (see

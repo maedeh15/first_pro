@@ -4341,8 +4341,11 @@ def run_subject_cross_session(subject_dir, subject_id, device="cuda" if torch.cu
     if fnirs_temporal_align not in ("none", "egta"):
         raise ValueError(f"fnirs_temporal_align must be 'none' or 'egta', "
                          f"got {fnirs_temporal_align!r}")
-    if val_mode not in ("trial", "cross_session"):
-        raise ValueError(f"val_mode must be 'trial' or 'cross_session', got {val_mode!r}")
+    if val_mode not in ("trial", "cross_session", "test_leak"):
+        raise ValueError(f"val_mode must be 'trial', 'cross_session' or 'test_leak', got {val_mode!r}")
+    if val_mode == "test_leak" and stage2_stop_mode != "none":
+        raise ValueError("val_mode='test_leak' requires stage2_stop_mode='none': stage 2 would "
+                         "concatenate the validation loader (= the TEST session) into training.")
     if stage2_stop_mode not in ("loss", "epoch_count", "none"):
         raise ValueError(f"stage2_stop_mode must be 'loss', 'epoch_count', or 'none', "
                          f"got {stage2_stop_mode!r}")
@@ -4448,8 +4451,9 @@ def run_subject_cross_session(subject_dir, subject_id, device="cuda" if torch.cu
 
         tv_trial_ids = trial_ids[train_val_idx]
         tv_labels = labels_np[train_val_idx]
-        if val_mode == "trial":
-            # DEFAULT -- bit-exact prior behavior (rule 5).
+        if val_mode in ("trial", "test_leak"):
+            # DEFAULT -- bit-exact prior behavior (rule 5). 'test_leak' uses the SAME split
+            # (training data identical); only the val_loader is swapped for the test loader below.
             train_sub_idx, val_sub_idx = trial_level_train_val_split(tv_trial_ids, tv_labels)
         else:
             # priority-XSVAL: hold out the LOWER-numbered remaining session as
@@ -4489,6 +4493,12 @@ def run_subject_cross_session(subject_dir, subject_id, device="cuda" if torch.cu
         train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
         val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False)
         test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False)
+        if val_mode == "test_leak":
+            # DELIBERATE LEAKAGE DIAGNOSTIC -- NEVER a valid result. Best-epoch selection and
+            # early stopping now see the held-out test session.
+            print("  *** [val_mode] 'test_leak': model selection uses the TEST session. "
+                  "DIAGNOSTIC ONLY -- these accuracies are optimistically biased by design. ***")
+            val_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False)
 
         class_weight = None
         num_classes = 3
