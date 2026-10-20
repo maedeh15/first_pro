@@ -379,6 +379,11 @@ _arg_parser.add_argument("--cafe-lambda", type=float, default=1.0,
                                "the total loss. That term pushes the two modality "
                                "representations toward being correlated (redundant). Default "
                                "1.0 = paper Eq. 5, bit-exact prior behavior. 0.0 removes it.")
+_arg_parser.add_argument("--cafe-pcc-mode", type=str, default="signed", choices=["signed", "abs"],
+                          help="priority-CAFEPCCABS: 'signed' (default) = the original L_cafe = 1 - mean PCC, "
+                               "bit-exact. 'abs' = 1 - mean |PCC| (STA-Net's form: anti-correlation is also "
+                               "'aligned', so the term stops pushing the two streams toward positive correlation "
+                               "only). Loss-only change: no parameter, no RNG, forward unchanged.")
 _arg_parser.add_argument("--egta-pcc-lambda", type=float, default=0.0,
                           help="priority-EGTAPCC: weight of STA-Net's L_egta = 1 - mean|PCC("
                                "F_fusion, F_fnirs(ta))| on the PURE EGTA-pooled fNIRS feature "
@@ -821,6 +826,7 @@ CONV_DROPOUT_TYPE = SEED_ARGS.conv_dropout_type
 FUSION_FNIRS_INJECT = SEED_ARGS.fusion_fnirs_inject
 ERP_BRANCH = SEED_ARGS.erp_branch
 EGTA_PCC_LAMBDA = SEED_ARGS.egta_pcc_lambda
+CAFE_PCC_MODE = SEED_ARGS.cafe_pcc_mode
 EEG_FILTERBANK = SEED_ARGS.eeg_filterbank
 EEG_FILTERBANK_SCOPE = SEED_ARGS.eeg_filterbank_scope
 FNIRS_CHROMA_SPLIT = SEED_ARGS.fnirs_chroma_split
@@ -1106,6 +1112,7 @@ _DATAROOT_SUBTAG = ("_data-" + os.path.basename(os.path.normpath(DATA_ROOT))
                     if os.path.normpath(DATA_ROOT) != os.path.normpath(_DEFAULT_DATA_ROOT) else "")
 _ERP_SUBTAG = f"_erp{ERP_BRANCH}" if ERP_BRANCH != "none" else ""
 _ERP_SUBTAG += f"_egtapcc{EGTA_PCC_LAMBDA:g}" if EGTA_PCC_LAMBDA > 0.0 else ""   # priority-EGTAPCC
+_ERP_SUBTAG += "_cafepccabs" if CAFE_PCC_MODE == "abs" else ""   # priority-CAFEPCCABS
 _ERP_SUBTAG += (f"_fb{EEG_FILTERBANK}{'' if EEG_FILTERBANK_SCOPE == 'both' else '-eegonly'}"
                 if EEG_FILTERBANK != "none" else "")                                  # priority-FILTERBANK
 _ERP_SUBTAG += f"_cs{FNIRS_CHROMA_SPLIT}" if FNIRS_CHROMA_SPLIT != "none" else ""      # priority-CHROMASPLIT
@@ -1355,6 +1362,7 @@ with CrashSafeLogger(os.path.join(RESULTS_DIR_VARIANT, f"baseline_run_log_{RUN_T
                 fusion_fnirs_inject=FUSION_FNIRS_INJECT,  # priority-FNIRSINJECT: "none" (default) = paper design
                 init_checkpoint=PRETRAIN_CKPT.get(subject_id),  # priority-XSUBJ: None (default) = random init
                 erp_branch=ERP_BRANCH,                    # priority-ERP: "none" (default) = no ERP pathway
+                cafe_pcc_mode=CAFE_PCC_MODE,                 # priority-CAFEPCCABS
                 egta_pcc_lambda=EGTA_PCC_LAMBDA,          # priority-EGTAPCC: 0.0 (default) = term off
                 eeg_filterbank=EEG_FILTERBANK,            # priority-FILTERBANK: "none" (default) = off
                 fnirs_chroma_split=FNIRS_CHROMA_SPLIT,    # priority-CHROMASPLIT: "none" (default) = off

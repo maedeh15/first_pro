@@ -1458,7 +1458,7 @@ class TSFNet(nn.Module):
                  efgf_gate_mode="clamp", efgf_gate_init=-6.0, attn_conv_init_gain=None,
                  conv_dropout=None, conv_dropout_type="channel",
                  fusion_fnirs_inject="none", erp_branch="none",
-                 egta_pcc_lambda=0.0, eeg_filterbank="none", eeg_filterbank_scope="both",
+                 egta_pcc_lambda=0.0, cafe_pcc_mode="signed", eeg_filterbank="none", eeg_filterbank_scope="both",
                  fnirs_chroma_split="none",
                  bandtok_d_model=32, bandtok_heads=4, bandtok_norm="none"):
         super().__init__()
@@ -1505,6 +1505,13 @@ class TSFNet(nn.Module):
         if egta_pcc_lambda > 0.0 and fnirs_temporal_align != "egta":
             raise ValueError("egta_pcc_lambda > 0 requires fnirs_temporal_align='egta'")
         self.egta_pcc_lambda = float(egta_pcc_lambda)
+        # priority-CAFEPCCABS: STA-Net's correlation losses use mean |PCC|; the existing
+        # L_cafe (Eq. 13) uses the SIGNED PCC. 'signed' (default) = bit-exact prior behavior.
+        # 'abs' = 1 - mean|PCC(enhanced_fnirs, enhanced_fusion)|. Affects the LOSS only: no
+        # parameter, no RNG, no forward change, so checkpoints stay interchangeable.
+        if cafe_pcc_mode not in ("signed", "abs"):
+            raise ValueError(f"cafe_pcc_mode must be 'signed' or 'abs', got {cafe_pcc_mode!r}")
+        self.cafe_pcc_mode = cafe_pcc_mode
         # priority-ERP: "eeg" feeds the ERP embedding into the EEG classifier's
         # input, "eeg_fusion" into both the EEG and the fusion classifiers'.
         # The ERP tensor travels in the x_chan batch slot (see NBackDataset
@@ -2374,6 +2381,7 @@ class TSFNet(nn.Module):
             "cafe_hsic_loss": cafe_hsic_loss,   # priority-B1, see CAFELayer.forward
             "egta_pcc_loss": egta_pcc_loss,     # priority-EGTAPCC: unweighted, None when off
             "egta_pcc_lambda": self.egta_pcc_lambda,
+            "cafe_pcc_mode": self.cafe_pcc_mode,   # priority-CAFEPCCABS
             "eeg_band_gate": (band_gate_value.detach()
                               if band_gate_value is not None else None),  # priority-D-1-safe
         }
@@ -2418,9 +2426,12 @@ def efgf_regularization_loss(eeg_pcc1, phi_pcc1, eeg_pcc2, phi_pcc2):
     return 1.0 - mean_pcc
 
 
-def cafe_regularization_loss(enhanced_fnirs, enhanced_fusion):
-    """Eq. 13: L_cafe = 1 - mean PCC(Fe_fnirs, Fe_fusion)."""
+def cafe_regularization_loss(enhanced_fnirs, enhanced_fusion, mode="signed"):
+    """Eq. 13: L_cafe = 1 - mean PCC(Fe_fnirs, Fe_fusion). mode='abs' (priority-CAFEPCCABS)
+    uses the mean ABSOLUTE PCC instead; 'signed' (default) is the original, bit-exact."""
     pcc = pearson_corrcoef(enhanced_fnirs, enhanced_fusion)
+    if mode == "abs":
+        pcc = pcc.abs()
     return 1.0 - pcc.mean()
 
 
@@ -2657,7 +2668,8 @@ def tsfnet_loss(y_eeg, y_fusion, y_fnirs, y_pred, labels, aux,
 
     l_efgf = efgf_regularization_loss(aux["eeg_pcc1"], aux["phi_pcc1"],
                                        aux["eeg_pcc2"], aux["phi_pcc2"])
-    l_cafe = cafe_regularization_loss(aux["enhanced_fnirs"], aux["enhanced_fusion"])
+    l_cafe = cafe_regularization_loss(aux["enhanced_fnirs"], aux["enhanced_fusion"],
+                                      mode=aux.get("cafe_pcc_mode", "signed"))
 
     # priority-PCCLAMBDA: Eq. 5 adds L_efgf and L_cafe to L_class with NO
     # weight. Each is 1 - PCC in [0, 2], so together they can contribute up to
@@ -4172,7 +4184,7 @@ def run_subject_cross_session(subject_dir, subject_id, device="cuda" if torch.cu
                                adabn=False, dropout=0.5, cafe_dropout=0.3,
                                conv_dropout=None, conv_dropout_type="channel",
                                fusion_fnirs_inject="none", erp_branch="none",
-                               egta_pcc_lambda=0.0,
+                               egta_pcc_lambda=0.0, cafe_pcc_mode="signed",
                                eeg_filterbank="none", eeg_filterbank_scope="both",
                                fnirs_chroma_split="none",
                                bandtok_d_model=32, bandtok_heads=4, bandtok_norm="none",
@@ -4606,7 +4618,7 @@ def run_subject_cross_session(subject_dir, subject_id, device="cuda" if torch.cu
                         dropout=dropout, cafe_dropout=cafe_dropout,
                         conv_dropout=conv_dropout, conv_dropout_type=conv_dropout_type,
                         fusion_fnirs_inject=fusion_fnirs_inject, erp_branch=erp_branch,
-                        egta_pcc_lambda=egta_pcc_lambda,
+                        egta_pcc_lambda=egta_pcc_lambda, cafe_pcc_mode=cafe_pcc_mode,
                         eeg_filterbank=eeg_filterbank, eeg_filterbank_scope=eeg_filterbank_scope,
                         fnirs_chroma_split=fnirs_chroma_split,
                         bandtok_d_model=bandtok_d_model, bandtok_heads=bandtok_heads,
