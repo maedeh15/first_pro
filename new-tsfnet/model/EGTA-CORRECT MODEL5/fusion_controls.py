@@ -49,7 +49,8 @@ import late_fusion_riemann as L
 
 W = 0.5
 VARIANTS = ("logvar", "raw|broad", "raw|multi", "EA|multi", "riem|multi", "riem_disp|broad", "riem_disp|multi")
-MAIN = "riem_disp|multi"
+MAIN = "riem_disp|multi"          # member whose confusion matrices / per-class recall are printed (--main)
+PREREG = "riem_disp|multi"        # reference of the PRE-REGISTERED attribution reading -- never follows --main
 CONTROL = "logvar"
 CLASSES = (0, 1, 2)
 
@@ -196,15 +197,15 @@ def summarise(rows, CM, subj_cnt):
     print("\n" + "=" * 118)
     print("QUESTION 1 -- attribution: same fusion, different EEG member")
     print("=" * 118)
-    print(f"{'EEG member':17} {'alone':>7} | {'fused win':>9} {'fused blk':>9} {'single':>7} | {'dWin vs deep':>12} {'p':>7} {'p_holm':>7} | {'dWin vs MAIN':>12} {'p':>7} {'p_holm':>7}")
+    print(f"{'EEG member':17} {'alone':>7} | {'fused win':>9} {'fused blk':>9} {'single':>7} | {'dWin vs deep':>12} {'p':>7} {'p_holm':>7} | {'dWin vs PREREG':>14} {'p':>7} {'p_holm':>7}")
     pd_raw, pm_raw, store = [], [], {}
     for v in VARIANTS:
         fw, ft = ps(v, "fused_win"), ps(v, "fused_tri")
         d = fw - deep_w
         pd_raw.append(wil(d))
         store[v] = (ps(v, "member_win"), fw, ft, ps(v, "fused_single_win"), d)
-    main_fw = store[MAIN][1]
-    others = [v for v in VARIANTS if v != MAIN]
+    main_fw = store[PREREG][1]
+    others = [v for v in VARIANTS if v != PREREG]
     for v in others:
         pm_raw.append(wil(store[v][1] - main_fw))
     adj_d = dict(zip(VARIANTS, holm(pd_raw)))
@@ -212,11 +213,11 @@ def summarise(rows, CM, subj_cnt):
     pm = dict(zip(others, pm_raw))
     for i, v in enumerate(VARIANTS):
         mem, fw, ft, fs, d = store[v]
-        if v == MAIN:
-            tail = f"{'-':>12} {'-':>7} {'-':>7}"
+        if v == PREREG:
+            tail = f"{'-':>14} {'-':>7} {'-':>7}"
         else:
             dm = fw - main_fw
-            tail = f"{dm.mean():+12.4f} {pm[v]:7.4f} {adj_m[v]:7.4f}"
+            tail = f"{dm.mean():+14.4f} {pm[v]:7.4f} {adj_m[v]:7.4f}"
         print(f"{v:17} {mem.mean():7.4f} | {fw.mean():9.4f} {ft.mean():9.4f} {fs.mean():7.4f} | {d.mean():+12.4f} {pd_raw[i]:7.4f} {adj_d[v]:7.4f} | {tail}")
     # pre-registered reading
     dl = main_fw - store[CONTROL][1]
@@ -353,15 +354,19 @@ def self_test():
 
 
 def main():
+    global MAIN
     ap = argparse.ArgumentParser()
     ap.add_argument("--data")
     ap.add_argument("--posteriors-dir")
     ap.add_argument("--self-test", action="store_true")
     ap.add_argument("--subjects", nargs="+")
     ap.add_argument("--out", help="per-fold rows csv")
+    ap.add_argument("--main", default=MAIN, choices=list(VARIANTS),
+                    help="member used for the QUESTION 2 confusion matrices and per-class recall. The\nPRE-REGISTERED attribution reading of QUESTION 1 always stays on riem_disp|multi, whatever this is set to.")
     a = ap.parse_args()
     if a.self_test:
         raise SystemExit(self_test())
+    MAIN = a.main
     if not (a.data and a.posteriors_dir):
         ap.error("--data and --posteriors-dir are required unless --self-test")
     rows, skipped, CM, subj_cnt = run(a.data, a.posteriors_dir, subjects=a.subjects)
