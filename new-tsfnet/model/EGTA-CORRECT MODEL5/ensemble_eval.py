@@ -123,6 +123,11 @@ p.add_argument("--cafe-dropout", type=float, default=0.3)
 p.add_argument("--eeg-temporal-mode", type=str, default="gap", choices=["gap", "gap_logvar", "bilstm"])
 p.add_argument("--fusion-fnirs-inject", type=str, default="none", choices=["none", "stage1", "both"])
 p.add_argument("--erp-branch", type=str, default="none", choices=["none", "eeg", "eeg_fusion"])
+p.add_argument("--riem-branch", type=str, default="none", choices=["none", "member"],
+               help="priority-RIEM: must match the training flag (adds the Riemannian member head; needs "
+                    "{sid}_eeg_riem.npy from build_riem_features.py).")
+p.add_argument("--riem-blend", type=float, default=0.5, help="blend of the Riemannian member (match training)")
+p.add_argument("--riem-dim", type=int, default=1624, help="tangent-feature dimension (4 bands x 28*29/2 = 1624)")
 p.add_argument("--eeg-filterbank", type=str, default="none", choices=["none", "fixed", "learnable"])
 p.add_argument("--eeg-filterbank-scope", type=str, default="both", choices=["both", "eeg"])
 p.add_argument("--fnirs-chroma-split", type=str, default="none",
@@ -261,6 +266,8 @@ def build_model(device):
         eeg_band_mode=ARGS.eeg_band_mode, norm_mode=ARGS.norm_mode,
         efgf_gate_mode=ARGS.efgf_gate_mode, efgf_gate_init=ARGS.efgf_gate_init,
         fusion_fnirs_inject=ARGS.fusion_fnirs_inject, erp_branch=ARGS.erp_branch,
+        riem_branch=ARGS.riem_branch, riem_blend=ARGS.riem_blend,
+        riem_dim=(ARGS.riem_dim if ARGS.riem_branch != "none" else 0),
         eeg_filterbank=ARGS.eeg_filterbank, eeg_filterbank_scope=ARGS.eeg_filterbank_scope,
         fnirs_chroma_split=ARGS.fnirs_chroma_split,
         bandtok_d_model=ARGS.bandtok_d_model, bandtok_heads=ARGS.bandtok_heads,
@@ -396,7 +403,8 @@ def main():
             print(f"[{sid}] SKIP -- no preprocessed folder")
             continue
         try:
-            full = NBackDataset(subject_dir, sid, load_erp=(ARGS.erp_branch != "none"))
+            full = NBackDataset(subject_dir, sid, load_erp=(ARGS.erp_branch != "none"),
+                             load_riem=(ARGS.riem_branch != "none"))
         except Exception as exc:
             print(f"[{sid}] SKIP -- could not load dataset: {exc}")
             continue

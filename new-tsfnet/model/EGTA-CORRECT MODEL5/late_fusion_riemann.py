@@ -70,10 +70,15 @@ def acc_2v3(P, y):
     return float((np.where(P[m][:, 1] >= P[m][:, 2], 1, 2) == y[m]).mean())
 
 
-def eeg_member_features(x, ses, multiband=True):
-    """riem_disp features for all windows of one subject (each session centred independently)"""
+MEMBER_MODE = "riem_disp"      # set by --mode; 'EA' = per-session arithmetic-mean whitening (Wu 2020)
+
+
+def eeg_member_features(x, ses, multiband=True, mode=None):
+    """multiband tangent features for all windows of one subject (each session centred independently);
+    mode in {riem_disp (default, the pre-registered main member), riem, EA, raw}"""
+    mode = mode or MEMBER_MODE
     bands = R.build_covs(x, multiband)
-    return np.hstack([R.domain_features(bands[b], ses, "riem_disp") for b in bands])
+    return np.hstack([R.domain_features(bands[b], ses, mode) for b in bands])
 
 
 def eeg_posteriors(X, y, ses, test_session):
@@ -252,6 +257,10 @@ def main():
     ap.add_argument("--posteriors-dir")
     ap.add_argument("--self-test", action="store_true")
     ap.add_argument("--no-multiband", action="store_true")
+    ap.add_argument("--mode", default="riem_disp", choices=["riem_disp", "riem", "EA", "raw"],
+                    help="domain handling of the EEG member. riem_disp = Frechet centring + dispersion "
+                         "(pre-registered main member); EA = per-session arithmetic-mean whitening (simpler, "
+                         "equivalent in check_riemannian_eeg / fusion_controls: 0.6760 vs 0.6765 fused window).")
     ap.add_argument("--subjects", nargs="+")
     ap.add_argument("--out", help="write per-fold rows to this csv")
     a = ap.parse_args()
@@ -259,6 +268,9 @@ def main():
         raise SystemExit(self_test())
     if not (a.data and a.posteriors_dir):
         ap.error("--data and --posteriors-dir are required unless --self-test")
+    global MEMBER_MODE
+    MEMBER_MODE = a.mode
+    print(f"EEG member: multiband={'no' if a.no_multiband else 'yes'}, domain mode = {a.mode}")
     rows, skipped = run(a.data, a.posteriors_dir, multiband=not a.no_multiband, subjects=a.subjects)
     for sid, why in skipped:
         print(f"[skipped] {sid}: {why}")

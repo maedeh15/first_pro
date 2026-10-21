@@ -1416,6 +1416,32 @@ class ERPBranch(nn.Module):
         return self.embed(self.pool(h))
 
 
+class RiemHead(nn.Module):
+    """priority-RIEM: linear classifier on PRECOMPUTED per-session tangent-space EEG features
+    ({subject_id}_eeg_riem.npy, see build_riem_features.py). BatchNorm1d(affine=False) plays the role of
+    the StandardScaler of the offline probe (and is re-estimated on the held-out session by AdaBN, like
+    every BatchNorm layer here); a single Linear then maps to class probabilities. Strong L2 comes from a
+    dedicated optimizer group (riem_weight_decay), the analogue of LogisticRegression(C=0.1)."""
+
+    def __init__(self, in_dim, num_classes=3, dropout=0.5):
+        super().__init__()
+        self.norm = nn.BatchNorm1d(in_dim, affine=False)
+        self.drop = nn.Dropout(dropout)
+        self.fc = nn.Linear(in_dim, num_classes)
+
+    def forward(self, x):
+        if x.dim() != 2:
+            raise ValueError(f"RiemHead expects (B, D) tangent features, got {tuple(x.shape)} -- is the dataset "
+                             f"built with load_riem=True (and build_riem_features.py run)?")
+        if self.training and x.shape[0] < 2:
+            # a 1-window tail batch has no batch statistics (BatchNorm1d would raise): normalise with the
+            # running estimates for that batch only
+            z = F.batch_norm(x, self.norm.running_mean, self.norm.running_var, None, None, False, 0.0, self.norm.eps)
+        else:
+            z = self.norm(x)
+        return F.softmax(self.fc(self.drop(z)), dim=-1)
+
+
 class TSFNet(nn.Module):
     """
     num_classes=3 (0-/2-/3-back) -- the paper's original tasks (MI, MA, WG)
@@ -1458,7 +1484,9 @@ class TSFNet(nn.Module):
                  efgf_gate_mode="clamp", efgf_gate_init=-6.0, attn_conv_init_gain=None,
                  conv_dropout=None, conv_dropout_type="channel",
                  fusion_fnirs_inject="none", erp_branch="none",
-                 egta_pcc_lambda=0.0, cafe_pcc_mode="signed", eeg_filterbank="none", eeg_filterbank_scope="both",
+                 egta_pcc_lambda=0.0, cafe_pcc_mode="signed",
+                 riem_branch="none", riem_dim=0, riem_blend=0.5, riem_lambda=0.2,
+                 riem_weight_decay=1e-2, riem_dropout=0.5, eeg_filterbank="none", eeg_filterbank_scope="both",
                  fnirs_chroma_split="none",
                  bandtok_d_model=32, bandtok_heads=4, bandtok_norm="none"):
         super().__init__()
@@ -1512,6 +1540,33 @@ class TSFNet(nn.Module):
         if cafe_pcc_mode not in ("signed", "abs"):
             raise ValueError(f"cafe_pcc_mode must be 'signed' or 'abs', got {cafe_pcc_mode!r}")
         self.cafe_pcc_mode = cafe_pcc_mode
+        # priority-RIEM: a FOURTH decision-level member fed by precomputed tangent-space features.
+        # 'none' (default) = nothing is constructed or changed (bit-exact prior behavior). 'member' =
+        # y_pred <- (1-b) * normalise(y_deep) + b * y_riem with a FIXED blend b (the pre-registered 0.5 of the
+        # offline late fusion), plus a separate CE term lambda_riem * L(y_riem) so the head is a proper
+        # classifier. The features travel in the x_chan batch slot (like ERP / LaBraM).
+        if riem_branch not in ("none", "member"):
+            raise ValueError(f"riem_branch must be 'none' or 'member', got {riem_branch!r}")
+        if riem_branch == "member":
+            if riem_dim <= 0:
+                raise ValueError("riem_branch='member' needs riem_dim > 0 (the feature dimension)")
+            if not (0.0 < riem_blend < 1.0):
+                raise ValueError(f"riem_blend must be in (0, 1), got {riem_blend}")
+            if riem_lambda < 0.0:
+                raise ValueError(f"riem_lambda must be >= 0, got {riem_lambda}")
+            if (erp_branch != "none" or eeg_spatial_mode != "none" or eeg_band_mode != "none"
+                    or eeg_backbone_mode != "native"):
+                raise ValueError("riem_branch uses the x_chan slot and cannot be combined with erp_branch / "
+                                 "eeg_spatial_mode / eeg_band_mode / a LaBraM eeg_backbone_mode")
+            if fusion_combination != "paper_mean":
+                raise ValueError("riem_branch='member' is implemented for fusion_combination='paper_mean' only")
+            if norm_mode != "batch":
+                raise ValueError("riem_branch='member' requires norm_mode='batch' (its BatchNorm1d must not be "
+                                 "converted to GroupNorm)")
+        self.riem_mode = riem_branch
+        self.riem_blend = float(riem_blend)
+        self.riem_lambda = float(riem_lambda)
+        self.riem_weight_decay = float(riem_weight_decay)
         # priority-ERP: "eeg" feeds the ERP embedding into the EEG classifier's
         # input, "eeg_fusion" into both the EEG and the fusion classifiers'.
         # The ERP tensor travels in the x_chan batch slot (see NBackDataset
@@ -2073,6 +2128,11 @@ class TSFNet(nn.Module):
         if norm_mode == "group":
             convert_batchnorm_to_groupnorm(self, num_groups=norm_groups)
 
+        # priority-RIEM: built LAST, after every other module, so each baseline parameter keeps the
+        # initial value it has without this branch (rule 6); 'none' constructs nothing.
+        if riem_branch == "member":
+            self.riem_head = RiemHead(riem_dim, num_classes, dropout=riem_dropout)
+
     def _apply_fnirs_input_gate(self, x_fnirs):
         """priority-FNIRSGATE: soft (0,2)-bounded multiplicative gate over the
         w (posterior..anterior) and chromophore axes of the raw fNIRS input.
@@ -2363,7 +2423,18 @@ class TSFNet(nn.Module):
             raise ValueError(f"Unknown fusion_combination: {self.fusion_combination!r} "
                               f"(expected 'paper_mean', 'wsum' or 'gated')")
 
+        y_riem = None                                                   # priority-RIEM
+        if self.riem_mode == "member":
+            if x_chan is None:
+                raise ValueError("TSFNet was built with riem_branch='member' but forward() received x_chan=None "
+                                 "-- build the dataset with load_riem=True (build_riem_features.py first).")
+            y_riem = self.riem_head(x_chan)
+            y_deep = y_pred / (y_pred.sum(dim=-1, keepdim=True) + 1e-8)
+            y_pred = (1.0 - self.riem_blend) * y_deep + self.riem_blend * y_riem
+
         aux = {
+            "y_riem": y_riem,              # priority-RIEM: None unless riem_branch='member'
+            "riem_lambda": self.riem_lambda,
             "y_labram": y_labram,          # None unless a LaBraM mode is active
             "gate_weights": (gate_weights.detach()
                               if self.fusion_combination in ("gated", "stanet2", "stanet3")
@@ -2665,6 +2736,13 @@ def tsfnet_loss(y_eeg, y_fusion, y_fnirs, y_pred, labels, aux,
         l_pred = F.nll_loss(torch.log(y_pred + eps), labels, weight=class_weight)
 
     l_class = l_pred + lambda_eeg * l_eeg + lambda_fnirs * l_fnirs + l_fusion  # Eq. 6
+    # priority-RIEM: separate CE on the Riemannian member's own posterior (plain NLL; the focal /
+    # asymmetric / label-smoothing variants are not extended to it). Absent (None) => exactly the old sum.
+    _y_riem = aux.get("y_riem")
+    l_riem = None
+    if _y_riem is not None:
+        l_riem = F.nll_loss(torch.log(_y_riem + eps), labels, weight=class_weight)
+        l_class = l_class + aux.get("riem_lambda", 0.2) * l_riem
 
     l_efgf = efgf_regularization_loss(aux["eeg_pcc1"], aux["phi_pcc1"],
                                        aux["eeg_pcc2"], aux["phi_pcc2"])
@@ -2732,6 +2810,8 @@ def tsfnet_loss(y_eeg, y_fusion, y_fnirs, y_pred, labels, aux,
     }
     if _l_egta is not None:
         breakdown["l_egta"] = _l_egta.item()
+    if l_riem is not None:
+        breakdown["l_riem"] = l_riem.item()      # priority-RIEM (unweighted)
     return total, breakdown
 
 
@@ -2903,7 +2983,7 @@ class NBackDataset(Dataset):
     evaluate's core loops were updated (via _unpack_batch below) to
     additionally accept the 4-tuple form."""
 
-    def __init__(self, subject_dir, subject_id, indices=None, load_erp=False):
+    def __init__(self, subject_dir, subject_id, indices=None, load_erp=False, load_riem=False):
         eeg = np.load(os.path.join(subject_dir, f"{subject_id}_eeg_windows.npy"))
         fnirs = np.load(os.path.join(subject_dir, f"{subject_id}_fnirs_windows.npy"))
         labels = np.load(os.path.join(subject_dir, f"{subject_id}_labels.npy"))
@@ -2934,6 +3014,25 @@ class NBackDataset(Dataset):
                                  f"{subject_id}'s current .npy files -- rerun build_erp_windows.py "
                                  f"--overwrite")
             channels = np.load(erp_path)
+        elif load_riem:
+            # priority-RIEM: the (N, D) per-session tangent-space feature matrix takes the x_chan slot
+            # (see TSFNet's riem_branch). Same fingerprint guard as the ERP tensor: a file built for another
+            # window set would silently pair every window with another window's features.
+            import hashlib, json as _json
+            riem_path = os.path.join(subject_dir, f"{subject_id}_eeg_riem.npy")
+            meta_path = os.path.join(subject_dir, f"{subject_id}_eeg_riem_meta.json")
+            if not (os.path.exists(riem_path) and os.path.exists(meta_path)):
+                raise FileNotFoundError(f"{riem_path} (or its _eeg_riem_meta.json) is missing -- run "
+                                        f"build_riem_features.py first")
+            with open(meta_path, encoding="utf-8") as _f:
+                _meta = _json.load(_f)
+            _h = hashlib.sha1()
+            for _a in (labels, trial_ids, session_ids):
+                _h.update(np.ascontiguousarray(_a).astype(np.int64).tobytes())
+            if _meta.get("fingerprint") != _h.hexdigest():
+                raise ValueError(f"{riem_path} was built for a different window set than "
+                                 f"{subject_id}'s current .npy files -- rerun build_riem_features.py --overwrite")
+            channels = np.load(riem_path)
         else:
             channels = np.load(chan_path) if os.path.exists(chan_path) else None
 
@@ -3768,7 +3867,9 @@ def train_one_fold(model, train_loader, val_loader, test_loader, device,
     # gated behind a flag rather than silently changed, so every existing run
     # stays exactly reproducible.
     _band_params = list(model.eeg_band_branch.parameters()) if hasattr(model, "eeg_band_branch") else []
-    _band_ids = {id(p) for p in _band_params}
+    _riem_params = list(model.riem_head.parameters()) if hasattr(model, "riem_head") else []   # priority-RIEM
+    _riem_wd = float(getattr(model, "riem_weight_decay", 1e-2))
+    _band_ids = {id(p) for p in _band_params} | {id(p) for p in _riem_params}   # both get their own groups
 
     if no_decay_scalars:
         _no_decay_params = [p for n, p in model.named_parameters()
@@ -3781,13 +3882,17 @@ def train_one_fold(model, train_loader, val_loader, test_loader, device,
             groups.append({"params": _no_decay_params, "weight_decay": 0.0})
         if _band_params:
             groups.append({"params": _band_params, "weight_decay": eeg_band_weight_decay})
+        if _riem_params:
+            groups.append({"params": _riem_params, "weight_decay": _riem_wd})
         optimizer = torch.optim.Adam(groups, lr=lr)
-    elif _band_params:
+    elif _band_params or _riem_params:
         _other = [p for p in model.parameters() if id(p) not in _band_ids]
-        optimizer = torch.optim.Adam([
-            {"params": _other, "weight_decay": weight_decay},
-            {"params": _band_params, "weight_decay": eeg_band_weight_decay},
-        ], lr=lr)
+        _groups = [{"params": _other, "weight_decay": weight_decay}]
+        if _band_params:
+            _groups.append({"params": _band_params, "weight_decay": eeg_band_weight_decay})
+        if _riem_params:
+            _groups.append({"params": _riem_params, "weight_decay": _riem_wd})
+        optimizer = torch.optim.Adam(_groups, lr=lr)
     else:
         optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
     # priority-G1: None unless the caller asked for a schedule (see docstring).
@@ -4185,6 +4290,7 @@ def run_subject_cross_session(subject_dir, subject_id, device="cuda" if torch.cu
                                conv_dropout=None, conv_dropout_type="channel",
                                fusion_fnirs_inject="none", erp_branch="none",
                                egta_pcc_lambda=0.0, cafe_pcc_mode="signed",
+                               riem_branch="none", riem_blend=0.5, riem_lambda=0.2, riem_weight_decay=1e-2,
                                eeg_filterbank="none", eeg_filterbank_scope="both",
                                fnirs_chroma_split="none",
                                bandtok_d_model=32, bandtok_heads=4, bandtok_norm="none",
@@ -4382,7 +4488,8 @@ def run_subject_cross_session(subject_dir, subject_id, device="cuda" if torch.cu
         if not (isinstance(_lam, (int, float)) and _lam >= 0.0 and _lam == _lam):
             raise ValueError(f"{_name} must be a finite number >= 0, got {_lam!r} "
                              f"(priority-PCCLAMBDA; 1.0 = paper Eq. 5, 0.0 = term disabled)")
-    full = NBackDataset(subject_dir, subject_id, load_erp=(erp_branch != "none"))
+    full = NBackDataset(subject_dir, subject_id, load_erp=(erp_branch != "none"),
+                        load_riem=(riem_branch != "none"))
     session_ids = full.session_ids
     labels_np = full.labels.numpy()
     trial_ids = full.trial_ids
@@ -4619,6 +4726,9 @@ def run_subject_cross_session(subject_dir, subject_id, device="cuda" if torch.cu
                         conv_dropout=conv_dropout, conv_dropout_type=conv_dropout_type,
                         fusion_fnirs_inject=fusion_fnirs_inject, erp_branch=erp_branch,
                         egta_pcc_lambda=egta_pcc_lambda, cafe_pcc_mode=cafe_pcc_mode,
+                        riem_branch=riem_branch, riem_blend=riem_blend, riem_lambda=riem_lambda,
+                        riem_weight_decay=riem_weight_decay,
+                        riem_dim=(int(full.channels.shape[1]) if riem_branch != "none" else 0),
                         eeg_filterbank=eeg_filterbank, eeg_filterbank_scope=eeg_filterbank_scope,
                         fnirs_chroma_split=fnirs_chroma_split,
                         bandtok_d_model=bandtok_d_model, bandtok_heads=bandtok_heads,

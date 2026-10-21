@@ -384,6 +384,19 @@ _arg_parser.add_argument("--cafe-pcc-mode", type=str, default="signed", choices=
                                "bit-exact. 'abs' = 1 - mean |PCC| (STA-Net's form: anti-correlation is also "
                                "'aligned', so the term stops pushing the two streams toward positive correlation "
                                "only). Loss-only change: no parameter, no RNG, forward unchanged.")
+_arg_parser.add_argument("--riem-branch", type=str, default="none", choices=["none", "member"],
+                          help="priority-RIEM: 'none' (default) = nothing changes, bit-exact. 'member' = add a fourth, "
+                               "NON-deep decision member to the model: a linear head on per-session tangent-space EEG "
+                               "features ({sid}_eeg_riem.npy from build_riem_features.py), blended into the final "
+                               "decision y = (1-b)*normalise(y_deep) + b*y_riem (b = --riem-blend, fixed). The same "
+                               "idea as the offline late fusion (+6 pp window), now trained jointly. Transductive "
+                               "per-session centring of the features, like E3/AdaBN.")
+_arg_parser.add_argument("--riem-blend", type=float, default=0.5,
+                          help="fixed blend b of the Riemannian member (0.5 = the pre-registered late-fusion weight)")
+_arg_parser.add_argument("--riem-lambda", type=float, default=0.2,
+                          help="weight of the separate CE term on the Riemannian member's own posterior")
+_arg_parser.add_argument("--riem-weight-decay", type=float, default=1e-2,
+                          help="weight decay of the Riemannian head only (analogue of LogisticRegression(C=0.1))")
 _arg_parser.add_argument("--egta-pcc-lambda", type=float, default=0.0,
                           help="priority-EGTAPCC: weight of STA-Net's L_egta = 1 - mean|PCC("
                                "F_fusion, F_fnirs(ta))| on the PURE EGTA-pooled fNIRS feature "
@@ -827,6 +840,10 @@ FUSION_FNIRS_INJECT = SEED_ARGS.fusion_fnirs_inject
 ERP_BRANCH = SEED_ARGS.erp_branch
 EGTA_PCC_LAMBDA = SEED_ARGS.egta_pcc_lambda
 CAFE_PCC_MODE = SEED_ARGS.cafe_pcc_mode
+RIEM_BRANCH = SEED_ARGS.riem_branch
+RIEM_BLEND = SEED_ARGS.riem_blend
+RIEM_LAMBDA = SEED_ARGS.riem_lambda
+RIEM_WEIGHT_DECAY = SEED_ARGS.riem_weight_decay
 EEG_FILTERBANK = SEED_ARGS.eeg_filterbank
 EEG_FILTERBANK_SCOPE = SEED_ARGS.eeg_filterbank_scope
 FNIRS_CHROMA_SPLIT = SEED_ARGS.fnirs_chroma_split
@@ -1113,6 +1130,7 @@ _DATAROOT_SUBTAG = ("_data-" + os.path.basename(os.path.normpath(DATA_ROOT))
 _ERP_SUBTAG = f"_erp{ERP_BRANCH}" if ERP_BRANCH != "none" else ""
 _ERP_SUBTAG += f"_egtapcc{EGTA_PCC_LAMBDA:g}" if EGTA_PCC_LAMBDA > 0.0 else ""   # priority-EGTAPCC
 _ERP_SUBTAG += "_cafepccabs" if CAFE_PCC_MODE == "abs" else ""   # priority-CAFEPCCABS
+_ERP_SUBTAG += (f"_riem{RIEM_BLEND:g}l{RIEM_LAMBDA:g}wd{RIEM_WEIGHT_DECAY:g}" if RIEM_BRANCH == "member" else "")   # priority-RIEM
 _ERP_SUBTAG += (f"_fb{EEG_FILTERBANK}{'' if EEG_FILTERBANK_SCOPE == 'both' else '-eegonly'}"
                 if EEG_FILTERBANK != "none" else "")                                  # priority-FILTERBANK
 _ERP_SUBTAG += f"_cs{FNIRS_CHROMA_SPLIT}" if FNIRS_CHROMA_SPLIT != "none" else ""      # priority-CHROMASPLIT
@@ -1363,6 +1381,8 @@ with CrashSafeLogger(os.path.join(RESULTS_DIR_VARIANT, f"baseline_run_log_{RUN_T
                 init_checkpoint=PRETRAIN_CKPT.get(subject_id),  # priority-XSUBJ: None (default) = random init
                 erp_branch=ERP_BRANCH,                    # priority-ERP: "none" (default) = no ERP pathway
                 cafe_pcc_mode=CAFE_PCC_MODE,                 # priority-CAFEPCCABS
+                riem_branch=RIEM_BRANCH, riem_blend=RIEM_BLEND,   # priority-RIEM: 'none' (default) = off
+                riem_lambda=RIEM_LAMBDA, riem_weight_decay=RIEM_WEIGHT_DECAY,
                 egta_pcc_lambda=EGTA_PCC_LAMBDA,          # priority-EGTAPCC: 0.0 (default) = term off
                 eeg_filterbank=EEG_FILTERBANK,            # priority-FILTERBANK: "none" (default) = off
                 fnirs_chroma_split=FNIRS_CHROMA_SPLIT,    # priority-CHROMASPLIT: "none" (default) = off
