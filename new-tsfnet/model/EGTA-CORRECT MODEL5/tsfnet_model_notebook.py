@@ -1433,9 +1433,12 @@ class RiemHead(nn.Module):
         if x.dim() != 2:
             raise ValueError(f"RiemHead expects (B, D) tangent features, got {tuple(x.shape)} -- is the dataset "
                              f"built with load_riem=True (and build_riem_features.py run)?")
-        if self.training and x.shape[0] < 2:
+        # self.norm.training (not self.training) decides whether BatchNorm1d would take the batch path:
+        # adapt_batchnorm_to_target() switches ONLY the BN layers to train mode while the model stays in
+        # eval(), so a 1-window tail batch of the target loader reaches the batch path with self.training False.
+        if self.norm.training and x.shape[0] < 2:
             # a 1-window tail batch has no batch statistics (BatchNorm1d would raise): normalise with the
-            # running estimates for that batch only
+            # running estimates for that batch only, and let it contribute nothing to the running average
             z = F.batch_norm(x, self.norm.running_mean, self.norm.running_var, None, None, False, 0.0, self.norm.eps)
         else:
             z = self.norm(x)
