@@ -25,6 +25,7 @@ e.g.
     --b "...\\results_a1621a1ecc_seed42\\baseline_all_subjects_*.csv" ...
 """
 import csv
+import re
 import glob
 import argparse
 import tempfile
@@ -37,11 +38,32 @@ METRICS = [("mean_acc", "accuracy"), ("mean_kappa", "kappa"),
            ("recall_3back", "recall 3-back")]
 
 
-def load(patterns):
-    """-> {metric: {subject: mean over the runs that have it}}, plus the set of incomplete subjects"""
+def seed_of(path):
+    m = re.search(r"seed(\d+)", os.path.basename(path))
+    return m.group(1) if m else None
+
+
+def load(patterns, label="", allow_dup=False):
+    """-> {metric: {subject: mean over the runs that have it}}, plus the set of incomplete subjects
+
+    A glob such as results_*_seed*/baseline_all_subjects_*.csv happily matches an ABANDONED run of a
+    seed alongside its good one (this project has a seed-42 run that failed on 7 subjects). Averaging
+    the two silently halves those subjects' weight, and the failed subjects are then dropped from
+    both sides, so the comparison quietly shrinks to 19 subjects. Two csv of the same seed are
+    therefore refused unless --allow-duplicate-seeds says they are meant to be pooled."""
     files = [f for p in patterns for f in sorted(glob.glob(p))]
     if not files:
         raise SystemExit(f"no csv matched {patterns}")
+    print(f"{label or 'run'}: {len(files)} csv")
+    for f in files:
+        print(f"    seed {seed_of(f) or '?':>5}  {os.path.basename(f)}")
+    seen = {}
+    for f in files:
+        seen.setdefault(seed_of(f), []).append(os.path.basename(f))
+    dup = {k: v for k, v in seen.items() if len(v) > 1}
+    if dup and not allow_dup:
+        raise SystemExit(f"{label}: more than one csv for the same seed: {dup}\n"
+                         f"  pass the intended files explicitly, or --allow-duplicate-seeds to pool them.")
     vals, bad = {}, set()
     for f in files:
         with open(f, newline="", encoding="utf-8") as fh:
@@ -90,7 +112,8 @@ def compare(A, B, bad, la, lb, boot=10000):
         raise SystemExit("no subject completed in both runs")
     print(f"\n{len(subs)} subjects compared (seeds averaged per subject first).")
     if bad:
-        print(f"dropped from BOTH sides (incomplete in at least one run): {sorted(bad)}")
+        print(f"*** dropped from BOTH sides, incomplete in at least one run: {sorted(bad)}\n"
+              f"*** the numbers below are over {len(subs)} subjects, not 26 -- say so wherever they are reported.")
     print(f"\n{'metric':15} {la[:12]:>12} {lb[:12]:>12} {'diff':>9} {'wins':>7} {'p':>8} {'95% CI of diff':>22}")
     out = {}
     for k, name in METRICS:
@@ -100,7 +123,11 @@ def compare(A, B, bad, la, lb, boot=10000):
         b = np.array([B[k][s] for s in subs])
         d = b - a
         p = wilcoxon(d).pvalue if np.any(d != 0) else 1.0
-        ci = f"[{boot_ci(d, boot)[0]:+.4f}, {boot_ci(d, boot)[1]:+.4f}]" if boot else "-"
+        if boot:
+            lo, hi = boot_ci(d, boot)
+            ci = f"[{lo:+.4f}, {hi:+.4f}]"
+        else:
+            ci = "-"
         print(f"{name:15} {a.mean():12.4f} {b.mean():12.4f} {d.mean():+9.4f} {int((d > 0).sum()):3d}/{len(d):<3} "
               f"{p:8.4f} {ci:>22}")
         out[k] = (d.mean(), p)
@@ -120,7 +147,7 @@ def self_test():
         def write(path, delta, seeds=3, fail=()):
             paths = []
             for k in range(seeds):
-                p = os.path.join(td, f"{path}_s{k}.csv")
+                p = os.path.join(td, f"{path}_seed{k}.csv")
                 with open(p, "w", newline="", encoding="utf-8") as f:
                     w = csv.DictWriter(f, fieldnames=["subject_id", "status", "mean_acc", "mean_kappa",
                                                       "recall_0back", "recall_2back", "recall_3back"])
@@ -137,8 +164,8 @@ def self_test():
             return paths
 
         pa, pb = write("A", 0.0), write("B", 0.04, fail=("VP006",))
-        A, badA, _ = load(pa)
-        B, badB, _ = load(pb)
+        A, badA, _ = load(pa, "A")
+        B, badB, _ = load(pb, "B")
         good = badA == set() and badB == {"VP006"}
         print(f"[load] incomplete subject detected on the B side only -> {'OK' if good else 'FAIL'}")
         ok &= good
@@ -150,8 +177,24 @@ def self_test():
         good = abs(d - 0.04) < 0.008 and p < 0.001
         print(f"[effect] planted +0.0400 recovered as {d:+.4f} p={p:.4f} -> {'OK' if good else 'FAIL'}")
         ok &= good
+        # the wildcard trap: two csv of the same seed must be refused
+        dupdir = os.path.join(td, "dup")
+        os.makedirs(dupdir)
+        for nm in ("run_a_seed42.csv", "run_b_seed42.csv"):
+            with open(os.path.join(dupdir, nm), "w", newline="", encoding="utf-8") as f:
+                w = csv.DictWriter(f, fieldnames=["subject_id", "status", "mean_acc"])
+                w.writeheader()
+                w.writerow(dict(subject_id="VP001", status="ok", mean_acc=0.6))
+        try:
+            load([os.path.join(dupdir, "*.csv")], "dup")
+            good = False
+        except SystemExit as e:
+            good = "same seed" in str(e)
+        print(f"[dupguard] two csv of one seed refused -> {'OK' if good else 'FAIL'}")
+        ok &= good
+
         # null case: same data on both sides must not be called a difference
-        A2, b2, _ = load(pa)
+        A2, b2, _ = load(pa, "A")
         res0, _ = compare(A2, A2, set(), "A", "A", boot=0)
         good = res0["mean_acc"][1] == 1.0 and abs(res0["mean_acc"][0]) < 1e-12
         print(f"[null] identical runs give diff 0, p=1 -> {'OK' if good else 'FAIL'}")
@@ -167,15 +210,16 @@ def main():
     ap.add_argument("--label-a", default="A")
     ap.add_argument("--label-b", default="B")
     ap.add_argument("--boot", type=int, default=10000)
+    ap.add_argument("--allow-duplicate-seeds", action="store_true",
+                    help="pool several csv of the same seed instead of refusing them")
     ap.add_argument("--self-test", action="store_true")
     a = ap.parse_args()
     if a.self_test:
         raise SystemExit(self_test())
     if not (a.a and a.b):
         ap.error("--a and --b are required unless --self-test")
-    A, badA, fa = load(a.a)
-    B, badB, fb = load(a.b)
-    print(f"{a.label_a}: {len(fa)} csv  |  {a.label_b}: {len(fb)} csv")
+    A, badA, _ = load(a.a, a.label_a, a.allow_duplicate_seeds)
+    B, badB, _ = load(a.b, a.label_b, a.allow_duplicate_seeds)
     compare(A, B, badA | badB, a.label_a, a.label_b, a.boot)
 
 
