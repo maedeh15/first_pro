@@ -26,6 +26,7 @@ e.g.
 """
 import csv
 import re
+import json
 import glob
 import argparse
 import tempfile
@@ -51,9 +52,15 @@ def load(patterns, label="", allow_dup=False):
     the two silently halves those subjects' weight, and the failed subjects are then dropped from
     both sides, so the comparison quietly shrinks to 19 subjects. Two csv of the same seed are
     therefore refused unless --allow-duplicate-seeds says they are meant to be pooled."""
-    files = [f for p in patterns for f in sorted(glob.glob(p))]
-    if not files:
-        raise SystemExit(f"no csv matched {patterns}")
+    files, empty = [], []
+    for pat in patterns:
+        hits = sorted(glob.glob(pat))
+        if not hits:
+            empty.append(pat)
+        files.extend(hits)
+    if empty:
+        raise SystemExit(f"{label}: these patterns matched no csv: {empty}\n"
+                         f"  a pattern that silently matches nothing drops a whole seed from the comparison.")
     print(f"{label or 'run'}: {len(files)} csv")
     for f in files:
         print(f"    seed {seed_of(f) or '?':>5}  {os.path.basename(f)}")
@@ -76,7 +83,8 @@ def load(patterns, label="", allow_dup=False):
                     if r.get(k) in (None, ""):
                         continue
                     vals.setdefault(k, {}).setdefault(sid, []).append(float(r[k]))
-    return {k: {s: float(np.mean(v)) for s, v in d.items()} for k, d in vals.items()}, bad, files
+    return ({k: {s: float(np.mean(v)) for s, v in d.items()} for k, d in vals.items()},
+            bad, len({seed_of(f) for f in files}))
 
 
 def boot_ci(d, n=10000, seed=0):
@@ -193,6 +201,34 @@ def self_test():
         print(f"[dupguard] two csv of one seed refused -> {'OK' if good else 'FAIL'}")
         ok &= good
 
+        # a pattern that matches nothing must not pass silently
+        try:
+            load([os.path.join(td, "A_seed*.csv"), os.path.join(td, "nope_*.csv")], "A")
+            good = False
+        except SystemExit as e:
+            good = "matched no csv" in str(e)
+        print(f"[emptyglob] a pattern matching nothing is refused -> {'OK' if good else 'FAIL'}")
+        ok &= good
+
+        # --table mode: rows, seed counts and Holm across the family
+        cfgp = os.path.join(td, "cfg.json")
+        import json as _json
+        _json.dump({"baseline": {"label": "base", "csv": pa},
+                    "rows": [{"label": "up", "csv": pb}, {"label": "same", "csv": pa}]},
+                   open(cfgp, "w"))
+        import io as _io
+        import contextlib as _ctx
+        buf = _io.StringIO()
+        with _ctx.redirect_stdout(buf):
+            table(cfgp, 0)
+        txt = buf.getvalue()
+        good = "| up |" in txt and "| same |" in txt and "Holm (m=2)" in txt and "+0.0000" in txt
+        print(f"[table] two rows, seed counts and Holm(m=2) rendered -> {'OK' if good else 'FAIL'}")
+        ok &= good
+        good = "| 3 | 25 |" in txt
+        print(f"[table] seed count and reduced n reported per row -> {'OK' if good else 'FAIL'}")
+        ok &= good
+
         # null case: same data on both sides must not be called a difference
         A2, b2, _ = load(pa, "A")
         res0, _ = compare(A2, A2, set(), "A", "A", boot=0)
@@ -201,6 +237,63 @@ def self_test():
         ok &= good
     print("SELFTEST", "PASSED" if ok else "FAILED")
     return 0 if ok else 1
+
+
+def table(cfg_path, boot):
+    """Build the intervention table from a json config, instead of assembling it by hand.
+
+    {"baseline": {"label": "baseline", "csv": ["...seed42...csv", "...seed999...csv"]},
+     "rows": [{"label": "cafe-lambda 2", "csv": ["...csv"]}, ...]}
+
+    Each row is compared against the same baseline with the same reading, the number of seeds on
+    each side is printed (a one-seed row and a three-seed row are not equally strong evidence), and
+    Holm is applied ACROSS THE ROWS, which is the family that matters: these are the interventions
+    tried on one dataset. Hand-assembled versions of this table in this project disagreed with the
+    csv files in every row, which is why it exists."""
+    with open(cfg_path, encoding="utf-8") as f:
+        cfg = json.load(f)
+    base = cfg["baseline"]
+    A, badA, nA = load(base["csv"], base.get("label", "baseline"))
+    rows, ps = [], []
+    for r in cfg["rows"]:
+        B, badB, nB = load(r["csv"], r["label"])
+        subs = sorted((set(A["mean_acc"]) & set(B["mean_acc"])) - (badA | badB))
+        a = np.array([A["mean_acc"][s] for s in subs])
+        b = np.array([B["mean_acc"][s] for s in subs])
+        d = b - a
+        p = wilcoxon(d).pvalue if np.any(d != 0) else 1.0
+        ci = boot_ci(d, boot) if boot else (float("nan"), float("nan"))
+        rows.append(dict(label=r["label"], seeds=nB, n=len(subs), diff=d.mean(),
+                         wins=int((d > 0).sum()), p=float(p), ci=ci,
+                         dropped=sorted(badA | badB)))
+        ps.append(float(p))
+    adj = holm(ps)
+    print(f"\n| intervention | seeds | n | diff | wins | p | Holm (m={len(rows)}) | 95% CI |")
+    print("|---|---|---|---:|---|---:|---:|---|")
+    for r, h in zip(rows, adj):
+        lo, hi = r["ci"]
+        ci = "-" if np.isnan(lo) else f"[{lo:+.4f}, {hi:+.4f}]"
+        print(f"| {r['label']} | {r['seeds']} | {r['n']} | {r['diff']:+.4f} | {r['wins']}/{r['n']} | "
+              f"{r['p']:.4f} | {h:.4f} | {ci} |")
+    print(f"\nbaseline: {nA} seed(s), {len(A['mean_acc'])} subjects.")
+    drop = {tuple(r["dropped"]) for r in rows if r["dropped"]}
+    for d_ in drop:
+        print(f"*** some rows dropped subjects: {list(d_)} -- their n differs, say so in the caption.")
+    print("Holm is applied across the rows of THIS table. If other interventions were tried and are "
+          "not listed, the family is larger than m and these corrected values are optimistic: list "
+          "every intervention, or state the selection rule.")
+
+
+def holm(p):
+    p = np.asarray(p, float)
+    order = np.argsort(p)
+    m = len(p)
+    out = np.zeros(m)
+    run = 0.0
+    for r, i in enumerate(order):
+        run = max(run, min(1.0, (m - r) * p[i]))
+        out[i] = run
+    return out
 
 
 def main():
@@ -213,9 +306,12 @@ def main():
     ap.add_argument("--allow-duplicate-seeds", action="store_true",
                     help="pool several csv of the same seed instead of refusing them")
     ap.add_argument("--self-test", action="store_true")
+    ap.add_argument("--table", help="json config: build the whole intervention table (see table())")
     a = ap.parse_args()
     if a.self_test:
         raise SystemExit(self_test())
+    if a.table:
+        raise SystemExit(table(a.table, a.boot) or 0)
     if not (a.a and a.b):
         ap.error("--a and --b are required unless --self-test")
     A, badA, _ = load(a.a, a.label_a, a.allow_duplicate_seeds)
