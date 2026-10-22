@@ -218,7 +218,9 @@ def self_test():
         cfgp = os.path.join(td, "cfg.json")
         import json as _json
         _json.dump({"baseline": {"label": "base", "csv": pa},
-                    "rows": [{"label": "up", "csv": pb}, {"label": "same", "csv": pa}]},
+                    "rows": [{"label": "up", "csv": pb},
+                             {"label": "same", "csv": pa},
+                             {"label": "one seed", "csv": pb[:1], "baseline": pa[:1]}]},
                    open(cfgp, "w"))
         import io as _io
         import contextlib as _ctx
@@ -226,11 +228,15 @@ def self_test():
         with _ctx.redirect_stdout(buf):
             run_table(_json.load(open(cfgp, encoding="utf-8")), 0)
         txt = buf.getvalue()
-        good = "| up |" in txt and "| same |" in txt and "Holm (m=2)" in txt and "+0.0000" in txt
+        good = "| up |" in txt and "| same |" in txt and "Holm (m=3)" in txt and "+0.0000" in txt
         print(f"[table] two rows, seed counts and Holm(m=2) rendered -> {'OK' if good else 'FAIL'}")
         ok &= good
-        good = "| 3 | 25 |" in txt
+        good = "| 3 | 3 | 25 |" in txt
         print(f"[table] seed count and reduced n reported per row -> {'OK' if good else 'FAIL'}")
+        ok &= good
+        good = "| one seed | 1 | 1 | 25 |" in txt and "**" not in txt.split("| one seed")[1][:40]
+        print(f"[table] a row with its own one-seed baseline is read 1-vs-1 -> "
+              f"{'OK' if good else 'FAIL'}")
         ok &= good
 
         # --discover: the layout is read, and an abandoned run of a seed loses to its complete one
@@ -363,7 +369,12 @@ def run_table(cfg, boot):
     """Build the intervention table from a json config, instead of assembling it by hand.
 
     {"baseline": {"label": "baseline", "csv": ["...seed42...csv", "...seed999...csv"]},
-     "rows": [{"label": "cafe-lambda 2", "csv": ["...csv"]}, ...]}
+     "rows": [{"label": "cafe-lambda 2", "csv": ["...seed42...csv"],
+               "baseline": ["...baseline seed42 only...csv"]}, ...]}
+
+    A row may carry its own "baseline". A one-seed intervention has to be read against the SAME
+    seed of the reference run, not against the mean of three: seed-to-seed spread in this project is
+    up to about one point, which is the size of most of the effects being judged.
 
     Each row is compared against the same baseline with the same reading, the number of seeds on
     each side is printed (a one-seed row and a three-seed row are not equally strong evidence), and
@@ -371,9 +382,13 @@ def run_table(cfg, boot):
     tried on one dataset. Hand-assembled versions of this table in this project disagreed with the
     csv files in every row, which is why it exists."""
     base = cfg["baseline"]
-    A, badA, nA = load(base["csv"], base.get("label", "baseline"))
+    A0, badA0, nA0 = load(base["csv"], base.get("label", "baseline"))
     rows, ps = [], []
     for r in cfg["rows"]:
+        if r.get("baseline"):
+            A, badA, nA = load(r["baseline"], f"baseline for {r['label']}")
+        else:
+            A, badA, nA = A0, badA0, nA0
         B, badB, nB = load(r["csv"], r["label"])
         subs = sorted((set(A["mean_acc"]) & set(B["mean_acc"])) - (badA | badB))
         a = np.array([A["mean_acc"][s] for s in subs])
@@ -381,19 +396,23 @@ def run_table(cfg, boot):
         d = b - a
         p = wilcoxon(d).pvalue if np.any(d != 0) else 1.0
         ci = boot_ci(d, boot) if boot else (float("nan"), float("nan"))
-        rows.append(dict(label=r["label"], seeds=nB, n=len(subs), diff=d.mean(),
+        rows.append(dict(label=r["label"], seeds=nB, base_seeds=nA, n=len(subs), diff=d.mean(),
                          wins=int((d > 0).sum()), p=float(p), ci=ci,
                          dropped=sorted(badA | badB)))
         ps.append(float(p))
     adj = holm(ps)
-    print(f"\n| intervention | seeds | n | diff | wins | p | Holm (m={len(rows)}) | 95% CI |")
-    print("|---|---|---|---:|---|---:|---:|---|")
+    print(f"\n| intervention | seeds | base seeds | n | diff | wins | p | Holm (m={len(rows)}) | 95% CI |")
+    print("|---|---|---|---|---:|---|---:|---:|---|")
     for r, h in zip(rows, adj):
         lo, hi = r["ci"]
         ci = "-" if np.isnan(lo) else f"[{lo:+.4f}, {hi:+.4f}]"
-        print(f"| {r['label']} | {r['seeds']} | {r['n']} | {r['diff']:+.4f} | {r['wins']}/{r['n']} | "
-              f"{r['p']:.4f} | {h:.4f} | {ci} |")
-    print(f"\nbaseline: {nA} seed(s), {len(A['mean_acc'])} subjects.")
+        mark = " **" if r["seeds"] != r["base_seeds"] else ""
+        print(f"| {r['label']} | {r['seeds']} | {r['base_seeds']}{mark} | {r['n']} | {r['diff']:+.4f} | "
+              f"{r['wins']}/{r['n']} | {r['p']:.4f} | {h:.4f} | {ci} |")
+    if any(r["seeds"] != r["base_seeds"] for r in rows):
+        print("\n** this row compares a different number of seeds on the two sides. Seed-to-seed spread "
+              "here reaches about one point, so give such a row its own same-seed baseline.")
+    print(f"\ndefault baseline: {nA0} seed(s), {len(A0['mean_acc'])} subjects.")
     drop = {tuple(r["dropped"]) for r in rows if r["dropped"]}
     for d_ in drop:
         print(f"*** some rows dropped subjects: {list(d_)} -- their n differs, say so in the caption.")
