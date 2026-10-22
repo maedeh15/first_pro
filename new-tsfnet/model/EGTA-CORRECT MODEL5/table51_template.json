@@ -1,0 +1,66 @@
+{
+  "_howto": "Replace every <...> with the full path of that run's baseline_all_subjects_*.csv. Delete any row whose run you do not have. A row's own 'baseline' must be the SAME seed(s) as its 'csv'.",
+
+  "baseline": {
+    "label": "baseline (3 seeds)",
+    "csv": [
+      "<baseline 40b7d8ea53 seed 42   csv>",
+      "<baseline 40b7d8ea53 seed 999  csv>",
+      "<baseline 40b7d8ea53 seed 2024 csv>"
+    ]
+  },
+
+  "rows": [
+    { "label": "stage1 fixed epochs 12",
+      "csv":      ["<fixed-epochs seed 42 csv>"],
+      "baseline": ["<baseline 40b7d8ea53 seed 42 csv>"] },
+
+    { "label": "cafe-lambda 2",
+      "csv":      ["<cafe-lambda2 seed 42 csv>"],
+      "baseline": ["<baseline 40b7d8ea53 seed 42 csv>"] },
+
+    { "label": "conv-dropout 0.3",
+      "csv":      ["<conv-dropout seed 42 csv>"],
+      "baseline": ["<baseline 40b7d8ea53 seed 42 csv>"] },
+
+    { "label": "efgf-lambda 2",
+      "csv":      ["<efgf-lambda2 seed 42 csv>"],
+      "baseline": ["<baseline 40b7d8ea53 seed 42 csv>"] },
+
+    { "label": "cafe-pcc-mode abs",
+      "csv":      ["<pcc-abs seed 42 csv>"],
+      "baseline": ["<baseline 40b7d8ea53 seed 42 csv>"] },
+
+    { "label": "fnirs-input-gate soft_prior",
+      "csv":      ["<gate soft_prior seed 42 csv>"],
+      "baseline": ["<baseline 40b7d8ea53 seed 42 csv>"] },
+
+    { "label": "fnirs grid bbox eeg",
+      "csv": [
+        "<bbox seed 42 csv>",
+        "<bbox seed 999 csv>",
+        "<bbox seed 2024 csv>"
+      ] },
+
+    { "label": "eeg-cov-align session",
+      "csv": [
+        "<covEA seed 42 csv>",
+        "<covEA seed 999 csv>",
+        "<covEA seed 2024 csv>"
+      ] },
+
+    { "label": "best-min-epoch 10",
+      "csv": [
+        "<best-min-epoch seed 42 csv>",
+        "<best-min-epoch seed 999 csv>",
+        "<best-min-epoch seed 2024 csv>"
+      ] },
+
+    { "label": "riem branch (in-network)",
+      "csv": [
+        "<riem a1621a1ecc seed 42   csv>",
+        "<riem a1621a1ecc seed 999  csv>",
+        "<riem a1621a1ecc seed 2024 csv>"
+      ] }
+  ]
+}
