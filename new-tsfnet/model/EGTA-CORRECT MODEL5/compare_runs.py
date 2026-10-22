@@ -63,6 +63,27 @@ def boot_ci(d, n=10000, seed=0):
     return np.percentile(m, 2.5), np.percentile(m, 97.5)
 
 
+def movers(A, B, subs, la, lb, k=5):
+    """the subjects that moved most in each direction, and every subject at or below chance in either
+    run -- a mean difference hides both, and a subject below 1/3 in a 3-class task is a failed fit,
+    not a hard subject."""
+    d = {s: B["mean_acc"][s] - A["mean_acc"][s] for s in subs}
+    order = sorted(subs, key=lambda s: d[s])
+    print(f"\nlargest moves in accuracy ({lb} - {la}):")
+    for s in order[:k]:
+        print(f"  {s}  {A['mean_acc'][s]:.4f} -> {B['mean_acc'][s]:.4f}  {d[s]:+.4f}")
+    print("  ...")
+    for s in order[-k:]:
+        print(f"  {s}  {A['mean_acc'][s]:.4f} -> {B['mean_acc'][s]:.4f}  {d[s]:+.4f}")
+    low = [s for s in subs if min(A["mean_acc"][s], B["mean_acc"][s]) <= 1.0 / 3]
+    if low:
+        print("\nat or below 3-class chance (0.3333) in at least one run -- inspect these fits:")
+        for s in low:
+            print(f"  {s}  {la} {A['mean_acc'][s]:.4f} | {lb} {B['mean_acc'][s]:.4f}")
+    else:
+        print("\nno subject at or below chance in either run.")
+
+
 def compare(A, B, bad, la, lb, boot=10000):
     subs = sorted(set(A.get("mean_acc", {})) & set(B.get("mean_acc", {})) - bad)
     if not subs:
@@ -83,6 +104,7 @@ def compare(A, B, bad, la, lb, boot=10000):
         print(f"{name:15} {a.mean():12.4f} {b.mean():12.4f} {d.mean():+9.4f} {int((d > 0).sum()):3d}/{len(d):<3} "
               f"{p:8.4f} {ci:>22}")
         out[k] = (d.mean(), p)
+    movers(A, B, subs, la, lb)
     print(f"\nThe accuracy row is the primary reading; the recall rows are descriptive. p-values are "
           f"uncorrected -- if this intervention is one of several tested, correct across them (Holm).")
     return out, subs
