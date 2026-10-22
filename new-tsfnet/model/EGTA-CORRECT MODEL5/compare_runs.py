@@ -18,6 +18,10 @@ does not.
 
 usage:
   python compare_runs.py --self-test
+  # no path typed by hand: list every run found under these folders
+  python compare_runs.py --discover "E:\\...\\Results" "E:\\...\\Results_baseline"
+  # then build the whole intervention table against one of the hashes it listed
+  python compare_runs.py --discover "E:\\...\\Results" --baseline-hash 40b7d8ea53 [--labels names.json]
   python compare_runs.py --a <csv> [<csv> ...] --b <csv> [<csv> ...] [--label-a ...] [--label-b ...]
 e.g.
   python compare_runs.py --label-a baseline --label-b "riem member" \
@@ -220,13 +224,46 @@ def self_test():
         import contextlib as _ctx
         buf = _io.StringIO()
         with _ctx.redirect_stdout(buf):
-            table(cfgp, 0)
+            run_table(_json.load(open(cfgp, encoding="utf-8")), 0)
         txt = buf.getvalue()
         good = "| up |" in txt and "| same |" in txt and "Holm (m=2)" in txt and "+0.0000" in txt
         print(f"[table] two rows, seed counts and Holm(m=2) rendered -> {'OK' if good else 'FAIL'}")
         ok &= good
         good = "| 3 | 25 |" in txt
         print(f"[table] seed count and reduced n reported per row -> {'OK' if good else 'FAIL'}")
+        ok &= good
+
+        # --discover: the layout is read, and an abandoned run of a seed loses to its complete one
+        dd = os.path.join(td, "disc")
+        for h, seed, stamp, nfail in (("aaaa111111", "42", "20260101_000000", 0),
+                                      ("aaaa111111", "999", "20260102_000000", 0),
+                                      ("bbbb222222", "42", "20260103_000000", 7),
+                                      ("bbbb222222", "42", "20260104_000000", 0)):
+            d2 = os.path.join(dd, f"results_{h}_seed{seed}")
+            os.makedirs(d2, exist_ok=True)
+            with open(os.path.join(d2, f"baseline_all_subjects_{stamp}_seed{seed}_{h}.csv"),
+                      "w", newline="", encoding="utf-8") as f:
+                w = csv.DictWriter(f, fieldnames=["subject_id", "status", "mean_acc"])
+                w.writeheader()
+                for i, sid in enumerate(subs):
+                    okrow = i >= nfail
+                    w.writerow(dict(subject_id=sid, status="ok" if okrow else "failed",
+                                    mean_acc=(base[sid] + (0.03 if h == "bbbb222222" else 0.0)) if okrow else ""))
+        buf = _io.StringIO()
+        with _ctx.redirect_stdout(buf):
+            runs = discover([dd])
+        good = (sorted(runs) == ["aaaa111111", "bbbb222222"]
+                and sorted(runs["aaaa111111"]) == ["42", "999"]
+                and "20260104" in runs["bbbb222222"]["42"])
+        print(f"[discover] hashes and seeds read from the layout, abandoned seed-42 run rejected -> "
+              f"{'OK' if good else 'FAIL'}")
+        ok &= good
+        buf = _io.StringIO()
+        with _ctx.redirect_stdout(buf):
+            run_table(table_discovered([dd], "aaaa111111", {"bbbb222222": "intervention"}, 0), 0)
+        txt2 = buf.getvalue()
+        good = "| intervention |" in txt2 and "+0.03" in txt2
+        print(f"[discover] table built against the chosen baseline hash -> {'OK' if good else 'FAIL'}")
         ok &= good
 
         # null case: same data on both sides must not be called a difference
@@ -239,7 +276,60 @@ def self_test():
     return 0 if ok else 1
 
 
-def table(cfg_path, boot):
+def discover(roots):
+    """Find every complete run under <roots> without any path being typed by hand.
+
+    Runs live at <root>/results_<hash>_seed<N>/baseline_all_subjects_<stamp>_seed<N>_<hash>.csv, so
+    the variant hash and the seed come from the layout itself. Transcribing those paths into a config
+    by hand is how the first version of the chapter-5 table ended up disagreeing with the data in
+    every row.
+
+    Where one seed of one variant has several csv (this project has an abandoned seed-42 run that
+    failed on 7 subjects next to its good one), a run with no failed subject wins over one with
+    failures, and among equals the latest timestamp wins; both choices are printed.
+
+    -> {hash: {seed: path}}
+    """
+    found = {}
+    for root in roots:
+        for f in sorted(glob.glob(os.path.join(root, "**", "baseline_all_subjects_*.csv"), recursive=True)):
+            m = re.search(r"baseline_all_subjects_(\d+_\d+)_seed(\d+)_([0-9a-f]+)\.csv$", os.path.basename(f))
+            if not m:
+                continue
+            stamp, seed, h = m.groups()
+            nbad = 0
+            with open(f, newline="", encoding="utf-8") as fh:
+                rows = list(csv.DictReader(fh))
+            nbad = sum(1 for r in rows if r.get("status") != "ok")
+            found.setdefault(h, {}).setdefault(seed, []).append((nbad, stamp, f, len(rows)))
+    out = {}
+    for h, seeds in sorted(found.items()):
+        for seed, cands in sorted(seeds.items()):
+            cands.sort(key=lambda c: (c[0], [-int(x) for x in c[1].split("_")]))
+            nbad, stamp, f, n = cands[0]
+            out.setdefault(h, {})[seed] = f
+            note = ""
+            if len(cands) > 1:
+                note = (f"  <- chosen over {len(cands) - 1} other csv of this seed "
+                        f"({', '.join(f'{c[1]} with {c[0]} failed' for c in cands[1:])})")
+            flag = f"  [{nbad} subject(s) did not complete]" if nbad else ""
+            print(f"  {h}  seed {seed:>4}  {n:3d} rows{flag}{note}")
+    return out
+
+
+def table_discovered(roots, baseline_hash, labels, boot):
+    runs = discover(roots)
+    if baseline_hash not in runs:
+        raise SystemExit(f"baseline hash {baseline_hash} not found under {roots}; "
+                         f"available: {sorted(runs)}")
+    cfg = {"baseline": {"label": labels.get(baseline_hash, baseline_hash),
+                        "csv": sorted(runs[baseline_hash].values())},
+           "rows": [{"label": labels.get(h, h), "csv": sorted(v.values())}
+                    for h, v in runs.items() if h != baseline_hash]}
+    return cfg
+
+
+def run_table(cfg, boot):
     """Build the intervention table from a json config, instead of assembling it by hand.
 
     {"baseline": {"label": "baseline", "csv": ["...seed42...csv", "...seed999...csv"]},
@@ -250,8 +340,6 @@ def table(cfg_path, boot):
     Holm is applied ACROSS THE ROWS, which is the family that matters: these are the interventions
     tried on one dataset. Hand-assembled versions of this table in this project disagreed with the
     csv files in every row, which is why it exists."""
-    with open(cfg_path, encoding="utf-8") as f:
-        cfg = json.load(f)
     base = cfg["baseline"]
     A, badA, nA = load(base["csv"], base.get("label", "baseline"))
     rows, ps = [], []
@@ -306,12 +394,25 @@ def main():
     ap.add_argument("--allow-duplicate-seeds", action="store_true",
                     help="pool several csv of the same seed instead of refusing them")
     ap.add_argument("--self-test", action="store_true")
-    ap.add_argument("--table", help="json config: build the whole intervention table (see table())")
+    ap.add_argument("--table", help="json config: build the whole intervention table")
+    ap.add_argument("--discover", nargs="+", metavar="ROOT",
+                    help="find every run under these folders automatically -- no path typed by hand")
+    ap.add_argument("--baseline-hash", help="with --discover: the variant hash of the reference run")
+    ap.add_argument("--labels", help="with --discover: optional json {hash: readable name}")
     a = ap.parse_args()
     if a.self_test:
         raise SystemExit(self_test())
+    if a.discover:
+        if not a.baseline_hash:
+            print("no --baseline-hash given; listing what was found and stopping.\n")
+            discover(a.discover)
+            raise SystemExit(0)
+        labels = json.load(open(a.labels, encoding="utf-8")) if a.labels else {}
+        raise SystemExit(run_table(table_discovered(a.discover, a.baseline_hash, labels, a.boot),
+                                   a.boot) or 0)
     if a.table:
-        raise SystemExit(table(a.table, a.boot) or 0)
+        with open(a.table, encoding="utf-8") as f:
+            raise SystemExit(run_table(json.load(f), a.boot) or 0)
     if not (a.a and a.b):
         ap.error("--a and --b are required unless --self-test")
     A, badA, _ = load(a.a, a.label_a, a.allow_duplicate_seeds)
