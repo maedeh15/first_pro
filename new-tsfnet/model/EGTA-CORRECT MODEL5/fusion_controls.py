@@ -226,9 +226,9 @@ def summarise(rows, CM, subj_cnt):
     pb = wil(db)
     ph = holm([pl, pb])
     ok = dl.mean() >= 0.01 and ph[0] < 0.05 and db.mean() > 0 and ph[1] < 0.05
-    print("\nPre-registered reading:")
-    print(f"  fused(main) - fused(logvar)          = {dl.mean():+.4f}  p={pl:.4f}  Holm p={ph[0]:.4f}")
-    print(f"  fused(main) - fused(riem_disp|broad) = {db.mean():+.4f}  p={pb:.4f}  Holm p={ph[1]:.4f}")
+    print(f"\nPre-registered reading (reference member pinned to {PREREG}, NOT affected by --main):")
+    print(f"  fused({PREREG}) - fused(logvar)          = {dl.mean():+.4f}  p={pl:.4f}  Holm p={ph[0]:.4f}")
+    print(f"  fused({PREREG}) - fused(riem_disp|broad) = {db.mean():+.4f}  p={pb:.4f}  Holm p={ph[1]:.4f}")
     print(f"  -> claim 'the Riemannian MULTIBAND member is what matters' is "
           f"{'SUPPORTED' if ok else 'NOT supported'} under the rule (>= +1.0 pp over logvar, Holm p<0.05, and > broadband-only).")
 
