@@ -235,17 +235,22 @@ def self_test():
 
         # --discover: the layout is read, and an abandoned run of a seed loses to its complete one
         dd = os.path.join(td, "disc")
-        for h, seed, stamp, nfail in (("aaaa111111", "42", "20260101_000000", 0),
-                                      ("aaaa111111", "999", "20260102_000000", 0),
-                                      ("bbbb222222", "42", "20260103_000000", 7),
-                                      ("bbbb222222", "42", "20260104_000000", 0)):
+        # ("hash", seed, stamp, n failed, n subjects written)
+        for h, seed, stamp, nfail, ntot in (("aaaa111111", "42", "20260101_000000", 0, 26),
+                                            ("aaaa111111", "999", "20260102_000000", 0, 26),
+                                            ("bbbb222222", "42", "20260103_000000", 7, 26),
+                                            ("bbbb222222", "42", "20260104_000000", 0, 26),
+                                            # a run stopped after 2 subjects: no failures at all,
+                                            # and the NEWEST -- it must still lose to the full run
+                                            ("bbbb222222", "42", "20260105_000000", 0, 2),
+                                            ("cccc333333", "42", "20260106_000000", 0, 2)):
             d2 = os.path.join(dd, f"results_{h}_seed{seed}")
             os.makedirs(d2, exist_ok=True)
             with open(os.path.join(d2, f"baseline_all_subjects_{stamp}_seed{seed}_{h}.csv"),
                       "w", newline="", encoding="utf-8") as f:
                 w = csv.DictWriter(f, fieldnames=["subject_id", "status", "mean_acc"])
                 w.writeheader()
-                for i, sid in enumerate(subs):
+                for i, sid in enumerate(subs[:ntot]):
                     okrow = i >= nfail
                     w.writerow(dict(subject_id=sid, status="ok" if okrow else "failed",
                                     mean_acc=(base[sid] + (0.03 if h == "bbbb222222" else 0.0)) if okrow else ""))
@@ -255,12 +260,25 @@ def self_test():
         good = (sorted(runs) == ["aaaa111111", "bbbb222222"]
                 and sorted(runs["aaaa111111"]) == ["42", "999"]
                 and "20260104" in runs["bbbb222222"]["42"])
-        print(f"[discover] hashes and seeds read from the layout, abandoned seed-42 run rejected -> "
+        print(f"[discover] full run beats both the 7-failure run and the newer 2-subject run -> "
+              f"{'OK' if good else 'FAIL'}")
+        ok &= good
+        good = "cccc333333" not in runs and "PARTIAL" in buf.getvalue()
+        print(f"[discover] variant with only a 2-subject run excluded and flagged -> "
+              f"{'OK' if good else 'FAIL'}")
+        ok &= good
+        try:
+            table_discovered([dd], "aaaa111111", {}, None, 26)
+            good = False
+        except SystemExit as e:
+            good = "not a family" in str(e)
+        print(f"[discover] a table over every variant is refused without --rows -> "
               f"{'OK' if good else 'FAIL'}")
         ok &= good
         buf = _io.StringIO()
         with _ctx.redirect_stdout(buf):
-            run_table(table_discovered([dd], "aaaa111111", {"bbbb222222": "intervention"}, 0), 0)
+            run_table(table_discovered([dd], "aaaa111111", {"bbbb222222": "intervention"},
+                                       ["bbbb222222"], 26), 0)
         txt2 = buf.getvalue()
         good = "| intervention |" in txt2 and "+0.03" in txt2
         print(f"[discover] table built against the chosen baseline hash -> {'OK' if good else 'FAIL'}")
@@ -276,7 +294,7 @@ def self_test():
     return 0 if ok else 1
 
 
-def discover(roots):
+def discover(roots, min_subjects=26):
     """Find every complete run under <roots> without any path being typed by hand.
 
     Runs live at <root>/results_<hash>_seed<N>/baseline_all_subjects_<stamp>_seed<N>_<hash>.csv, so
@@ -284,9 +302,11 @@ def discover(roots):
     by hand is how the first version of the chapter-5 table ended up disagreeing with the data in
     every row.
 
-    Where one seed of one variant has several csv (this project has an abandoned seed-42 run that
-    failed on 7 subjects next to its good one), a run with no failed subject wins over one with
-    failures, and among equals the latest timestamp wins; both choices are printed.
+    Where one seed of one variant has several csv (this project has both an abandoned seed-42 run
+    that failed on 7 subjects and several runs stopped after a couple of subjects), the run with the
+    MOST COMPLETED subjects wins, then the one with fewest failures, then the latest timestamp. The
+    completed count has to come first: a run stopped after two subjects has no failed rows at all,
+    so a rule that only counted failures preferred it over the full 26-subject run.
 
     -> {hash: {seed: path}}
     """
@@ -301,32 +321,42 @@ def discover(roots):
             with open(f, newline="", encoding="utf-8") as fh:
                 rows = list(csv.DictReader(fh))
             nbad = sum(1 for r in rows if r.get("status") != "ok")
-            found.setdefault(h, {}).setdefault(seed, []).append((nbad, stamp, f, len(rows)))
+            nok = sum(1 for r in rows if r.get("status") == "ok")
+            found.setdefault(h, {}).setdefault(seed, []).append((nbad, stamp, f, len(rows), nok))
     out = {}
     for h, seeds in sorted(found.items()):
         for seed, cands in sorted(seeds.items()):
-            cands.sort(key=lambda c: (c[0], [-int(x) for x in c[1].split("_")]))
-            nbad, stamp, f, n = cands[0]
-            out.setdefault(h, {})[seed] = f
+            cands.sort(key=lambda c: (-c[4], c[0], [-int(x) for x in c[1].split("_")]))
+            nbad, stamp, f, n, nok = cands[0]
             note = ""
             if len(cands) > 1:
                 note = (f"  <- chosen over {len(cands) - 1} other csv of this seed "
-                        f"({', '.join(f'{c[1]} with {c[0]} failed' for c in cands[1:])})")
-            flag = f"  [{nbad} subject(s) did not complete]" if nbad else ""
-            print(f"  {h}  seed {seed:>4}  {n:3d} rows{flag}{note}")
+                        f"({', '.join(f'{c[1]}: {c[4]} ok/{c[0]} failed' for c in cands[1:])})")
+            flag = f"  [{nbad} failed]" if nbad else ""
+            if nok < min_subjects:
+                flag += f"  [PARTIAL: only {nok} subjects -- excluded from tables]"
+            print(f"  {h}  seed {seed:>4}  {nok:3d} ok{flag}{note}")
+            if nok >= min_subjects:
+                out.setdefault(h, {})[seed] = f
     return out
 
 
-def table_discovered(roots, baseline_hash, labels, boot):
-    runs = discover(roots)
+def table_discovered(roots, baseline_hash, labels, row_hashes, min_subjects):
+    runs = discover(roots, min_subjects)
     if baseline_hash not in runs:
         raise SystemExit(f"baseline hash {baseline_hash} not found under {roots}; "
                          f"available: {sorted(runs)}")
-    cfg = {"baseline": {"label": labels.get(baseline_hash, baseline_hash),
-                        "csv": sorted(runs[baseline_hash].values())},
-           "rows": [{"label": labels.get(h, h), "csv": sorted(v.values())}
-                    for h, v in runs.items() if h != baseline_hash]}
-    return cfg
+    if not row_hashes:
+        raise SystemExit(
+            f"{len(runs)} variants have a run of at least {min_subjects} subjects. A table over all of "
+            f"them is not a family of interventions: pass --rows <hash> ... with the ones the table "
+            f"should contain, and state the inclusion rule in the text.")
+    missing = [h for h in row_hashes if h not in runs]
+    if missing:
+        raise SystemExit(f"no complete run found for: {missing}")
+    return {"baseline": {"label": labels.get(baseline_hash, baseline_hash),
+                         "csv": sorted(runs[baseline_hash].values())},
+            "rows": [{"label": labels.get(h, h), "csv": sorted(runs[h].values())} for h in row_hashes]}
 
 
 def run_table(cfg, boot):
@@ -399,17 +429,21 @@ def main():
                     help="find every run under these folders automatically -- no path typed by hand")
     ap.add_argument("--baseline-hash", help="with --discover: the variant hash of the reference run")
     ap.add_argument("--labels", help="with --discover: optional json {hash: readable name}")
+    ap.add_argument("--rows", nargs="+", metavar="HASH",
+                    help="with --discover: the variant hashes that become rows of the table")
+    ap.add_argument("--min-subjects", type=int, default=26,
+                    help="a run with fewer completed subjects is treated as partial and excluded")
     a = ap.parse_args()
     if a.self_test:
         raise SystemExit(self_test())
     if a.discover:
         if not a.baseline_hash:
             print("no --baseline-hash given; listing what was found and stopping.\n")
-            discover(a.discover)
+            discover(a.discover, a.min_subjects)
             raise SystemExit(0)
         labels = json.load(open(a.labels, encoding="utf-8")) if a.labels else {}
-        raise SystemExit(run_table(table_discovered(a.discover, a.baseline_hash, labels, a.boot),
-                                   a.boot) or 0)
+        raise SystemExit(run_table(table_discovered(a.discover, a.baseline_hash, labels,
+                                                    a.rows, a.min_subjects), a.boot) or 0)
     if a.table:
         with open(a.table, encoding="utf-8") as f:
             raise SystemExit(run_table(json.load(f), a.boot) or 0)
