@@ -49,11 +49,49 @@ RIDGE = 1e-3
 
 
 # ----------------------------------------------------------------------------- SPD maths
+_EIGH_DEVICE = None      # None = numpy, exactly what every number in this project was computed with
+
+
+def set_eigh_backend(device=None):
+    """Route the eigendecomposition through torch on `device` instead of numpy.
+
+    Every probe here spends almost all of its time in np.linalg.eigh: measured, 74 s of the 80 s a
+    26-channel 4-band subject takes goes into 6800 decompositions of 28x28 matrices, and the einsums
+    around them cost 0.3 s. numpy runs those one at a time; a GPU does the batch at once. torch on
+    the CPU is not faster (85 s measured), so this is only worth passing a real device.
+
+    float64 is forced: the tangent vector is a log of eigenvalues, and in float32 the small
+    eigenvalues -- which is where the ridge lives -- lose the precision the features depend on.
+
+    device=None restores numpy. The numpy path stays the default everywhere so published numbers are
+    reproduced bit for bit; self_test() checks the two paths agree.
+    """
+    global _EIGH_DEVICE
+    if device is None:
+        _EIGH_DEVICE = None
+        return "numpy"
+    import torch
+    dev = torch.device(device)
+    if dev.type == "cuda" and not torch.cuda.is_available():
+        raise SystemExit("--device cuda asked for, but torch.cuda.is_available() is False")
+    _EIGH_DEVICE = dev
+    return str(dev)
+
+
+def _eigh(C):
+    if _EIGH_DEVICE is None:
+        return np.linalg.eigh(C)
+    import torch
+    t = torch.as_tensor(np.ascontiguousarray(C), dtype=torch.float64, device=_EIGH_DEVICE)
+    w, v = torch.linalg.eigh(t)
+    return w.cpu().numpy(), v.cpu().numpy()
+
+
 def _eigfun(C, f, clamp=True):
     """apply f to the eigenvalues of a symmetric matrix. clamp=True floors eigenvalues at 1e-12 (for
     SPD inputs: log, sqrt, inverse sqrt); clamp=False is REQUIRED for exp of a symmetric matrix whose
     eigenvalues are legitimately negative (the Karcher update)."""
-    w, v = np.linalg.eigh(C)
+    w, v = _eigh(C)
     return np.einsum("...ij,...j,...kj->...ik", v, f(np.maximum(w, 1e-12) if clamp else w), v)
 
 
@@ -208,6 +246,26 @@ def self_test():
     good = np.allclose(karcher_mean(W), np.eye(2), atol=1e-6)
     print(f"  Frechet mean after recentering == I -> {'OK' if good else 'FAIL'}")
     ok &= good
+    # the torch backend must not move the features. Checked against torch on the CPU, which is the
+    # same code path as a GPU run bar the device; a GPU run also prints this check.
+    try:
+        import torch  # noqa: F401
+        rng2 = np.random.RandomState(7)
+        xb = rng2.randn(60, 10, 300)
+        sesb = np.repeat([1, 2, 3], 20)
+        ref = {k: domain_features(build_covs(xb, True)[k], sesb, "riem_disp") for k in ("broad", "alpha")}
+        set_eigh_backend("cpu")
+        try:
+            got = {k: domain_features(build_covs(xb, True)[k], sesb, "riem_disp") for k in ("broad", "alpha")}
+        finally:
+            set_eigh_backend(None)
+        dmax = max(np.abs(ref[k] - got[k]).max() for k in ref)
+        good = dmax < 1e-8
+        print(f"[backend] torch path reproduces the numpy features, max diff {dmax:.2e} -> "
+              f"{'OK' if good else 'FAIL'}")
+        ok &= good
+    except ImportError:
+        print("[backend] torch not installed -- numpy path only, skipped")
     print("SELFTEST", "PASSED" if ok else "FAILED")
     return 0 if ok else 1
 
@@ -218,12 +276,16 @@ def main():
     ap.add_argument("--data")
     ap.add_argument("--self-test", action="store_true")
     ap.add_argument("--no-multiband", action="store_true", help="broadband covariance only (faster)")
+    ap.add_argument("--device", default=None,
+                    help="route the eigendecompositions through torch on this device (e.g. cuda). "
+                         "Default: numpy, which is what every published number here used.")
     ap.add_argument("--subjects", nargs="+", default=[f"VP{i:03d}" for i in range(1, 27)])
     a = ap.parse_args()
     if a.self_test:
         raise SystemExit(self_test())
     if not a.data:
         ap.error("--data is required unless --self-test")
+    print(f"eigendecomposition backend: {set_eigh_backend(a.device)}")
     rows, ids = [], []
     keys = None
     for sid in a.subjects:

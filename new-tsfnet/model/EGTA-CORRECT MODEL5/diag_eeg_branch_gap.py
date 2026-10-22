@@ -42,6 +42,7 @@ is the GPU-side evidence; this script only says which cause to spend GPU time on
 usage:
   python diag_eeg_branch_gap.py --self-test
   python diag_eeg_branch_gap.py --data "E:\\...\\TSFNET_PAPER_EXACT_nback"
+  python diag_eeg_branch_gap.py --data "..." --device cuda        # same numbers, much faster
 """
 import os
 import argparse
@@ -81,21 +82,36 @@ def cov_features(x, ses, multiband=True):
     return np.hstack([R.domain_features(b[k], ses, "EA") for k in b])
 
 
-def grid_signals(grid_windows):
+def grid_signals(grid_windows, rank=28):
     """{sid}_eeg_windows.npy is the 16x16 interpolated grid the model actually eats: (N, 16, 16, T).
-    Flatten it to (N, cells, T) and drop the cells that are zero in every window -- outside the
-    projected head they are structurally zero and only make the covariance singular. No channel
-    positions are needed: the grid is read from the file the branch is fed."""
+    Flatten to (N, cells, T), drop cells that are zero in every window (outside the projected head
+    they are structurally zero), then project the live cells onto their leading `rank` directions.
+
+    The projection is not an approximation. The grid is W @ channels with W fixed by the electrode
+    positions, so the cells span a subspace of dimension at most the channel count: a 160x160 cell
+    covariance has rank ~28 and its 12880-element tangent vector holds only ~406 independent
+    numbers. Computing it at full size makes the ridge, not the data, decide the whitening, and costs
+    minutes per subject. The basis is the row space of W -- sensor geometry, not labels, and the same
+    for every window and session -- so taking it from the pooled windows uses no label information.
+    rank=None keeps every live cell (slow, ill-conditioned; kept only to check the claim above)."""
     g = np.asarray(grid_windows, dtype=np.float64)
     if g.ndim != 4:
         raise ValueError(f"expected (N, 16, 16, T) grid windows, got {g.shape}")
-    N, H, W, T = g.shape
-    g = g.reshape(N, H * W, T)
+    N, H, W_, T = g.shape
+    g = g.reshape(N, H * W_, T)
     keep = np.abs(g).sum(axis=(0, 2)) > 0
-    return g[:, keep, :], int(keep.sum())
+    g = g[:, keep, :]
+    live = int(keep.sum())
+    if rank is None or rank >= live:
+        return g, live, live
+    flat = g.transpose(1, 0, 2).reshape(live, -1)                 # (cells, N*T)
+    S = flat @ flat.T / flat.shape[1]
+    w, v = np.linalg.eigh(S)
+    B = v[:, ::-1][:, :rank]                                      # (cells, rank)
+    return np.einsum("cr,nct->nrt", B, g), live, rank
 
 
-def features_for(name, x, ses, grid):
+def features_for(name, x, ses, grid, grid_rank=28):
     if name in ("mean", "rect", "logvar"):
         b = band_signals(x)
         if name == "logvar":
@@ -106,15 +122,15 @@ def features_for(name, x, ses, grid):
     if name == "cov_grid":
         if grid is None:
             raise ValueError("cov_grid needs the grid windows")
-        g, _ = grid_signals(grid)
+        g, _, _ = grid_signals(grid, rank=grid_rank)
         return cov_features(g, ses)
     raise ValueError(name)
 
 
-def run_subject(x, y, ses, grid, which):
+def run_subject(x, y, ses, grid, which, grid_rank=28):
     out = {}
     for name in which:
-        F = features_for(name, x, ses, grid)
+        F = features_for(name, x, ses, grid, grid_rank)
         out[name] = (R.loso(F, y, ses), R.loso(F, y, ses, (1, 2)))
     return out
 
@@ -157,6 +173,25 @@ def self_test():
     good = a_mean2 > 0.80
     print(f"  time-mean finds a level shift -> {'OK' if good else 'FAIL'}")
     ok &= good
+    # the grid claim: send channels through a fixed linear map into many cells; the rank-reduced
+    # grid probe must recover what the channel-space probe finds, since the map is invertible on its
+    # row space. If it does not, --grid-rank is losing something and cov_grid cannot be read.
+    Cch, Ncells = 8, 120
+    Wmap = rng.randn(Ncells, Cch)
+    xs = np.empty((N, Cch, T))
+    for i in range(N):
+        xs[i] = (1.0 + 0.6 * y[i]) * rng.randn(Cch, T)
+    cells = np.einsum("gc,nct->ngt", Wmap, xs)
+    side = int(np.ceil(np.sqrt(Ncells)))
+    grid = np.zeros((N, side, side, T))
+    grid.reshape(N, side * side, T)[:, :Ncells, :] = cells
+    a_ch = R.loso(cov_features(xs, ses), y, ses)
+    gr, live, kept = grid_signals(grid, rank=Cch)
+    a_gr = R.loso(cov_features(gr, ses), y, ses)
+    print(f"[grid] channel-space {a_ch:.3f} | rank-{kept} grid {a_gr:.3f} (of {live} live cells)")
+    good = kept == Cch and abs(a_ch - a_gr) < 0.05
+    print(f"  rank-reduced grid probe matches the channel-space probe -> {'OK' if good else 'FAIL'}")
+    ok &= good
     print("SELFTEST", "PASSED" if ok else "FAILED")
     return 0 if ok else 1
 
@@ -166,12 +201,22 @@ def main():
     ap.add_argument("--data")
     ap.add_argument("--self-test", action="store_true")
     ap.add_argument("--feats", nargs="+", default=list(FEATS), choices=list(FEATS))
+    ap.add_argument("--grid-rank", type=int, default=28,
+                    help="cov_grid: project the live grid cells onto this many directions. The grid "
+                         "is a rank-<n_channels> map of the channels, so 28 loses nothing and keeps "
+                         "the covariance well conditioned. 0 = keep every cell (slow).")
+    ap.add_argument("--device", default=None,
+                    help="run the eigendecompositions on this torch device (e.g. cuda). Almost all "
+                         "the runtime is thousands of 28x28 eigh calls, which numpy does one at a "
+                         "time; a GPU does the batch at once. Default: numpy.")
     ap.add_argument("--subjects", nargs="+", default=[f"VP{i:03d}" for i in range(1, 27)])
     a = ap.parse_args()
     if a.self_test:
         raise SystemExit(self_test())
+    a.grid_rank = a.grid_rank or None
     if not a.data:
         ap.error("--data is required unless --self-test")
+    print(f"eigendecomposition backend: {R.set_eigh_backend(a.device)}")
     rows = []
     hdr = "  ".join(f"{f:>9}" for f in a.feats)
     print(f"{'subject':8} {'n':>6} {hdr}   | 2-vs-3: {hdr}")
@@ -190,7 +235,7 @@ def main():
                 raise SystemExit(f"{sid}: no eeg_windows.npy, so cov_grid cannot be built. "
                                  f"Re-run with --feats mean rect logvar cov")
             grid = np.load(p, mmap_mode="r")
-        r = run_subject(np.asarray(x, dtype=np.float64), y, ses, grid, a.feats)
+        r = run_subject(np.asarray(x, dtype=np.float64), y, ses, grid, a.feats, a.grid_rank)
         rows.append(r)
         print(f"{sid:8} [{len(y):4d}w] " + "  ".join(f"{r[f][0]:9.3f}" for f in a.feats) + "   | "
               + "  ".join(f"{r[f][1]:9.3f}" for f in a.feats), flush=True)
