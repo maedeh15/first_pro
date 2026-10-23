@@ -29,6 +29,11 @@ What it computes, per subject, leave-one-session-out, same classifier as the oth
   cov         EA-aligned covariance, tangent space            second order, full (the 64.97% member)
   cov_grid    the same, on the saved 16x16 grid windows        (b): does the grid representation cost
                                                               anything a linear read-out can see?
+  cov_grid_std the same with the projected components          the conditioning control for cov_grid:
+              standardised                                     the grid basis spans orders of
+                                                              magnitude, so a fixed ridge and an L2
+                                                              penalty are not comparable across the
+                                                              two bases
 
 Reading it: if `rect` lands near the branch's 48.7% while `cov` lands near 65%, then what the branch
 is missing is the CROSS-CHANNEL second-order structure, which no amount of time-averaging recovers,
@@ -52,7 +57,7 @@ from scipy.stats import wilcoxon
 
 import check_riemannian_eeg as R
 
-FEATS = ("mean", "rect", "logvar", "cov", "cov_grid")
+FEATS = ("mean", "rect", "logvar", "cov", "cov_grid", "cov_grid_std")
 
 
 def band_signals(x):
@@ -82,7 +87,7 @@ def cov_features(x, ses, multiband=True):
     return np.hstack([R.domain_features(b[k], ses, "EA") for k in b])
 
 
-def grid_signals(grid_windows, rank=28):
+def grid_signals(grid_windows, rank=28, standardize=False):
     """{sid}_eeg_windows.npy is the 16x16 interpolated grid the model actually eats: (N, 16, 16, T).
     Flatten to (N, cells, T), drop cells that are zero in every window (outside the projected head
     they are structurally zero), then project the live cells onto their leading `rank` directions.
@@ -93,7 +98,16 @@ def grid_signals(grid_windows, rank=28):
     numbers. Computing it at full size makes the ridge, not the data, decide the whitening, and costs
     minutes per subject. The basis is the row space of W -- sensor geometry, not labels, and the same
     for every window and session -- so taking it from the pooled windows uses no label information.
-    rank=None keeps every live cell (slow, ill-conditioned; kept only to check the claim above)."""
+    rank=None keeps every live cell (slow, ill-conditioned; kept only to check the claim above).
+
+    standardize=True divides each projected component by the square root of its own variance. This
+    is the control for the obvious confound in reading cov_grid against cov: the two use different
+    coordinate bases, and everything downstream of the covariance -- a fixed ridge on the trace, the
+    whitening, StandardScaler and the L2 penalty -- is basis dependent. The channel basis is roughly
+    equally scaled; the grid's leading components span orders of magnitude, so a fixed ridge falls
+    almost entirely on the weak ones. If cov_grid_std recovers what cov_grid loses, the loss was the
+    probe's conditioning and says nothing about the representation; if it does not, the gap is about
+    the representation itself."""
     g = np.asarray(grid_windows, dtype=np.float64)
     if g.ndim != 4:
         raise ValueError(f"expected (N, 16, 16, T) grid windows, got {g.shape}")
@@ -108,7 +122,10 @@ def grid_signals(grid_windows, rank=28):
     S = flat @ flat.T / flat.shape[1]
     w, v = np.linalg.eigh(S)
     B = v[:, ::-1][:, :rank]                                      # (cells, rank)
-    return np.einsum("cr,nct->nrt", B, g), live, rank
+    out = np.einsum("cr,nct->nrt", B, g)
+    if standardize:
+        out = out / np.sqrt(np.maximum(w[::-1][:rank], 1e-12))[None, :, None]
+    return out, live, rank
 
 
 def features_for(name, x, ses, grid, grid_rank=28):
@@ -119,10 +136,10 @@ def features_for(name, x, ses, grid, grid_rank=28):
         return first_order(b, rectify=(name == "rect"))
     if name == "cov":
         return cov_features(x, ses)
-    if name == "cov_grid":
+    if name in ("cov_grid", "cov_grid_std"):
         if grid is None:
-            raise ValueError("cov_grid needs the grid windows")
-        g, _, _ = grid_signals(grid, rank=grid_rank)
+            raise ValueError(f"{name} needs the grid windows")
+        g, _, _ = grid_signals(grid, rank=grid_rank, standardize=(name == "cov_grid_std"))
         return cov_features(g, ses)
     raise ValueError(name)
 
@@ -192,6 +209,29 @@ def self_test():
     good = kept == Cch and abs(a_ch - a_gr) < 0.05
     print(f"  rank-reduced grid probe matches the channel-space probe -> {'OK' if good else 'FAIL'}")
     ok &= good
+    # the conditioning control must work on the confound it exists for: send the channels through a
+    # BADLY CONDITIONED map into the cells, so the leading grid components span orders of magnitude.
+    # cov_grid should then fall below cov even though the map is invertible on its row space and no
+    # information is lost; cov_grid_std should recover most of it. Without this check, a cov_grid
+    # deficit on real data cannot be told apart from an artefact of the probe.
+    # a weaker planted effect than above, so there is room for a deficit to show at all
+    xw = np.empty((N, Cch, T))
+    for i in range(N):
+        xw[i] = (1.0 + 0.06 * y[i]) * rng.randn(Cch, T)
+    a_ch_w = R.loso(cov_features(xw, ses), y, ses)
+    U = np.linalg.qr(rng.randn(Ncells, Cch))[0]
+    Wbad = U * np.logspace(0, -5, Cch)[None, :]        # condition number 1e5
+    cells_b = np.einsum("gc,nct->ngt", Wbad, xw)
+    grid_b = np.zeros((N, side, side, T))
+    grid_b.reshape(N, side * side, T)[:, :Ncells, :] = cells_b
+    a_raw = R.loso(cov_features(grid_signals(grid_b, rank=Cch)[0], ses), y, ses)
+    a_std = R.loso(cov_features(grid_signals(grid_b, rank=Cch, standardize=True)[0], ses), y, ses)
+    print(f"[conditioning] ill-conditioned map (cond 1e5): channel {a_ch_w:.3f} | grid {a_raw:.3f} | "
+          f"grid standardised {a_std:.3f}")
+    good = a_std > a_raw + 0.03 and a_std >= a_ch_w - 0.02
+    print(f"  the standardised control recovers a deficit that is pure conditioning -> "
+          f"{'OK' if good else 'FAIL'}")
+    ok &= good
     print("SELFTEST", "PASSED" if ok else "FAILED")
     return 0 if ok else 1
 
@@ -229,7 +269,7 @@ def main():
         y = np.load(os.path.join(d, f"{sid}_labels.npy"))
         ses = np.load(os.path.join(d, f"{sid}_session_ids.npy"))
         grid = None
-        if "cov_grid" in a.feats:
+        if {"cov_grid", "cov_grid_std"} & set(a.feats):
             p = os.path.join(d, f"{sid}_eeg_windows.npy")
             if not os.path.exists(p):
                 raise SystemExit(f"{sid}: no eeg_windows.npy, so cov_grid cannot be built. "
