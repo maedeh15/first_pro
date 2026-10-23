@@ -285,11 +285,13 @@ def main():
     print(f"  {'feature':10} {'3-class':>8} {'2-vs-3':>8}")
     for f in a.feats:
         print(f"  {f:10} {np.mean([r[f][0] for r in rows]):8.4f} {np.mean([r[f][1] for r in rows]):8.4f}")
-    print("\npaired differences vs 'rect' (the band-power proxy a conv+ReLU+GAP branch can represent):")
+    base = "rect" if "rect" in a.feats else a.feats[0]
+    print(f"\npaired differences vs '{base}'"
+          + (" (the band-power proxy a conv+ReLU+GAP branch can represent)" if base == "rect" else ""))
     for f in a.feats:
-        if f == "rect" or "rect" not in a.feats:
+        if f == base:
             continue
-        d = np.array([r[f][0] - r["rect"][0] for r in rows])
+        d = np.array([r[f][0] - r[base][0] for r in rows])
         p = wilcoxon(d).pvalue if np.any(d != 0) else 1.0
         print(f"  {f:10} {d.mean():+.4f}  wins {int((d > 0).sum())}/{len(d)}  p={p:.4f}")
     print("\nReading: the EEG branch's own head sits at 0.487. If 'rect' is near that and 'cov' is "
