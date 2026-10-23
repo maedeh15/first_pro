@@ -1,0 +1,11 @@
+{"user_id": 12, "product": "editor", "event": "publish", "timestamp": "2026-01-01T10:05:00+03:30"}
+{"user_id": 12, "product": "editor", "event": "open",    "timestamp": "2026-01-01T10:00:00+03:30"}
+{"user_id": 12, "product": "editor", "event": "edit",    "timestamp": "2026-01-01T06:32:00Z"}
+{"user_id": 12, "product": "editor", "event": "edit",    "timestamp": "2026-01-01T10:02:00+03:30"}
+{"user_id": 12, "product": "editor", "event": "open",    "timestamp": "2026-01-01T15:00:00+03:30"}
+{"user_id": 18, "product": "editor", "event": "open",    "timestamp": "2026-01-01T11:00:00+03:30"}
+{"user_id": 18, "product": "editor", "event": "edit",    "timestamp": "2026-01-01T11:04:00+03:30"}
+{"user_id": 21, "product": "forms",  "event": "create",  "timestamp": "2026-01-01T12:00:00+03:30"}
+{"user_id": 21, "product": "forms",  "event": "share",   "timestamp": "2026-01-01T12:01:00+03:30"}
+{"user_id": 21, "product": "forms",  "event": "respond", "timestamp": "2026-01-01 12:03:00+03:30"}
+{"user_id": 30, "product": "chat",   "event": "ask"

@@ -1,0 +1,63 @@
+{
+ "rows": [
+  {
+   "date": "2026-01-01",
+   "product": "editor",
+   "users": 2,
+   "sessions": 3,
+   "events": 6,
+   "converted": 1,
+   "conversion_rate": 0.3333
+  },
+  {
+   "date": "2026-01-01",
+   "product": "forms",
+   "users": 1,
+   "sessions": 1,
+   "events": 2,
+   "converted": 0,
+   "conversion_rate": 0.0
+  },
+  {
+   "date": "2026-01-01",
+   "product": "*",
+   "users": 3,
+   "sessions": 4,
+   "events": 8,
+   "converted": 1,
+   "conversion_rate": 0.25
+  },
+  {
+   "date": "*",
+   "product": "editor",
+   "users": 2,
+   "sessions": 3,
+   "events": 6,
+   "converted": 1,
+   "conversion_rate": 0.3333
+  },
+  {
+   "date": "*",
+   "product": "forms",
+   "users": 1,
+   "sessions": 1,
+   "events": 2,
+   "converted": 0,
+   "conversion_rate": 0.0
+  },
+  {
+   "date": "*",
+   "product": "*",
+   "users": 3,
+   "sessions": 4,
+   "events": 8,
+   "converted": 1,
+   "conversion_rate": 0.25
+  }
+ ],
+ "quality": {
+  "lines": 11,
+  "invalid": 2,
+  "duplicates": 1
+ }
+}

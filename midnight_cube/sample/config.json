@@ -1,0 +1,2 @@
+{"tz_offset": "+03:30", "session_gap_minutes": 30, "date_from": "2026-01-01", "date_to": "2026-01-07",
+ "funnels": {"editor": ["open", "edit", "publish"], "forms": ["create", "share", "respond"], "chat": ["join", "ask", "answer"]}}
