@@ -1,0 +1,14 @@
+[
+  {"annotator": "a01", "label": "spam", "confidence": 0.8},
+  {"annotator": "a01", "label": "spam", "confidence": 0.9},
+  {"annotator": "a01", "label": "ad",   "confidence": 0.6},
+  {"annotator": "a02", "label": "ad",   "confidence": 0.9},
+  {"annotator": "a03", "label": "spam", "confidence": 0.7},
+  {"annotator": "a03", "label": "ad",   "confidence": 0.7},
+  {"annotator": "a04", "label": "ad",   "confidence": 0.8},
+  {"annotator": "a05", "label": "ad",   "confidence": 0.9},
+  {"annotator": "a05", "label": "spam", "confidence": 0.9},
+  {"annotator": "a06", "label": "spam", "confidence": 1},
+  {"annotator": "a07", "label": "ad",   "confidence": true},
+  {"annotator": "",    "label": "spam", "confidence": 0.5}
+]
