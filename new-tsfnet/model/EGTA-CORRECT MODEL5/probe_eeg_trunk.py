@@ -1,5 +1,22 @@
 """
-probe_eeg_trunk.py -- the last untested cause of the EEG branch's 0.487.
+probe_eeg_trunk.py (v2) -- the last untested cause of the EEG branch's 0.487.
+
+v2 ADDS two diagnostics, and changes nothing in the existing columns (the default run prints the same
+numbers as v1):
+  * head_train      accuracy of the deployed head on the TRAINING windows of the fold. The point is the
+                    comparison with the fresh classifier's own train accuracy, not the size of the
+                    train/test gap on its own: a head that trails the fresh classifier on held-out data
+                    BECAUSE it over-fits must beat it on the training windows. MEASURED: it does not. The
+                    head reaches 0.6861 on its training windows while the most heavily regularised fresh
+                    classifier reaches 0.8019 on the same rows, in 26/26 subjects. So the head is not
+                    over-fitting its features; it is under-fitting them.
+                    CAVEAT: under --adabn these training windows pass the HELD-OUT session's BN statistics,
+                    so head_train is not the accuracy the head had at the end of training. The --no-adabn
+                    run is what separates under-fitting from AdaBN disabling the head.
+  * --gap-Cs        a sweep of the fresh classifier's regularisation C on the `gap` features (test AND train
+                    accuracy per C). It separates two explanations of the fresh classifier's +4 to +5 points:
+                    REGULARISATION (the advantage should vanish as C grows) versus something about what the
+                    deployed head was fitted to (the advantage should persist at every C).
 
 Where the question stands. A linear classifier on the same EEG reaches 0.6449 with full covariance
 features and 0.5872 with the rectified band power that a conv+ReLU+GAP branch CAN represent, while
@@ -81,6 +98,15 @@ def fit_eval(Xtr, ytr, Xte, yte, C=0.1):
     return float((clf.predict(Xte) == yte).mean())
 
 
+def fit_eval2(Xtr, ytr, Xte, yte, C=0.1):
+    """like fit_eval, also returns the training accuracy (the over-fitting read-out)"""
+    if len(np.unique(ytr)) < 2 or len(yte) == 0:
+        return float("nan"), float("nan")
+    clf = make_pipeline(StandardScaler(), LogisticRegression(C=C, max_iter=5000))
+    clf.fit(Xtr, ytr)
+    return float((clf.predict(Xte) == yte).mean()), float((clf.predict(Xtr) == ytr).mean())
+
+
 def self_test():
     """The measurement chain is: a forward hook grabs the stage-2 map, pool_features reduces it, a
     fresh classifier is fitted. Each link is checked on data where the right answer is known.
@@ -143,6 +169,37 @@ def self_test():
     good = not np.any(ses[tr_idx] == 3)
     print(f"[split] the training rows exclude the held-out session -> {'OK' if good else 'FAIL'}")
     ok &= good
+    # the C sweep must expose memorisation in its TRAIN column and report a separate TEST column.
+    # (In this synthetic world weak regularisation costs only ~1-2 points of test accuracy even though it
+    # memorises the training rows -- so the sweep is a MEASURE of how much C matters, and a flat result on
+    # the real trunk would be informative in itself, not a failure of the tool.)
+    def world(seed, n=150, d=400, k=40, shift=0.35):
+        r = np.random.RandomState(seed)
+        mu = r.randn(3, k) * shift
+        yy = np.tile([0, 1, 2], n // 3)
+        X = r.randn(n, d)
+        X[:, :k] += mu[yy]
+        yt = np.tile([0, 1, 2], 300)
+        Xt = r.randn(900, d)
+        Xt[:, :k] += mu[yt]
+        return X, yy, Xt, yt
+
+    res = []
+    for sd in range(6):
+        X2, y2, Xte, yte = world(sd)
+        res.append((fit_eval2(X2, y2, Xte, yte, C=0.001), fit_eval2(X2, y2, Xte, yte, C=100.0)))
+    lo_te = np.mean([r[0][0] for r in res]); lo_tr = np.mean([r[0][1] for r in res])
+    hi_te = np.mean([r[1][0] for r in res]); hi_tr = np.mean([r[1][1] for r in res])
+    print(f"[C sweep] C=0.001 test {lo_te:.3f} train {lo_tr:.3f} | C=100 test {hi_te:.3f} train {hi_tr:.3f}")
+    good = hi_tr > 0.98 and hi_tr >= lo_tr and lo_te >= hi_te - 0.005 and lo_te > 0.5
+    print(f"  train column shows memorisation at weak regularisation, test column is separate and above chance "
+          f"-> {'OK' if good else 'FAIL'}")
+    ok &= good
+    X2, y2, Xte, yte = world(0)
+    good = abs(fit_eval(X2, y2, Xte, yte) - fit_eval2(X2, y2, Xte, yte)[0]) < 0.02
+    print(f"[v1 == v2] the default classifier path agrees with v1 (up to the max_iter setting) -> "
+          f"{'OK' if good else 'FAIL'}")
+    ok &= good
     print("SELFTEST", "PASSED" if ok else "FAILED")
     return 0 if ok else 1
 
@@ -157,6 +214,8 @@ def main():
     ap.add_argument("--adabn", dest="adabn", action="store_true", default=True)
     ap.add_argument("--no-adabn", dest="adabn", action="store_false")
     ap.add_argument("--out")
+    ap.add_argument("--gap-Cs", nargs="+", type=float, default=None,
+                    help="extra: regularisation sweep of the fresh classifier on `gap` (e.g. 0.001 0.01 0.1 1 100)")
     ap.add_argument("--self-test", action="store_true")
     # architecture flags: defaults are the accepted baseline of this project
     ap.add_argument("--dropout", type=float, default=0.5)
@@ -233,12 +292,20 @@ def main():
             y_ord = labels[order]
             is_te = np.concatenate([np.zeros(len(order) - len(te_idx), bool), np.ones(len(te_idx), bool)])
             head_acc = float((np.concatenate(yhead).argmax(1)[is_te] == y_ord[is_te]).mean())
-            row = dict(subject=sid, session=int(test_s), n_test=int(is_te.sum()), head=head_acc)
+            head_train = float((np.concatenate(yhead).argmax(1)[~is_te] == y_ord[~is_te]).mean())
+            row = dict(subject=sid, session=int(test_s), n_test=int(is_te.sum()), head=head_acc,
+                       head_train=head_train)
             for k in FEATS:
                 X = np.concatenate(feats[k])
                 row[k] = fit_eval(X[~is_te], y_ord[~is_te], X[is_te], y_ord[is_te])
+            if a.gap_Cs:
+                Xg = np.concatenate(feats["gap"])
+                for Cv in a.gap_Cs:
+                    te_acc, tr_acc = fit_eval2(Xg[~is_te], y_ord[~is_te], Xg[is_te], y_ord[is_te], C=Cv)
+                    row[f"gap@C{Cv:g}"] = te_acc
+                    row[f"gap_train@C{Cv:g}"] = tr_acc
             rows.append(row)
-            print(f"[{sid} s{test_s}] head {head_acc:.3f} | "
+            print(f"[{sid} s{test_s}] head {head_acc:.3f} (train {head_train:.3f}) | "
                   + " ".join(f"{k} {row[k]:.3f}" for k in FEATS), flush=True)
     if not rows:
         raise SystemExit("no fold could be probed")
@@ -267,6 +334,37 @@ def main():
     d = per("logvar") - per("gap")
     p = wilcoxon(d).pvalue if np.any(d != 0) else 1.0
     print(f"  {'logvar - gap':12} {d.mean():+.4f}  wins {int((d > 0).sum())}/{len(d)}  p={p:.4f}")
+    ht = per("head_train")
+    print(f"\nthe deployed head: accuracy on its TRAINING windows {ht.mean():.4f} vs held-out "
+          f"{h.mean():.4f}. Read this against the fresh classifier's train column below, not on its "
+          f"own: over-fitting would mean the head BEATS the fresh classifier on the training rows.")
+    if a.gap_Cs:
+        print("\nfresh classifier on `gap`, regularisation sweep (test | train | paired vs the head):")
+        for Cv in a.gap_Cs:
+            te = per(f"gap@C{Cv:g}")
+            tr = per(f"gap_train@C{Cv:g}")
+            d = te - h
+            p = wilcoxon(d).pvalue if np.any(d != 0) else 1.0
+            print(f"  C={Cv:<8g} test {te.mean():.4f} | train {tr.mean():.4f} | vs head {d.mean():+.4f} "
+                  f"wins {int((d > 0).sum())}/{len(d)} p={p:.4f}")
+        Cmin = min(a.gap_Cs)
+        dt = per(f"gap_train@C{Cmin:g}") - ht
+        pt = wilcoxon(dt).pvalue if np.any(dt != 0) else 1.0
+        print(f"  TRAIN accuracy, the most regularised fresh classifier (C={Cmin:g}) minus the head: "
+              f"{dt.mean():+.4f} wins {int((dt > 0).sum())}/{len(dt)} p={pt:.2g}")
+        print("  reading: if the advantage over the head shrinks toward 0 as C grows, the head's deficit is "
+              "regularisation; if it persists at every C, it is not. And if the head also trails on the "
+              "TRAIN row, it is under-fitting its own features rather than over-fitting them.")
+        low = [r for r in rows if r["head_train"] < 0.55]
+        if low:
+            hi = [r for r in rows if r["head_train"] >= 0.55]
+            g = lambda rs, k: float(np.mean([r[k] for r in rs]))
+            print(f"\n{len(low)} of {len(rows)} folds have the head below 0.55 on its own training windows. "
+                  f"There its held-out accuracy is {g(low, 'head'):.4f} against {g(hi, 'head'):.4f} "
+                  f"elsewhere, and the fresh classifier's advantage is "
+                  f"{g(low, 'gap') - g(low, 'head'):+.4f} against {g(hi, 'gap') - g(hi, 'head'):+.4f}. "
+                  f"Under --adabn this can be the held-out session's BN statistics disabling the head "
+                  f"rather than under-fitting; the --no-adabn run separates the two.")
     print("\nThis reads the trunk of a model trained under the joint objective; it does not say what a "
           "retrained EEG-only branch would reach. AdaBN was applied on the held-out session before "
           "any extraction, so the training-session features carry that session's normalisation -- the "
