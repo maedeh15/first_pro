@@ -48,7 +48,7 @@ def seed_of(path):
     return m.group(1) if m else None
 
 
-def load(patterns, label="", allow_dup=False):
+def load(patterns, label="", allow_dup=False, exclude_seeds=()):
     """-> {metric: {subject: mean over the runs that have it}}, plus the set of incomplete subjects
 
     A glob such as results_*_seed*/baseline_all_subjects_*.csv happily matches an ABANDONED run of a
@@ -62,6 +62,13 @@ def load(patterns, label="", allow_dup=False):
         if not hits:
             empty.append(pat)
         files.extend(hits)
+    if exclude_seeds:
+        drop = [f for f in files if seed_of(f) in {str(x) for x in exclude_seeds}]
+        files = [f for f in files if f not in drop]
+        for f in drop:
+            print(f"{label or 'run'}: EXCLUDED seed {seed_of(f)} -- {os.path.basename(f)}")
+        if not files:
+            raise SystemExit(f"{label}: every csv was excluded by --exclude-seed")
     if empty:
         raise SystemExit(f"{label}: these patterns matched no csv: {empty}\n"
                          f"  a pattern that silently matches nothing drops a whole seed from the comparison.")
@@ -118,7 +125,49 @@ def movers(A, B, subs, la, lb, k=5):
         print("\nno subject at or below chance in either run.")
 
 
-def compare(A, B, bad, la, lb, boot=10000):
+def per_seed_signs(pa, pb, exclude):
+    """sign of the mean accuracy difference within each seed present on both sides"""
+    fa = {seed_of(f): f for pat in pa for f in sorted(glob.glob(pat))}
+    fb = {seed_of(f): f for pat in pb for f in sorted(glob.glob(pat))}
+    ex = {str(x) for x in exclude}
+    signs = []
+    for sd in sorted(set(fa) & set(fb) - ex):
+        a1, _, _ = load([fa[sd]], f"seed {sd} A")
+        b1, _, _ = load([fb[sd]], f"seed {sd} B")
+        subs = sorted(set(a1["mean_acc"]) & set(b1["mean_acc"]))
+        d = np.mean([b1["mean_acc"][s] - a1["mean_acc"][s] for s in subs])
+        signs.append(int(np.sign(d)))
+        print(f"  seed {sd}: mean difference {d:+.4f}")
+    return signs
+
+
+def verdict(diff, p, per_seed_signs, rule):
+    """Print a PASS/FAIL against a rule the caller wrote down BEFORE seeing this output.
+
+    The point is not the arithmetic -- it is that the threshold is in the command line, so it cannot
+    be chosen after the fact. A rule given here is only pre-registered if the command was written
+    before the runs finished; the tool cannot check that, so it says so."""
+    if not any(v is not None and v is not False for v in rule.values()):
+        return
+    print("\nPRE-REGISTERED DECISION RULE (as given on the command line):")
+    checks = []
+    if rule["min_diff"] is not None:
+        checks.append((f"mean difference >= {rule['min_diff']:+.4f}", diff >= rule["min_diff"],
+                       f"{diff:+.4f}"))
+    if rule["max_p"] is not None:
+        checks.append((f"p <= {rule['max_p']:.4f}", p <= rule["max_p"], f"{p:.4f}"))
+    if rule["same_sign"] and per_seed_signs is not None:
+        same = len(set(per_seed_signs)) == 1 and per_seed_signs[0] != 0
+        checks.append(("every seed moves in the same direction", same, str(per_seed_signs)))
+    for text, passed, got in checks:
+        print(f"  [{'PASS' if passed else 'FAIL'}] {text}   (observed {got})")
+    ok = all(c[1] for c in checks)
+    print(f"  -> {'SUPPORTED' if ok else 'NOT SUPPORTED'} under this rule.")
+    print("  This is only a pre-registration if the rule was written before the runs finished; "
+          "nothing here can verify that.")
+
+
+def compare(A, B, bad, la, lb, boot=10000, rule=None, per_seed_signs=None):
     subs = sorted(set(A.get("mean_acc", {})) & set(B.get("mean_acc", {})) - bad)
     if not subs:
         raise SystemExit("no subject completed in both runs")
@@ -144,6 +193,8 @@ def compare(A, B, bad, la, lb, boot=10000):
               f"{p:8.4f} {ci:>22}")
         out[k] = (d.mean(), p)
     movers(A, B, subs, la, lb)
+    if rule:
+        verdict(out["mean_acc"][0], out["mean_acc"][1], per_seed_signs, rule)
     print(f"\nThe accuracy row is the primary reading; the recall rows are descriptive. p-values are "
           f"uncorrected -- if this intervention is one of several tested, correct across them (Holm).")
     return out, subs
@@ -228,14 +279,18 @@ def self_test():
         with _ctx.redirect_stdout(buf):
             run_table(_json.load(open(cfgp, encoding="utf-8")), 0)
         txt = buf.getvalue()
-        good = "| up |" in txt and "| same |" in txt and "Holm (m=3)" in txt and "+0.0000" in txt
-        print(f"[table] two rows, seed counts and Holm(m=2) rendered -> {'OK' if good else 'FAIL'}")
+        good = ("| up |" in txt and "| same |" in txt and "| Holm |" in txt
+                and "+0.0000" in txt and "Holm family" in txt)
+        print(f"[table] rows, the reference column and the Holm families rendered -> "
+              f"{'OK' if good else 'FAIL'}")
         ok &= good
-        good = "| 3 | 3 | 25 |" in txt
-        print(f"[table] seed count and reduced n reported per row -> {'OK' if good else 'FAIL'}")
+        good = "| base | 3 | 3 | 25 |" in txt
+        print(f"[table] reference, seed counts and reduced n reported per row -> "
+              f"{'OK' if good else 'FAIL'}")
         ok &= good
-        good = "| one seed | 1 | 1 | 25 |" in txt and "**" not in txt.split("| one seed")[1][:40]
-        print(f"[table] a row with its own one-seed baseline is read 1-vs-1 -> "
+        seg = txt.split("| one seed |")[1]
+        good = "| 1 | 1 | 25 |" in seg[:60] and "A_seed0.csv" in seg[:60]
+        print(f"[table] a row with its own one-seed baseline is read 1-vs-1 and names it -> "
               f"{'OK' if good else 'FAIL'}")
         ok &= good
 
@@ -288,6 +343,30 @@ def self_test():
         txt2 = buf.getvalue()
         good = "| intervention |" in txt2 and "+0.03" in txt2
         print(f"[discover] table built against the chosen baseline hash -> {'OK' if good else 'FAIL'}")
+        ok &= good
+
+        # --exclude-seed must drop the named seed from both sides
+        buf = _io.StringIO()
+        with _ctx.redirect_stdout(buf):
+            Ax, _, nax = load(pa, "A", exclude_seeds=("1",))
+        good = nax == 2 and "EXCLUDED seed 1" in buf.getvalue()
+        print(f"[exclude] --exclude-seed drops that seed and says so -> {'OK' if good else 'FAIL'}")
+        ok &= good
+
+        # the decision rule must fail a result that misses one of its conditions
+        buf = _io.StringIO()
+        with _ctx.redirect_stdout(buf):
+            verdict(0.004, 0.2, [1, 1], dict(min_diff=0.01, max_p=0.05, same_sign=True))
+        txt3 = buf.getvalue()
+        good = "NOT SUPPORTED" in txt3 and txt3.count("[FAIL]") == 2 and "[PASS]" in txt3
+        print(f"[rule] a result below threshold and above p fails exactly those two checks -> "
+              f"{'OK' if good else 'FAIL'}")
+        ok &= good
+        buf = _io.StringIO()
+        with _ctx.redirect_stdout(buf):
+            verdict(0.02, 0.01, [1, 1], dict(min_diff=0.01, max_p=0.05, same_sign=True))
+        good = "SUPPORTED" in buf.getvalue() and "NOT SUPPORTED" not in buf.getvalue()
+        print(f"[rule] a result meeting every condition passes -> {'OK' if good else 'FAIL'}")
         ok &= good
 
         # null case: same data on both sides must not be called a difference
@@ -396,19 +475,30 @@ def run_table(cfg, boot):
         d = b - a
         p = wilcoxon(d).pvalue if np.any(d != 0) else 1.0
         ci = boot_ci(d, boot) if boot else (float("nan"), float("nan"))
+        ref = r.get("baseline_label") or (base.get("label", "baseline") if not r.get("baseline")
+                                          else " ".join(os.path.basename(c) for c in r["baseline"]))
         rows.append(dict(label=r["label"], seeds=nB, base_seeds=nA, n=len(subs), diff=d.mean(),
-                         wins=int((d > 0).sum()), p=float(p), ci=ci,
+                         wins=int((d > 0).sum()), p=float(p), ci=ci, ref=ref,
                          dropped=sorted(badA | badB)))
         ps.append(float(p))
-    adj = holm(ps)
-    print(f"\n| intervention | seeds | base seeds | n | diff | wins | p | Holm (m={len(rows)}) | 95% CI |")
-    print("|---|---|---|---|---:|---|---:|---:|---|")
+    # Holm is applied WITHIN each group of rows that share a reference run. Rows measured against a
+    # different reference are not the same family: correcting them together would mix comparisons
+    # that answer different questions.
+    adj = [None] * len(rows)
+    groups = {}
+    for i, r in enumerate(rows):
+        groups.setdefault(r["ref"], []).append(i)
+    for ref, idx in groups.items():
+        for i, h in zip(idx, holm([ps[i] for i in idx])):
+            adj[i] = h
+    print(f"\n| intervention | reference | seeds | base seeds | n | diff | wins | p | Holm | 95% CI |")
+    print("|---|---|---|---|---|---:|---|---:|---:|---|")
     for r, h in zip(rows, adj):
         lo, hi = r["ci"]
         ci = "-" if np.isnan(lo) else f"[{lo:+.4f}, {hi:+.4f}]"
         mark = " **" if r["seeds"] != r["base_seeds"] else ""
-        print(f"| {r['label']} | {r['seeds']} | {r['base_seeds']}{mark} | {r['n']} | {r['diff']:+.4f} | "
-              f"{r['wins']}/{r['n']} | {r['p']:.4f} | {h:.4f} | {ci} |")
+        print(f"| {r['label']} | {r['ref']} | {r['seeds']} | {r['base_seeds']}{mark} | {r['n']} | "
+              f"{r['diff']:+.4f} | {r['wins']}/{r['n']} | {r['p']:.4f} | {h:.4f} | {ci} |")
     if any(r["seeds"] != r["base_seeds"] for r in rows):
         print("\n** this row compares a different number of seeds on the two sides. Seed-to-seed spread "
               "here reaches about one point, so give such a row its own same-seed baseline.")
@@ -416,9 +506,12 @@ def run_table(cfg, boot):
     drop = {tuple(r["dropped"]) for r in rows if r["dropped"]}
     for d_ in drop:
         print(f"*** some rows dropped subjects: {list(d_)} -- their n differs, say so in the caption.")
-    print("Holm is applied across the rows of THIS table. If other interventions were tried and are "
-          "not listed, the family is larger than m and these corrected values are optimistic: list "
-          "every intervention, or state the selection rule.")
+    for ref, idx in groups.items():
+        print(f"Holm family '{ref}': {len(idx)} row(s).")
+    print("Holm is applied WITHIN each reference group, because rows measured against different "
+          "reference runs answer different questions. If other interventions were tried against the "
+          "same reference and are not listed, that family is larger than shown and these corrected "
+          "values are optimistic: list every intervention, or state the selection rule.")
 
 
 def holm(p):
@@ -440,6 +533,17 @@ def main():
     ap.add_argument("--label-a", default="A")
     ap.add_argument("--label-b", default="B")
     ap.add_argument("--boot", type=int, default=10000)
+    ap.add_argument("--exclude-seed", nargs="+", default=(), metavar="SEED",
+                    help="drop these seeds from BOTH sides. Use it to keep the seed a variant was "
+                         "CHOSEN on out of its own confirmation: a variant picked as the best of "
+                         "several on seed 42 is biased upward on seed 42, and including it makes the "
+                         "p-value optimistic.")
+    ap.add_argument("--rule-min-diff", type=float, default=None,
+                    help="pre-registered decision rule: the minimum mean accuracy difference")
+    ap.add_argument("--rule-max-p", type=float, default=None,
+                    help="pre-registered decision rule: the maximum p-value")
+    ap.add_argument("--rule-same-sign", action="store_true",
+                    help="pre-registered decision rule: every seed must move in the same direction")
     ap.add_argument("--allow-duplicate-seeds", action="store_true",
                     help="pool several csv of the same seed instead of refusing them")
     ap.add_argument("--self-test", action="store_true")
@@ -470,7 +574,9 @@ def main():
         ap.error("--a and --b are required unless --self-test")
     A, badA, _ = load(a.a, a.label_a, a.allow_duplicate_seeds)
     B, badB, _ = load(a.b, a.label_b, a.allow_duplicate_seeds)
-    compare(A, B, badA | badB, a.label_a, a.label_b, a.boot)
+    rule = dict(min_diff=a.rule_min_diff, max_p=a.rule_max_p, same_sign=a.rule_same_sign)
+    signs = per_seed_signs(a.a, a.b, a.exclude_seed) if a.rule_same_sign else None
+    compare(A, B, badA | badB, a.label_a, a.label_b, a.boot, rule, signs)
 
 
 if __name__ == "__main__":
