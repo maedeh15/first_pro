@@ -157,8 +157,14 @@ def verdict(diff, p, per_seed_signs, rule):
     if rule["max_p"] is not None:
         checks.append((f"p <= {rule['max_p']:.4f}", p <= rule["max_p"], f"{p:.4f}"))
     if rule["same_sign"] and per_seed_signs is not None:
-        same = len(set(per_seed_signs)) == 1 and per_seed_signs[0] != 0
-        checks.append(("every seed moves in the same direction", same, str(per_seed_signs)))
+        # "all seeds agree" is vacuously true for one seed; a cross-seed condition
+        # needs at least two seeds, so one seed is a FAIL, not a PASS.
+        if len(per_seed_signs) < 2:
+            checks.append(("every seed moves in the same direction (needs >= 2 seeds)",
+                           False, f"{per_seed_signs} -- only {len(per_seed_signs)} seed on both sides"))
+        else:
+            same = len(set(per_seed_signs)) == 1 and per_seed_signs[0] != 0
+            checks.append(("every seed moves in the same direction", same, str(per_seed_signs)))
     for text, passed, got in checks:
         print(f"  [{'PASS' if passed else 'FAIL'}] {text}   (observed {got})")
     ok = all(c[1] for c in checks)
@@ -528,8 +534,13 @@ def holm(p):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--a", nargs="+", help="reference run csv(s), one per seed (globs allowed)")
-    ap.add_argument("--b", nargs="+", help="intervention run csv(s), one per seed")
+    # nargs="+" WITHOUT action="append" made a second --a OVERWRITE the first, so
+    # "--a p1 --a p2" silently compared one seed and the same-sign rule passed vacuously
+    # on a one-element list. action="append" accumulates; the lists are flattened below.
+    ap.add_argument("--a", nargs="+", action="append",
+                    help="reference run csv(s), one per seed (globs allowed; repeatable)")
+    ap.add_argument("--b", nargs="+", action="append",
+                    help="intervention run csv(s), one per seed (repeatable)")
     ap.add_argument("--label-a", default="A")
     ap.add_argument("--label-b", default="B")
     ap.add_argument("--boot", type=int, default=10000)
@@ -570,10 +581,16 @@ def main():
     if a.table:
         with open(a.table, encoding="utf-8") as f:
             raise SystemExit(run_table(json.load(f), a.boot) or 0)
+    if a.a:
+        a.a = [p for group in a.a for p in group]
+    if a.b:
+        a.b = [p for group in a.b for p in group]
     if not (a.a and a.b):
         ap.error("--a and --b are required unless --self-test")
-    A, badA, _ = load(a.a, a.label_a, a.allow_duplicate_seeds)
-    B, badB, _ = load(a.b, a.label_b, a.allow_duplicate_seeds)
+    # exclude_seeds was reaching per_seed_signs only, so --exclude-seed left the
+    # excluded seed in the primary accuracy row -- the circularity it exists to prevent.
+    A, badA, _ = load(a.a, a.label_a, a.allow_duplicate_seeds, a.exclude_seed)
+    B, badB, _ = load(a.b, a.label_b, a.allow_duplicate_seeds, a.exclude_seed)
     rule = dict(min_diff=a.rule_min_diff, max_p=a.rule_max_p, same_sign=a.rule_same_sign)
     signs = per_seed_signs(a.a, a.b, a.exclude_seed) if a.rule_same_sign else None
     compare(A, B, badA | badB, a.label_a, a.label_b, a.boot, rule, signs)
