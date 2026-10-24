@@ -11,9 +11,16 @@ three readings are paired per fold:
   within        the target's own two remaining sessions            the protocol used everywhere else
   cross         all 3 sessions of the other 25 subjects, and
                 NO data from the target at all                     the subject-independent question
-  cross+within  both pooled                                        what deployment would actually do:
-                                                                   a population model plus whatever
-                                                                   calibration data the person gave
+  cross+within  both pooled, every window weighted equally        NOT "the two together": the target
+                                                                   contributes about 591 of 22780
+                                                                   rows, i.e. 2.6%, so this row sits
+                                                                   near the cross row by construction
+                                                                   and says nothing about whether the
+                                                                   target's data would help if it
+                                                                   counted for more
+  cross+within(w) the same with the target's windows weighted      the row that actually asks it.
+                x --target-weight, so they carry a                 --target-weight 1 reproduces the
+                comparable share of the loss                       equal-weight row
 
 Why the features are comparable across people at all: each session is whitened by its own mean
 covariance, so every session -- whoever it belongs to -- is mapped to a neighbourhood of the
@@ -50,16 +57,22 @@ from sklearn.pipeline import make_pipeline
 import check_riemannian_eeg as R
 
 CONDITIONS = ("within", "cross", "cross+within")
+WEIGHTED = "cross+within(w)"
 
 
-def fit_eval(Xtr, ytr, Xte, yte, classes=None):
+def fit_eval(Xtr, ytr, Xte, yte, classes=None, sw=None):
     if classes is not None:
         mtr, mte = np.isin(ytr, classes), np.isin(yte, classes)
         Xtr, ytr, Xte, yte = Xtr[mtr], ytr[mtr], Xte[mte], yte[mte]
+        if sw is not None:
+            sw = sw[mtr]
     if len(Xte) == 0 or len(np.unique(ytr)) < 2:
         return float("nan")
     clf = make_pipeline(StandardScaler(), LogisticRegression(C=0.1, max_iter=3000))
-    clf.fit(Xtr, ytr)
+    if sw is None:
+        clf.fit(Xtr, ytr)
+    else:
+        clf.fit(Xtr, ytr, logisticregression__sample_weight=sw)
     return float((clf.predict(Xte) == yte).mean())
 
 
@@ -96,7 +109,7 @@ def load_subject(data, sid, verbose=True):
     return F, y, ses
 
 
-def run(data, subjects, verbose=True):
+def run(data, subjects, verbose=True, target_weight=None):
     feats = {}
     for sid in subjects:
         if not os.path.exists(os.path.join(data, sid, f"{sid}_labels.npy")):
@@ -115,36 +128,51 @@ def run(data, subjects, verbose=True):
         for s in np.unique(ses):
             te = ses == s
             tr = ~te
-            sets = {"within": (F[tr], y[tr]),
-                    "cross": (Xo, yo),
-                    "cross+within": (np.vstack([Xo, F[tr]]), np.concatenate([yo, y[tr]]))}
+            Xp = np.vstack([Xo, F[tr]])
+            yp = np.concatenate([yo, y[tr]])
+            sets = {"within": (F[tr], y[tr], None),
+                    "cross": (Xo, yo, None),
+                    "cross+within": (Xp, yp, None)}
+            conds = list(CONDITIONS)
+            if target_weight is not None:
+                sw = np.concatenate([np.ones(len(yo)), np.full(len(y[tr]), float(target_weight))])
+                sets[WEIGHTED] = (Xp, yp, sw)
+                conds.append(WEIGHTED)
             row = dict(subject=sid, session=int(s), n_test=int(te.sum()))
-            for c in CONDITIONS:
-                Xtr, ytr = sets[c]
-                row[f"{c}_3cls"] = fit_eval(Xtr, ytr, F[te], y[te])
-                row[f"{c}_2v3"] = fit_eval(Xtr, ytr, F[te], y[te], (1, 2))
+            for c in conds:
+                Xtr, ytr, sw_c = sets[c]
+                row[f"{c}_3cls"] = fit_eval(Xtr, ytr, F[te], y[te], sw=sw_c)
+                row[f"{c}_2v3"] = fit_eval(Xtr, ytr, F[te], y[te], (1, 2), sw=sw_c)
                 row[f"{c}_ntrain"] = int(len(ytr))
+            row["target_share"] = float(len(y[tr]) / len(yp))
             rows.append(row)
             if verbose:
                 print(f"  {sid} session {s}: " + "  ".join(
-                    f"{c} {row[f'{c}_3cls']:.3f}" for c in CONDITIONS), flush=True)
+                    f"{c} {row[f'{c}_3cls']:.3f}" for c in conds), flush=True)
     return rows
 
 
 def summarise(rows):
     subs = sorted({r["subject"] for r in rows})
+    conds = [c for c in list(CONDITIONS) + [WEIGHTED] if f"{c}_3cls" in rows[0]]
 
     def per_subject(key):
         return np.array([np.mean([r[key] for r in rows if r["subject"] == s]) for s in subs])
 
     print(f"\n{len(subs)} target subjects, {len(rows)} folds. Mean over subjects:")
     print(f"  {'training set':14} {'3-class':>9} {'2-vs-3':>9} {'train windows':>15}")
-    for c in CONDITIONS:
+    for c in conds:
         n = int(np.mean([r[f"{c}_ntrain"] for r in rows]))
         print(f"  {c:14} {per_subject(f'{c}_3cls').mean():9.4f} {per_subject(f'{c}_2v3').mean():9.4f} "
               f"{n:15d}")
+    share = float(np.mean([r.get("target_share", float("nan")) for r in rows]))
+    print(f"\nthe target contributes {100 * share:.1f}% of the pooled training rows, so the "
+          f"equal-weight 'cross+within' row sits near 'cross' by construction.")
     print("\npaired over subjects (Wilcoxon):")
-    for a, b in (("cross", "within"), ("cross+within", "within"), ("cross+within", "cross")):
+    pairs = [("cross", "within"), ("cross+within", "within"), ("cross+within", "cross")]
+    if WEIGHTED in conds:
+        pairs += [(WEIGHTED, "within"), (WEIGHTED, "cross+within")]
+    for a, b in pairs:
         for lab, k in (("3-class", "3cls"), ("2-vs-3", "2v3")):
             d = per_subject(f"{a}_{k}") - per_subject(f"{b}_{k}")
             p = wilcoxon(d).pvalue if np.any(d != 0) else 1.0
@@ -190,7 +218,7 @@ def self_test():
                 for nm, a in (("labels", y), ("session_ids", ses),
                               ("trial_ids", np.repeat(np.arange(N // 3), 3))):
                     np.save(os.path.join(d, f"{sid}_{nm}.npy"), a)
-            rows = run(td, subs, verbose=False)
+            rows = run(td, subs, verbose=False, target_weight=40.0)
             g = lambda c: float(np.mean([r[f"{c}_3cls"] for r in rows]))
             print(f"[{world:14}] within {g('within'):.3f} | cross {g('cross'):.3f} | "
                   f"cross+within {g('cross+within'):.3f}")
@@ -201,6 +229,12 @@ def self_test():
                 good = g("cross") < 0.45 and g("within") > 0.60
                 print(f"  a per-subject effect does NOT transfer, while within still works -> "
                       f"{'OK' if good else 'FAIL'}")
+                ok &= good
+                # and the weighted row must rescue what equal-weight pooling drowns: with a
+                # per-subject effect, upweighting the target has to beat the equal-weight pool
+                good = g(WEIGHTED) > g("cross+within") + 0.05
+                print(f"  upweighting the target beats equal-weight pooling "
+                      f"({g(WEIGHTED):.3f} vs {g('cross+within'):.3f}) -> {'OK' if good else 'FAIL'}")
             ok &= good
     print("SELFTEST", "PASSED" if ok else "FAILED")
     return 0 if ok else 1
@@ -212,6 +246,11 @@ def main():
     ap.add_argument("--self-test", action="store_true")
     ap.add_argument("--device", default=None, help="torch device for the eigendecompositions")
     ap.add_argument("--out", help="per-fold csv")
+    ap.add_argument("--target-weight", type=float, default=None,
+                    help="also fit a pooled model with the target's own windows carrying this "
+                         "sample weight. The target is ~2.6%% of the pooled rows, so a weight near "
+                         "38 makes its share of the loss comparable to the other 25 subjects "
+                         "combined; 1 reproduces the equal-weight row.")
     ap.add_argument("--subjects", nargs="+", default=[f"VP{i:03d}" for i in range(1, 27)])
     a = ap.parse_args()
     if a.self_test:
@@ -220,7 +259,7 @@ def main():
         ap.error("--data is required unless --self-test")
     if a.device:
         print(f"eigendecomposition backend: {R.set_eigh_backend(a.device)}")
-    rows = run(a.data, a.subjects)
+    rows = run(a.data, a.subjects, target_weight=a.target_weight)
     if a.out:
         import csv
         with open(a.out, "w", newline="", encoding="utf-8") as f:

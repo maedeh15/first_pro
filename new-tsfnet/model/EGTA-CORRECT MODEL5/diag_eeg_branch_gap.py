@@ -128,6 +128,24 @@ def grid_signals(grid_windows, rank=28, standardize=False):
     return out, live, rank
 
 
+def grid_spectrum(grid_windows, top=40):
+    """Eigenvalues of the covariance over the LIVE grid cells, pooled over windows.
+
+    Settles whether the saved grid really is a rank-<n_channels> linear image of the channels. If it
+    is, the spectrum must fall off a cliff just after component 28 and everything past it is numerical
+    dust. If it does not, the array the branch is fed is NOT a pure linear image of the channels --
+    some further step (a nonlinearity, or a normalisation applied per cell) has added rank, and the
+    cov_grid deficit has a structural explanation rather than a basis one."""
+    g = np.asarray(grid_windows, dtype=np.float64)
+    N, H, W_, T = g.shape
+    g = g.reshape(N, H * W_, T)
+    keep = np.abs(g).sum(axis=(0, 2)) > 0
+    g = g[:, keep, :]
+    flat = g.transpose(1, 0, 2).reshape(g.shape[1], -1)
+    w = np.linalg.eigvalsh(flat @ flat.T / flat.shape[1])[::-1]
+    return w[:top] / w[0], int(keep.sum())
+
+
 def features_for(name, x, ses, grid, grid_rank=28):
     if name in ("mean", "rect", "logvar"):
         b = band_signals(x)
@@ -232,6 +250,19 @@ def self_test():
     print(f"  the standardised control recovers a deficit that is pure conditioning -> "
           f"{'OK' if good else 'FAIL'}")
     ok &= good
+    # the spectrum tool must show the rank cliff where it exists and not where it does not
+    gl = np.zeros((40, side, side, T))
+    gl.reshape(40, side * side, T)[:, :Ncells, :] = np.einsum("gc,nct->ngt", Wmap, rng.randn(40, Cch, T))
+    sp, live = grid_spectrum(gl)
+    cliff = sp[Cch - 1] / max(sp[Cch], 1e-300)
+    gf = rng.randn(40, side, side, T)                      # full-rank cells, no cliff
+    spf, _ = grid_spectrum(gf)
+    cliff_f = spf[Cch - 1] / max(spf[Cch], 1e-300)
+    print(f"[spectrum] rank-{Cch} grid cliff {cliff:.1e} | full-rank grid cliff {cliff_f:.1f}")
+    good = cliff > 1e6 and cliff_f < 10
+    print(f"  the cliff appears only when the cells really are a rank-{Cch} image -> "
+          f"{'OK' if good else 'FAIL'}")
+    ok &= good
     print("SELFTEST", "PASSED" if ok else "FAILED")
     return 0 if ok else 1
 
@@ -240,6 +271,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data")
     ap.add_argument("--self-test", action="store_true")
+    ap.add_argument("--spectrum", action="store_true",
+                    help="print the eigenvalue spectrum of the live grid cells for each subject and "
+                         "stop: is the saved grid a rank-<n_channels> linear image of the channels?")
+    ap.add_argument("--no-scaler", action="store_true",
+                    help="drop StandardScaler from the probe pipeline. Removes one basis-dependent "
+                         "step, so a cov_grid deficit that survives it is not the scaler's doing.")
     ap.add_argument("--feats", nargs="+", default=list(FEATS), choices=list(FEATS))
     ap.add_argument("--grid-rank", type=int, default=28,
                     help="cov_grid: project the live grid cells onto this many directions. The grid "
@@ -257,6 +294,37 @@ def main():
     if not a.data:
         ap.error("--data is required unless --self-test")
     print(f"eigendecomposition backend: {R.set_eigh_backend(a.device)}")
+    if a.no_scaler:
+        _orig = R.loso
+
+        def _loso_noscaler(X, y, ses, classes=None):
+            from sklearn.linear_model import LogisticRegression
+            accs = []
+            for s_ in np.unique(ses):
+                tr, te = ses != s_, ses == s_
+                if classes is not None:
+                    tr, te = tr & np.isin(y, classes), te & np.isin(y, classes)
+                if te.sum() == 0 or len(np.unique(y[tr])) < 2:
+                    continue
+                clf = LogisticRegression(C=0.1, max_iter=3000).fit(X[tr], y[tr])
+                accs.append((clf.predict(X[te]) == y[te]).mean())
+            return float(np.mean(accs)) if accs else float("nan")
+        R.loso = _loso_noscaler
+        print("StandardScaler removed from the probe pipeline (--no-scaler)")
+    if a.spectrum:
+        print(f"{'subject':8} {'live':>5}  eigenvalues of the live-cell covariance, "
+              f"relative to the largest (components 1, 10, 20, 27, 28, 29, 30, 40)")
+        for sid in a.subjects:
+            f = os.path.join(a.data, sid, f"{sid}_eeg_windows.npy")
+            if not os.path.exists(f):
+                continue
+            sp, live = grid_spectrum(np.load(f, mmap_mode="r"))
+            idx = [i for i in (0, 9, 19, 26, 27, 28, 29, 39) if i < len(sp)]
+            print(f"{sid:8} {live:5d}  " + "  ".join(f"{i+1}:{sp[i]:.2e}" for i in idx), flush=True)
+        print("\nA cliff between component 28 and 29 means the grid is the rank-28 linear image the "
+              "interpolation implies. No cliff means something beyond a linear map of the channels "
+              "has entered the saved array.")
+        raise SystemExit(0)
     rows = []
     hdr = "  ".join(f"{f:>9}" for f in a.feats)
     print(f"{'subject':8} {'n':>6} {hdr}   | 2-vs-3: {hdr}")
