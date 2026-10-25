@@ -4274,6 +4274,21 @@ def train_one_fold(model, train_loader, val_loader, test_loader, device,
     return report["test_accuracy_final"], report["kappa_final"], model, report
 
 
+def pick_init_checkpoint(init_checkpoint, test_session):
+    """priority-XSUBJ-LOSO: init_checkpoint is either one path (pooled pretraining: every fold of a
+    subject starts from the same weights) or a dict {session: path} (loso pretraining: the fold
+    that holds out session s starts from the model pretrained WITHOUT session s). A dict that has
+    no entry for this fold's session is an error, never a silent fall-back to another session's
+    model -- that would put the held-out session's data back into the starting weights."""
+    if not isinstance(init_checkpoint, dict):
+        return init_checkpoint
+    ts = int(test_session)
+    if ts not in init_checkpoint:
+        raise KeyError(f"no pretrained model for held-out session {ts}; have "
+                       f"{sorted(init_checkpoint)}")
+    return init_checkpoint[ts]
+
+
 def run_subject_cross_session(subject_dir, subject_id, device="cuda" if torch.cuda.is_available() else "cpu",
                                batch_size=16, run_diagnostics_flag=False, diagnostics_dir=None,
                                results_dir=None, fusion_combination="paper_mean",
@@ -4759,7 +4774,10 @@ def run_subject_cross_session(subject_dir, subject_id, device="cuda" if torch.cu
             # pretraining run, and silently fine-tuning a partly random model
             # would be worse than failing. None (default) = random init, the
             # prior behavior.
-            _sd = torch.load(init_checkpoint, map_location=device)
+            _ck = pick_init_checkpoint(init_checkpoint, test_session)
+            _announce = isinstance(init_checkpoint, dict) or \
+                test_session == sorted(np.unique(session_ids))[0]
+            _sd = torch.load(_ck, map_location=device)
             # priority-XSUBJ-NEWMOD: init_checkpoint_new_modules names modules the
             # pretraining architecture did NOT have (e.g. ("riem_head",) when the
             # trunk was pretrained without --riem-branch). Every parameter of a
@@ -4788,14 +4806,14 @@ def run_subject_cross_session(subject_dir, subject_id, device="cuda" if torch.cu
                             f"already has {len(_have)} of its keys; drop it from "
                             f"--pretrained-new-modules so it loads strictly.")
                 model.load_state_dict(_sd, strict=False)
-                if test_session == sorted(np.unique(session_ids))[0]:
-                    print(f"  [pretrained] {subject_id}: every fold starts from {init_checkpoint}"
+                if _announce:
+                    print(f"  [pretrained] {subject_id} test session {test_session}: starts from {_ck}"
                           f" | RANDOM INIT (not pretrained): {list(init_checkpoint_new_modules)}"
                           f" -> {len(_missing)} parameter tensors")
             else:
                 model.load_state_dict(_sd, strict=True)
-                if test_session == sorted(np.unique(session_ids))[0]:
-                    print(f"  [pretrained] {subject_id}: every fold starts from {init_checkpoint}")
+                if _announce:
+                    print(f"  [pretrained] {subject_id} test session {test_session}: starts from {_ck}")
         ckpt_path = os.path.join(results_dir, f"{subject_id}_session{test_session}_best.pt")
         active_focal_gamma = focal_gamma if class_weighting_scheme == "focal" else None
         if fnirs_chroma_mode != "both" and test_session == sorted(np.unique(session_ids))[0]:

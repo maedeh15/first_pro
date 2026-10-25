@@ -88,6 +88,12 @@ p.add_argument("--n-val-subjects", type=int, default=2)
 p.add_argument("--window-stride", type=int, default=3,
                help="keep every k-th window within each block (1 = all windows)")
 p.add_argument("--groups", type=str, default=None, help="comma list of group indices to run")
+p.add_argument("--session-protocol", type=str, default="pooled", choices=["pooled", "loso"],
+               help="pooled (default, prior behavior): one model per group trained on ALL 3 sessions "
+                    "of the pool subjects. loso: one model per (group, held-out session s) trained "
+                    "only on the pool subjects' sessions != s, so a target subject's test session s "
+                    "is never seen in ANY subject's data -- the leave-one-session-out protocol "
+                    "applied to pretraining too. 3x the pretraining cost.")
 p.add_argument("--subjects", type=str, default="1-26")
 p.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
 p.add_argument("--batch-size", type=int, default=16)
@@ -146,6 +152,10 @@ TRAIN = dict(lr=ARGS.lr, weight_decay=ARGS.weight_decay, max_epochs=ARGS.max_epo
              normalize_ypred=ARGS.normalize_ypred, no_decay_scalars=ARGS.no_decay_scalars,
              window_stride=ARGS.window_stride, batch_size=ARGS.batch_size,
              n_groups=ARGS.n_groups, n_val_subjects=ARGS.n_val_subjects)
+if ARGS.session_protocol != "pooled":
+    # Only added when non-default, so the pooled run keeps its existing id (32dedf7a etc.)
+    # while a loso run can never share an id -- or an output folder -- with a pooled one.
+    TRAIN["session_protocol"] = ARGS.session_protocol
 # The id identifies everything that determines the pretrained weights except
 # the seed, so the three seeds of one configuration share an id.
 RUN_ID = hashlib.md5(json.dumps({"arch": ARCH, "train": TRAIN}, sort_keys=True)
@@ -180,9 +190,10 @@ class MmapWindowDataset(Dataset):
     handles it unchanged.
     """
 
-    def __init__(self, data_root, subjects, stride):
+    def __init__(self, data_root, subjects, stride, exclude_session=None):
         self.eeg, self.fnirs, self.labels, self.index = [], [], [], []
         self.n_per_subject = {}
+        self.sessions_seen = set()
         for k, sid in enumerate(subjects):
             d = os.path.join(data_root, sid)
             eeg = np.load(os.path.join(d, f"{sid}_eeg_windows.npy"), mmap_mode="r")
@@ -192,8 +203,25 @@ class MmapWindowDataset(Dataset):
             if not (len(eeg) == len(fn) == len(lab) == len(tri)):
                 raise ValueError(f"{sid}: window arrays have different lengths")
             keep = []
-            for t in np.unique(tri):
-                keep.extend(np.flatnonzero(tri == t)[::stride].tolist())
+            if exclude_session is None:
+                # legacy path, untouched: the pooled run must reproduce bit-for-bit
+                for t in np.unique(tri):
+                    keep.extend(np.flatnonzero(tri == t)[::stride].tolist())
+            else:
+                sess = np.load(os.path.join(d, f"{sid}_session_ids.npy"))
+                if len(sess) != len(lab):
+                    raise ValueError(f"{sid}: session_ids length differs from labels")
+                allowed = sess != exclude_session
+                if not allowed.any():
+                    raise ValueError(f"{sid}: excluding session {exclude_session} leaves no windows")
+                # stride is applied per (session, trial): a trial id that were reused across
+                # sessions must not be subsampled across the session boundary
+                for ss in np.unique(sess[allowed]):
+                    for t in np.unique(tri[sess == ss]):
+                        keep.extend(np.flatnonzero((tri == t) & (sess == ss))[::stride].tolist())
+                self.sessions_seen.update(int(x) for x in np.unique(sess[allowed]))
+                # hard post-condition: not one window of the excluded session got through
+                assert not np.isin(sess[keep], [exclude_session]).any(), "session leak in pretraining pool"
             keep.sort()
             self.eeg.append(eeg)
             self.fnirs.append(fn)
@@ -209,6 +237,21 @@ class MmapWindowDataset(Dataset):
         return (torch.from_numpy(np.array(self.eeg[k][w], dtype=np.float32)),
                 torch.from_numpy(np.array(self.fnirs[k][w], dtype=np.float32)),
                 torch.tensor(int(self.labels[k][w]), dtype=torch.long))
+
+
+def _discover_sessions(data_root, subjects):
+    """Sorted session ids, required to be IDENTICAL for every subject: a subject missing a session
+    would make "the other sessions" mean different things for different pool members."""
+    found = {}
+    for sid in subjects:
+        sess = np.load(os.path.join(data_root, sid, f"{sid}_session_ids.npy"))
+        found[sid] = sorted(int(x) for x in np.unique(sess))
+    ref = found[subjects[0]]
+    odd = {sid: v for sid, v in found.items() if v != ref}
+    if odd or len(ref) < 2:
+        sys.exit(f"ERROR: loso needs the same >= 2 sessions for every subject; reference {ref}, "
+                 f"differing: {odd}")
+    return ref
 
 
 def main():
@@ -243,15 +286,17 @@ def main():
         print(f"  group {g}: targets {groups[g]}")
     print("=" * 78)
 
+    loso = ARGS.session_protocol == "loso"
+    sessions = None
+    if loso:
+        sessions = _discover_sessions(ARGS.data_root, subjects)
+        manifest["session_protocol"] = "loso"
+        manifest["sessions"] = sessions
+        print(f"  session protocol: loso over sessions {sessions} "
+              f"({len(sessions)} models per group)")
+
     for g in todo:
         key = str(g)
-        ckpt_name = f"pretrain_g{g}.pt"
-        ckpt = os.path.join(out_dir, ckpt_name)
-        if key in manifest["groups"] and os.path.isfile(ckpt):
-            print(f"\n[group {g}] already done (best val acc "
-                  f"{manifest['groups'][key]['val_acc']:.4f}) -- skipping")
-            continue
-
         targets = groups[g]
         pool = [s for s in subjects if s not in targets]
         rng = np.random.default_rng(ARGS.seed * 1000 + g)
@@ -259,46 +304,76 @@ def main():
         pool_train = [s for s in pool if s not in pool_val]
         assert not (set(targets) & set(pool)), "leakage guard"
 
-        t0 = time.time()
-        train_ds = MmapWindowDataset(ARGS.data_root, pool_train, ARGS.window_stride)
-        val_ds = MmapWindowDataset(ARGS.data_root, pool_val, ARGS.window_stride)
-        print(f"\n[group {g}] pool_train={len(pool_train)} subjects ({len(train_ds)} windows) | "
-              f"pool_val={pool_val} ({len(val_ds)} windows)")
-        train_loader = DataLoader(train_ds, batch_size=ARGS.batch_size, shuffle=True,
-                                  num_workers=ARGS.num_workers)
-        val_loader = DataLoader(val_ds, batch_size=ARGS.batch_size, shuffle=False,
-                                num_workers=ARGS.num_workers)
+        # one fold = one model: pooled -> a single fold using every session; loso -> one fold per
+        # held-out session, trained on the OTHER sessions of the pool subjects only
+        folds = [(None, f"pretrain_g{g}.pt")] if not loso else \
+                [(sn, f"pretrain_g{g}_s{sn}.pt") for sn in sessions]
+        for held, ckpt_name in folds:
+            ckpt = os.path.join(out_dir, ckpt_name)
+            tag = f"group {g}" + (f" | held-out session {held}" if held is not None else "")
+            entry = manifest["groups"].get(key)
+            if loso:
+                done = bool(entry) and str(held) in entry.get("folds", {}) and os.path.isfile(ckpt)
+            else:
+                done = bool(entry) and os.path.isfile(ckpt)
+            if done:
+                va = (entry["folds"][str(held)] if loso else entry)["val_acc"]
+                print(f"\n[{tag}] already done (best val acc {va:.4f}) -- skipping")
+                continue
 
-        torch.manual_seed(ARGS.seed)
-        np.random.seed(ARGS.seed)
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed_all(ARGS.seed)
-        model = TSFNet(**ARCH).to(device)
+            t0 = time.time()
+            train_ds = MmapWindowDataset(ARGS.data_root, pool_train, ARGS.window_stride, held)
+            val_ds = MmapWindowDataset(ARGS.data_root, pool_val, ARGS.window_stride, held)
+            print(f"\n[{tag}] pool_train={len(pool_train)} subjects ({len(train_ds)} windows) | "
+                  f"pool_val={pool_val} ({len(val_ds)} windows)"
+                  + (f" | train sessions {sorted(train_ds.sessions_seen)}" if loso else ""))
+            train_loader = DataLoader(train_ds, batch_size=ARGS.batch_size, shuffle=True,
+                                      num_workers=ARGS.num_workers)
+            val_loader = DataLoader(val_ds, batch_size=ARGS.batch_size, shuffle=False,
+                                    num_workers=ARGS.num_workers)
 
-        val_acc, val_kappa, model, report = train_one_fold(
-            model, train_loader, val_loader, val_loader, device,
-            lambda_eeg=ARGS.lambda_eeg, lambda_fnirs=ARGS.lambda_fnirs,
-            lr=ARGS.lr, weight_decay=ARGS.weight_decay,
-            stage1_max_epochs=ARGS.max_epochs, stage1_patience=ARGS.patience,
-            stage2_max_epochs=0, stage2_stop_mode="none",
-            ckpt_path=ckpt, adabn=False,
-            normalize_ypred=ARGS.normalize_ypred, no_decay_scalars=ARGS.no_decay_scalars)
+            torch.manual_seed(ARGS.seed)
+            np.random.seed(ARGS.seed)
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed_all(ARGS.seed)
+            model = TSFNet(**ARCH).to(device)
 
-        manifest["groups"][key] = {
-            "targets": targets, "pool_train": pool_train, "pool_val": pool_val,
-            "checkpoint": ckpt_name, "val_acc": float(val_acc), "val_kappa": float(val_kappa),
-            "n_train_windows": len(train_ds), "n_val_windows": len(val_ds),
-            "minutes": round((time.time() - t0) / 60, 1),
-        }
-        with open(man_path, "w", encoding="utf-8") as f:       # after every group: resumable
-            json.dump(manifest, f, indent=2)
-        print(f"[group {g}] done in {manifest['groups'][key]['minutes']} min | val acc on "
-              f"unseen pool subjects {pool_val}: {val_acc:.4f} (kappa {val_kappa:.4f})")
-        del model, train_loader, val_loader, train_ds, val_ds
-        if device.type == "cuda":
-            torch.cuda.empty_cache()
+            val_acc, val_kappa, model, report = train_one_fold(
+                model, train_loader, val_loader, val_loader, device,
+                lambda_eeg=ARGS.lambda_eeg, lambda_fnirs=ARGS.lambda_fnirs,
+                lr=ARGS.lr, weight_decay=ARGS.weight_decay,
+                stage1_max_epochs=ARGS.max_epochs, stage1_patience=ARGS.patience,
+                stage2_max_epochs=0, stage2_stop_mode="none",
+                ckpt_path=ckpt, adabn=False,
+                normalize_ypred=ARGS.normalize_ypred, no_decay_scalars=ARGS.no_decay_scalars)
 
-    missing = [g for g in groups if str(g) not in manifest["groups"]]
+            rec = {"checkpoint": ckpt_name, "val_acc": float(val_acc), "val_kappa": float(val_kappa),
+                   "n_train_windows": len(train_ds), "n_val_windows": len(val_ds),
+                   "minutes": round((time.time() - t0) / 60, 1)}
+            if loso:
+                rec["train_sessions"] = sorted(train_ds.sessions_seen)
+                # the guard run_all_subjects re-checks: the held-out session must be absent
+                assert held not in rec["train_sessions"], "held-out session in pretraining data"
+                manifest["groups"].setdefault(key, {"targets": targets, "pool_train": pool_train,
+                                                    "pool_val": pool_val, "folds": {}})
+                manifest["groups"][key]["folds"][str(held)] = rec
+            else:
+                manifest["groups"][key] = {"targets": targets, "pool_train": pool_train,
+                                           "pool_val": pool_val, **rec}
+            with open(man_path, "w", encoding="utf-8") as f:       # after every model: resumable
+                json.dump(manifest, f, indent=2)
+            print(f"[{tag}] done in {rec['minutes']} min | val acc on unseen pool subjects "
+                  f"{pool_val}: {val_acc:.4f} (kappa {val_kappa:.4f})")
+            del model, train_loader, val_loader, train_ds, val_ds
+            if device.type == "cuda":
+                torch.cuda.empty_cache()
+
+    def _group_complete(g):
+        e = manifest["groups"].get(str(g))
+        if not e:
+            return False
+        return (not loso) or set(e.get("folds", {})) == {str(x) for x in sessions}
+    missing = [g for g in groups if not _group_complete(g)]
     print()
     if missing:
         print(f"NOT COMPLETE: groups {missing} still to run.")

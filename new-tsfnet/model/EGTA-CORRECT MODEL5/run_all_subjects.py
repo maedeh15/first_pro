@@ -1002,47 +1002,85 @@ PRETRAINED_DIR = SEED_ARGS.pretrained_dir
 PRETRAINED_NEW_MODULES = tuple(SEED_ARGS.pretrained_new_modules or ())
 PRETRAIN_CKPT = {}
 _PRETRAIN_SUBTAG = ""
+def _resolve_pretrain_map(man, pretrained_dir, seed, subjects, has_data):
+    """sid -> checkpoint path (pooled) or sid -> {held-out session: path} (loso).
+
+    Every leakage-relevant fact is re-derived from the manifest and re-checked here:
+      subject level : no target is in its own group's pretraining pool;
+      session level : (loso) the checkpoint used when session s is held out was trained on
+                      sessions that exclude s, and on exactly the other sessions."""
+    if int(man["seed"]) != seed:
+        raise ValueError(f"pretrained models were trained with seed {man['seed']} but this run "
+                         f"uses --seed {seed}. Pretrain once per seed so the three seeds stay "
+                         f"independent replicates.")
+    protocol = man.get("session_protocol", "pooled")
+    if protocol not in ("pooled", "loso"):
+        raise ValueError(f"unknown session_protocol {protocol!r} in the manifest")
+    all_sessions = {int(x) for x in man.get("sessions", [])}
+    if protocol == "loso" and len(all_sessions) < 2:
+        raise ValueError("loso manifest lists fewer than 2 sessions")
+    out = {}
+    for g, info in man["groups"].items():
+        pool = set(info["pool_train"]) | set(info["pool_val"])
+        if protocol == "loso":
+            if {int(k) for k in info["folds"]} != all_sessions:
+                raise ValueError(f"group {g}: folds {sorted(info['folds'])} do not cover sessions "
+                                 f"{sorted(all_sessions)} (pretraining not finished?)")
+            per_session = {}
+            for k, fold in info["folds"].items():
+                s_held = int(k)
+                trained_on = {int(x) for x in fold["train_sessions"]}
+                if s_held in trained_on:
+                    raise ValueError(f"SESSION LEAKAGE: group {g} model for held-out session "
+                                     f"{s_held} was trained on sessions {sorted(trained_on)}")
+                if trained_on != all_sessions - {s_held}:
+                    raise ValueError(f"group {g}, held-out session {s_held}: trained on "
+                                     f"{sorted(trained_on)}, expected {sorted(all_sessions - {s_held})}")
+                ck = os.path.join(pretrained_dir, fold["checkpoint"])
+                if not os.path.isfile(ck):
+                    raise FileNotFoundError(f"group {g} session {s_held} checkpoint missing: {ck}")
+                per_session[s_held] = ck
+        else:
+            ck = os.path.join(pretrained_dir, info["checkpoint"])
+            if not os.path.isfile(ck):
+                raise FileNotFoundError(f"group {g} checkpoint missing: {ck} "
+                                        f"(pretraining not finished?)")
+        for sid in info["targets"]:
+            if sid in pool:
+                raise ValueError(f"LEAKAGE: {sid} is a target of group {g} but is in its "
+                                 f"pretraining pool")
+            if sid in out:
+                raise ValueError(f"{sid} is a target of more than one group")
+            out[sid] = dict(per_session) if protocol == "loso" else ck
+    missing = [x for x in subjects if x not in out and has_data(x)]
+    if missing:
+        raise ValueError(f"no pretrained model covers {missing} -- rerun pretraining for "
+                         f"their group(s)")
+    return out, protocol
+
+
 if PRETRAINED_DIR:
     _man_path = os.path.join(PRETRAINED_DIR, "pretrain_manifest.json")
     if not os.path.isfile(_man_path):
         raise FileNotFoundError(f"--pretrained-dir has no pretrain_manifest.json: {_man_path}")
     with open(_man_path, encoding="utf-8") as _f:
         _man = json.load(_f)
-    if int(_man["seed"]) != SEED:
-        raise ValueError(f"pretrained models were trained with seed {_man['seed']} but this run "
-                         f"uses --seed {SEED}. Pretrain once per seed so the three seeds stay "
-                         f"independent replicates.")
     if os.path.normpath(_man["data_root"]) != os.path.normpath(DATA_ROOT):
         print(f"[pretrained] WARNING: pretraining used data_root={_man['data_root']} but this run "
               f"uses {DATA_ROOT}")
-    for _g, _info in _man["groups"].items():
-        _pool = set(_info["pool_train"]) | set(_info["pool_val"])
-        for _sid in _info["targets"]:
-            if _sid in _pool:
-                raise ValueError(f"LEAKAGE: {_sid} is a target of group {_g} but is in its "
-                                 f"pretraining pool")
-            if _sid in PRETRAIN_CKPT:
-                raise ValueError(f"{_sid} is a target of more than one group")
-            _ck = os.path.join(PRETRAINED_DIR, _info["checkpoint"])
-            if not os.path.isfile(_ck):
-                raise FileNotFoundError(f"group {_g} checkpoint missing: {_ck} "
-                                        f"(pretraining not finished?)")
-            PRETRAIN_CKPT[_sid] = _ck
-    _missing = [s for s in SUBJECTS if s not in PRETRAIN_CKPT
-                and os.path.isdir(os.path.join(DATA_ROOT, s))]
-    if _missing:
-        raise ValueError(f"no pretrained model covers {_missing} -- rerun pretraining for "
-                         f"their group(s)")
-    _PRETRAIN_SUBTAG = "_pt-" + _man["id"]
+    PRETRAIN_CKPT, _PRETRAIN_PROTOCOL = _resolve_pretrain_map(
+        _man, PRETRAINED_DIR, SEED, SUBJECTS, lambda x: os.path.isdir(os.path.join(DATA_ROOT, x)))
+    _PRETRAIN_SUBTAG = "_pt-" + _man["id"] + ("-loso" if _PRETRAIN_PROTOCOL == "loso" else "")
     if PRETRAINED_NEW_MODULES:
         # The subtag must record it: a run whose riem_head starts random is NOT
         # the same condition as one loaded strictly, and must not share a folder.
         _PRETRAIN_SUBTAG += "-new" + "".join(m[:4] for m in PRETRAINED_NEW_MODULES)
         print(f"[pretrained] random-init modules: {list(PRETRAINED_NEW_MODULES)}")
+    print(f"[pretrained] {len(PRETRAIN_CKPT)} subjects mapped to {len(_man['groups'])} "
+          f"pretrained models from {PRETRAINED_DIR} (id {_man['id']}, "
+          f"session protocol: {_PRETRAIN_PROTOCOL})")
 elif PRETRAINED_NEW_MODULES:
     raise ValueError("--pretrained-new-modules needs --pretrained-dir")
-    print(f"[pretrained] {len(PRETRAIN_CKPT)} subjects mapped to {len(_man['groups'])} "
-          f"pretrained models from {PRETRAINED_DIR} (id {_man['id']})")
 RUN_DIAGNOSTICS = SEED_ARGS.run_diagnostics          # True = also make PCA/t-SNE/saliency plots per subject (SLOW: 26 subjects x 3 sessions = 78 diagnostic runs). Off by default; pass --diagnostics to enable.
 # Variant tag distinguishes this isolated ablation (fusion combination formula,
 # plus the now-accepted no-clip setting from priority-1) from any other
