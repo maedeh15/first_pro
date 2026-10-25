@@ -360,6 +360,16 @@ _arg_parser.add_argument("--pretrained-dir", type=str, default=None,
                                "start from the pretrained model of the subject group that EXCLUDES "
                                "it, instead of from random weights. Default None = random init, "
                                "prior behavior. The manifest's seed must equal --seed.")
+_arg_parser.add_argument("--pretrained-new-modules", type=str, nargs="*", default=(),
+                          metavar="MODULE",
+                          help="priority-XSUBJ-NEWMOD: modules the PRETRAINING architecture did "
+                               "not have, so they start from random init instead of failing the "
+                               "strict load. Use riem_head when the trunk was pretrained without "
+                               "--riem-branch but this run uses it; the Riemannian features are "
+                               "built per subject, so that head has nothing to transfer anyway. "
+                               "Every OTHER key must still match exactly, and a named module must "
+                               "be wholly absent from the checkpoint. Default () = strict load, "
+                               "i.e. prior behavior.")
 _arg_parser.add_argument("--fusion-fnirs-inject", type=str, default="none",
                           choices=["none", "stage1", "both"],
                           help="priority-FNIRSINJECT isolated variable: add fNIRS FEATURE maps "
@@ -989,6 +999,7 @@ SUBJECTS = _parse_subjects_spec(SEED_ARGS.subjects)     # default "1-26" = VP001
 # pretraining pool did NOT contain that subject. Every leakage-relevant fact
 # is re-checked here rather than trusted from the manifest's file layout.
 PRETRAINED_DIR = SEED_ARGS.pretrained_dir
+PRETRAINED_NEW_MODULES = tuple(SEED_ARGS.pretrained_new_modules or ())
 PRETRAIN_CKPT = {}
 _PRETRAIN_SUBTAG = ""
 if PRETRAINED_DIR:
@@ -1023,6 +1034,13 @@ if PRETRAINED_DIR:
         raise ValueError(f"no pretrained model covers {_missing} -- rerun pretraining for "
                          f"their group(s)")
     _PRETRAIN_SUBTAG = "_pt-" + _man["id"]
+    if PRETRAINED_NEW_MODULES:
+        # The subtag must record it: a run whose riem_head starts random is NOT
+        # the same condition as one loaded strictly, and must not share a folder.
+        _PRETRAIN_SUBTAG += "-new" + "".join(m[:4] for m in PRETRAINED_NEW_MODULES)
+        print(f"[pretrained] random-init modules: {list(PRETRAINED_NEW_MODULES)}")
+elif PRETRAINED_NEW_MODULES:
+    raise ValueError("--pretrained-new-modules needs --pretrained-dir")
     print(f"[pretrained] {len(PRETRAIN_CKPT)} subjects mapped to {len(_man['groups'])} "
           f"pretrained models from {PRETRAINED_DIR} (id {_man['id']})")
 RUN_DIAGNOSTICS = SEED_ARGS.run_diagnostics          # True = also make PCA/t-SNE/saliency plots per subject (SLOW: 26 subjects x 3 sessions = 78 diagnostic runs). Off by default; pass --diagnostics to enable.
@@ -1379,6 +1397,7 @@ with CrashSafeLogger(os.path.join(RESULTS_DIR_VARIANT, f"baseline_run_log_{RUN_T
                 conv_dropout_type=CONV_DROPOUT_TYPE,      # priority-CONVDROP: "channel" (default) = Dropout3d
                 fusion_fnirs_inject=FUSION_FNIRS_INJECT,  # priority-FNIRSINJECT: "none" (default) = paper design
                 init_checkpoint=PRETRAIN_CKPT.get(subject_id),  # priority-XSUBJ: None (default) = random init
+                init_checkpoint_new_modules=PRETRAINED_NEW_MODULES,  # priority-XSUBJ-NEWMOD: () (default) = strict load
                 erp_branch=ERP_BRANCH,                    # priority-ERP: "none" (default) = no ERP pathway
                 cafe_pcc_mode=CAFE_PCC_MODE,                 # priority-CAFEPCCABS
                 riem_branch=RIEM_BRANCH, riem_blend=RIEM_BLEND,   # priority-RIEM: 'none' (default) = off

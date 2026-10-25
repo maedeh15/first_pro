@@ -4313,6 +4313,7 @@ def run_subject_cross_session(subject_dir, subject_id, device="cuda" if torch.cu
                                stage2_stop_mode="loss", efgf_gate_init=-6.0,
                                attn_conv_init_gain=None,
                                init_checkpoint=None,
+                               init_checkpoint_new_modules=(),
                                **train_kwargs):
     """Sec. 3.6: Hold-Out over all 3 sessions, average of test accuracy/kappa
 
@@ -4758,9 +4759,43 @@ def run_subject_cross_session(subject_dir, subject_id, device="cuda" if torch.cu
             # pretraining run, and silently fine-tuning a partly random model
             # would be worse than failing. None (default) = random init, the
             # prior behavior.
-            model.load_state_dict(torch.load(init_checkpoint, map_location=device), strict=True)
-            if test_session == sorted(np.unique(session_ids))[0]:
-                print(f"  [pretrained] {subject_id}: every fold starts from {init_checkpoint}")
+            _sd = torch.load(init_checkpoint, map_location=device)
+            # priority-XSUBJ-NEWMOD: init_checkpoint_new_modules names modules the
+            # pretraining architecture did NOT have (e.g. ("riem_head",) when the
+            # trunk was pretrained without --riem-branch). Every parameter of a
+            # NAMED module may be absent and is left at its random init; every
+            # other key must still match exactly, so a real architecture mismatch
+            # still fails. Default () = strict=True, the prior behavior.
+            if init_checkpoint_new_modules:
+                _pref = tuple(f"{m}." for m in init_checkpoint_new_modules)
+                _own = set(model.state_dict())
+                _missing = sorted(_own - set(_sd))
+                _bad = [k for k in _missing if not k.startswith(_pref)]
+                _unexpected = sorted(set(_sd) - _own)
+                if _bad or _unexpected:
+                    raise RuntimeError(
+                        f"checkpoint does not match the model beyond "
+                        f"{list(init_checkpoint_new_modules)}: missing {_bad}, "
+                        f"unexpected {_unexpected}. The architecture flags of this run "
+                        f"differ from the pretraining run in some other way too.")
+                # Every named module must be fully absent, never half-loaded: a
+                # partly-filled module would mix pretrained and random weights.
+                for _m in init_checkpoint_new_modules:
+                    _have = [k for k in _sd if k.startswith(f"{_m}.")]
+                    if _have:
+                        raise RuntimeError(
+                            f"{_m} was declared a new module but the checkpoint "
+                            f"already has {len(_have)} of its keys; drop it from "
+                            f"--pretrained-new-modules so it loads strictly.")
+                model.load_state_dict(_sd, strict=False)
+                if test_session == sorted(np.unique(session_ids))[0]:
+                    print(f"  [pretrained] {subject_id}: every fold starts from {init_checkpoint}"
+                          f" | RANDOM INIT (not pretrained): {list(init_checkpoint_new_modules)}"
+                          f" -> {len(_missing)} parameter tensors")
+            else:
+                model.load_state_dict(_sd, strict=True)
+                if test_session == sorted(np.unique(session_ids))[0]:
+                    print(f"  [pretrained] {subject_id}: every fold starts from {init_checkpoint}")
         ckpt_path = os.path.join(results_dir, f"{subject_id}_session{test_session}_best.pt")
         active_focal_gamma = focal_gamma if class_weighting_scheme == "focal" else None
         if fnirs_chroma_mode != "both" and test_session == sorted(np.unique(session_ids))[0]:
