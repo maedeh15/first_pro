@@ -130,6 +130,36 @@ def psd_band(xb):
     return np.log(np.einsum("nct,nct->nc", z, z) / xb.shape[-1] + 1e-12)
 
 
+def blocks_from_windows(x, trial_ids, step_s=1.0, sfreq=SFREQ):
+    """Rebuild each n-back block's continuous signal from its overlapping windows.
+
+    The preprocessing saves 10 s windows with a 1 s step, so window w of a block starts 1 s after
+    window w-1 and the first `step_s` seconds of consecutive windows tile the block exactly. The
+    block is therefore the concatenation of each window's first second, plus the whole last window
+    to recover the tail: for 35 windows that is 34 s + 10 s = 44 s, which is the 40 s scale the
+    paper's own window-size analysis reports as the EEG optimum (its Fig. 3B), against the 10 s
+    this project's model uses.
+
+    Returns (blocks, keep_index) where blocks is (n_blocks, C, T) truncated to the shortest block
+    so the feature dimension is fixed, and keep_index gives, per block, the index of its first
+    window so labels and session ids can be taken from the window arrays."""
+    stepn = int(round(step_s * sfreq))
+    out, first = [], []
+    for t in np.unique(trial_ids):
+        idx = np.flatnonzero(trial_ids == t)
+        if len(idx) < 2:
+            continue
+        idx = idx[np.argsort(idx)]                 # windows are saved in time order within a trial
+        head = [x[i][:, :stepn] for i in idx[:-1]]
+        seg = np.concatenate(head + [x[idx[-1]]], axis=-1)
+        out.append(seg)
+        first.append(idx[0])
+    if not out:
+        raise ValueError("no trial had at least 2 windows")
+    T = min(o.shape[-1] for o in out)
+    return np.stack([o[:, :T] for o in out]), np.array(first)
+
+
 def features_from_band(xb, method, lo, hi, mi_bins=5, mi_decim=4):
     """the per-method feature, given the ALREADY band-filtered signal. Split out from features()
     so the main loop filters once per band instead of once per (band, method): filtfilt on
@@ -208,6 +238,12 @@ def main():
     ap.add_argument("--clf", default="svm", choices=["svm", "logreg"])
     ap.add_argument("--mi-bins", type=int, default=5)
     ap.add_argument("--mi-decim", type=int, default=4)
+    ap.add_argument("--level", default="window", choices=["window", "block"],
+                    help="window (default): one feature vector per 10 s window, this project's "
+                         "unit. block: one per 40 s n-back block, rebuilt from its windows, which "
+                         "is the scale the paper measured at -- but then each fold has only 18 "
+                         "training blocks, so the ANOVA selection is fitted on 18 samples and "
+                         "both the selection and the accuracy are far noisier.")
     ap.add_argument("--self-test", action="store_true")
     a = ap.parse_args()
     if a.self_test:
@@ -228,6 +264,16 @@ def main():
         x = np.asarray(np.load(f, mmap_mode="r"), dtype=np.float64)
         y = np.load(os.path.join(d, f"{sid}_labels.npy"))
         ses = np.load(os.path.join(d, f"{sid}_session_ids.npy"))
+        if a.level == "block":
+            tri = np.load(os.path.join(d, f"{sid}_trial_ids.npy"))
+            x, keep = blocks_from_windows(x, tri)
+            y, ses = y[keep], ses[keep]
+            # every window of a block carries the block's label, so taking the first window's is
+            # exact -- verified rather than assumed
+            for b, i0 in enumerate(keep):
+                m = tri == tri[i0]
+                if len(np.unique(np.asarray(y_all := np.load(os.path.join(d, f"{sid}_labels.npy"))[m]))) != 1:
+                    raise SystemExit(f"{sid}: block {b} has mixed labels {np.unique(y_all)}")
         r23, r3 = {}, {}
         for band in a.bands:                      # filter once per band, reuse for every method
             lo, hi = BANDS[band]
@@ -350,6 +396,23 @@ def self_test():
     assert leak < 0.45, f"selection leaked the test session (acc {leak:.3f})"
     print("MI matmul == per-pair histograms; MSC and PLV in [0,1]; MI >= 0; feature counts right;"
           f" a session-3-only feature does not get selected when session 3 is held out ({leak:.3f})")
+    # block reconstruction must return the ORIGINAL continuous signal, not a reshuffle of it
+    C2, T2, win, stepn = 4, 200 * 10, 10, 200
+    cont = np.random.RandomState(1).randn(C2, 200 * 44)          # 44 s at 200 Hz
+    nwin = (cont.shape[-1] - win * 200) // stepn + 1
+    wins = np.stack([cont[:, k * stepn:k * stepn + win * 200] for k in range(nwin)])
+    tri = np.zeros(nwin, dtype=int)
+    blk, keep = blocks_from_windows(wins, tri)
+    assert keep.tolist() == [0] and blk.shape[0] == 1
+    assert np.allclose(blk[0], cont[:, :blk.shape[-1]]), "block reconstruction is not the original"
+    # two blocks -> two rows, truncated to the shorter one, first-window index per block
+    tri2 = np.array([0] * nwin + [1] * (nwin - 3))
+    wins2 = np.concatenate([wins, wins[:nwin - 3]])
+    blk2, keep2 = blocks_from_windows(wins2, tri2)
+    assert blk2.shape[0] == 2 and keep2.tolist() == [0, nwin]
+    assert blk2.shape[-1] == min(200 * 44, (nwin - 4) * stepn + win * 200)
+    print(f"block reconstruction exact over {blk.shape[-1] / 200:.0f} s; two blocks truncate to "
+          f"{blk2.shape[-1] / 200:.0f} s with first-window indices {keep2.tolist()}")
     print("SELFTEST " + ("PASSED" if ok else "FAILED"))
     if not ok:
         sys.exit(1)
