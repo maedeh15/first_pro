@@ -78,6 +78,7 @@ import sys
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, Subset
+from torch.utils.data._utils.collate import default_collate
 
 p = argparse.ArgumentParser(
     description="Seed-ensemble evaluation from saved checkpoints.",
@@ -106,6 +107,40 @@ p.add_argument("--adabn", dest="adabn", action="store_true", default=True)
 p.add_argument("--no-adabn", dest="adabn", action="store_false")
 p.add_argument("--raw-posteriors", action="store_true", default=False,
                help="Do not divide posterior rows by their sum before combining (see docstring).")
+p.add_argument("--ttime", action="store_true", default=False,
+               help="priority-TTIME: after AdaBN, adapt each member on the held-out session with "
+                    "T-TIME's target-model update (conditional entropy minimisation + marginal "
+                    "distribution regularisation; Li et al., IEEE TBME). Off by default = prior "
+                    "behavior bit-for-bit. Uses no labels but uses the unlabeled test session, so "
+                    "it is transductive like AdaBN -- disclose it with AdaBN, not separately.")
+p.add_argument("--ttime-mode", type=str, default="online", choices=["online", "offline"],
+               help="online (the paper): predict window a, then update on the last --ttime-batch "
+                    "windows, so no future window can affect the prediction for a. offline: "
+                    "--ttime-epochs passes over the whole fold first, then one prediction pass; "
+                    "cheaper, but every prediction then sees the whole session (same transductive "
+                    "status as AdaBN, stronger than the paper's setting).")
+p.add_argument("--ttime-batch", type=int, default=8, help="sliding batch size B (paper: 8)")
+p.add_argument("--ttime-stride", type=int, default=1,
+               help="update every k-th window (paper: 1). Raise it to cut the cost.")
+p.add_argument("--ttime-steps", type=int, default=1, help="gradient steps per update (paper: 1)")
+p.add_argument("--ttime-epochs", type=int, default=1, help="--ttime-mode offline only")
+p.add_argument("--ttime-lr", type=float, default=1e-3, help="Adam lr for the update (paper: 1e-3)")
+p.add_argument("--ttime-temp", type=float, default=2.0, help="temperature T (paper: 2)")
+p.add_argument("--ttime-mdr", type=str, default="balanced", choices=["balanced", "adaptive", "off"],
+               help="marginal distribution regularisation. This dataset's test sessions are close "
+                    "to class-balanced (~270/294/290), so 'balanced' is the matching form; "
+                    "'adaptive' is the paper's class-imbalance variant, 'off' is CEM alone, which "
+                    "their own ablation shows degrades.")
+p.add_argument("--ttime-tau", type=float, default=0.7, help="pseudo-label threshold, adaptive MDR")
+p.add_argument("--ttime-c", type=float, default=4.0, help="the small constant c in Eq. 11")
+p.add_argument("--ttime-params", type=str, default="all", choices=["all", "bn"],
+               help="all (the paper) or bn only (Tent's scope, for comparison)")
+p.add_argument("--ttime-train-mode", type=str, default="eval", choices=["eval", "train"],
+               help="eval (default): the model stays in eval() during the update, so AdaBN's "
+                    "running statistics survive and dropout stays off. train: the paper's "
+                    "model.train(), which recomputes BN statistics from batches of "
+                    "--ttime-batch and re-enables dropout -- that confounds the update with "
+                    "losing AdaBN, so it is not the default here.")
 p.add_argument("--save-posteriors", action="store_true", default=False,
                help="Also save every fold's per-seed posteriors, labels, trial ids and window "
                     "position within the block (npz) for later analysis.")
@@ -157,6 +192,9 @@ if not os.path.isfile(_notebook_path):
 if "TSFNet" not in globals():
     print(f"[init] loading definitions from {_notebook_path}")
     exec(open(_notebook_path, encoding="utf-8").read(), globals())
+
+from ttime_update import (cem_mdr_loss, online_schedule, trainable_parameters,
+                           update_pseudo_counts)
 
 HEADS = ("final", "eeg", "fusion", "fnirs")
 
@@ -275,6 +313,76 @@ def build_model(device):
     ).to(device)
 
 
+def _forward(model, batch, device):
+    x_eeg, x_fnirs, y, x_conn, x_chan = _unpack_batch(batch)
+    x_eeg, x_fnirs = x_eeg.to(device), x_fnirs.to(device)
+    x_conn = x_conn.to(device) if x_conn is not None else None
+    x_chan = x_chan.to(device) if x_chan is not None else None
+    y_eeg, y_fusion, y_fnirs, y_pred, _aux = model(x_eeg, x_fnirs, x_conn, x_chan)
+    return y_eeg, y_fusion, y_fnirs, y_pred, y
+
+
+def ttime_fold_posteriors(model, full, test_idx, device):
+    """priority-TTIME: T-TIME's target-model update on one fold, then the posteriors.
+
+    The model arrives already loaded from its checkpoint and already AdaBN-adapted, so the ONLY
+    difference from the baseline path is this update -- one variable. The loss is taken on the
+    FINAL head (y_pred), the quantity the project reports; the other three heads are recorded for
+    diagnosis but never drive the update. Each fold starts from its own fresh checkpoint (the
+    caller builds a new model per call), so nothing carries across folds or subjects."""
+    ds = Subset(full, test_idx)
+    n = len(ds)
+    params = trainable_parameters(model, ARGS.ttime_params)
+    opt = torch.optim.Adam(params, lr=ARGS.ttime_lr)
+    if ARGS.ttime_train_mode == "train":
+        model.train()
+    else:
+        model.eval()                      # AdaBN statistics survive, dropout stays off
+    zk = np.zeros(3)
+
+    def step(idx_list):
+        batch = default_collate([ds[i] for i in idx_list])
+        nonlocal zk
+        for _ in range(ARGS.ttime_steps):
+            _e, _f, _n, p_pred, _y = _forward(model, batch, device)
+            loss, _pbar = cem_mdr_loss(p_pred, T=ARGS.ttime_temp, mdr=ARGS.ttime_mdr,
+                                       zk=zk, c=ARGS.ttime_c)
+            opt.zero_grad(); loss.backward(); opt.step()
+        if ARGS.ttime_mdr == "adaptive":
+            with torch.no_grad():
+                _e, _f, _n, p_pred, _y = _forward(model, batch, device)
+            zk = update_pseudo_counts(zk, p_pred, ARGS.ttime_tau)
+
+    out = {h: [] for h in HEADS}
+    seen = []
+    if ARGS.ttime_mode == "online":
+        # one window at a time: predict a, THEN update on [a-B+1, a]. Never the other order.
+        for a, upd in online_schedule(n, ARGS.ttime_batch, ARGS.ttime_stride):
+            with torch.no_grad():
+                y_eeg, y_fus, y_fni, y_prd, y = _forward(model, default_collate([ds[a]]), device)
+            for h, v in zip(HEADS, (y_prd, y_eeg, y_fus, y_fni)):
+                out[h].append(v.cpu().numpy())
+            seen.append(y.numpy())
+            if upd is not None:
+                step(list(range(upd.start, upd.stop)))
+    else:
+        for _ep in range(ARGS.ttime_epochs):
+            for a, upd in online_schedule(n, ARGS.ttime_batch, ARGS.ttime_stride):
+                if upd is not None:
+                    step(list(range(upd.start, upd.stop)))
+        model.eval()
+        with torch.no_grad():
+            for batch in DataLoader(ds, batch_size=ARGS.batch_size, shuffle=False):
+                y_eeg, y_fus, y_fni, y_prd, y = _forward(model, batch, device)
+                for h, v in zip(HEADS, (y_prd, y_eeg, y_fus, y_fni)):
+                    out[h].append(v.cpu().numpy())
+                seen.append(y.numpy())
+    del model, opt
+    if str(device).startswith("cuda"):
+        torch.cuda.empty_cache()
+    return {h: np.concatenate(v, axis=0) for h, v in out.items()}, np.concatenate(seen)
+
+
 def collect_fold_posteriors(full, test_idx, ckpt_path, device):
     model = build_model(device)
     # strict=True: a key mismatch means the architecture flags differ from the run that
@@ -284,6 +392,8 @@ def collect_fold_posteriors(full, test_idx, ckpt_path, device):
     loader = DataLoader(Subset(full, test_idx), batch_size=ARGS.batch_size, shuffle=False)
     if ARGS.adabn:
         adapt_batchnorm_to_target(model, loader, device, log_fn=lambda *a, **k: None)
+    if ARGS.ttime:
+        return ttime_fold_posteriors(model, full, test_idx, device)
     out = {h: [] for h in HEADS}
     seen = []
     with torch.no_grad():
@@ -380,6 +490,11 @@ def main():
         sys.exit(f"ERROR: --data-root has no VP001 folder: {ARGS.data_root}")
     out_dir = ARGS.out_dir or os.path.join(
         ARGS.data_root, f"ensemble_eval_{ARGS.variant_hash}_seeds-" + "-".join(map(str, seeds)))
+    if ARGS.ttime and not ARGS.out_dir:
+        # never share a folder with a baseline replay of the same seeds
+        out_dir += (f"_ttime-{ARGS.ttime_mode}-B{ARGS.ttime_batch}-lr{ARGS.ttime_lr:g}"
+                    f"-T{ARGS.ttime_temp:g}-{ARGS.ttime_mdr}-{ARGS.ttime_params}"
+                    f"-{ARGS.ttime_train_mode}")
     os.makedirs(out_dir, exist_ok=True)
     subjects = parse_subjects(ARGS.subjects)
 
@@ -391,6 +506,13 @@ def main():
     print(f"  out_dir   : {out_dir}")
     print(f"  AdaBN     : {'ON' if ARGS.adabn else 'OFF (will not reproduce the record)'} | "
           f"posterior normalisation: {'OFF (raw)' if ARGS.raw_posteriors else 'ON (rows sum to 1)'}")
+    if ARGS.ttime:
+        print(f"  T-TIME    : {ARGS.ttime_mode} | B={ARGS.ttime_batch} stride={ARGS.ttime_stride} "
+              f"steps={ARGS.ttime_steps} lr={ARGS.ttime_lr} T={ARGS.ttime_temp} "
+              f"mdr={ARGS.ttime_mdr} params={ARGS.ttime_params} mode={ARGS.ttime_train_mode}"
+              + (f" epochs={ARGS.ttime_epochs}" if ARGS.ttime_mode == "offline" else ""))
+        print( "              the self-check below MUST NOT reproduce the record: the members are "
+               "adapted, so a match would mean the update did nothing.")
     print("=" * 78)
 
     folds = []            # one dict per (subject, session)
@@ -504,7 +626,8 @@ def main():
     # ------------------------- self-check ------------------------------------
     print()
     print("=" * 78)
-    print("SELF-CHECK -- does the checkpoint replay reproduce each seed's record?")
+    print("SELF-CHECK -- does the checkpoint replay reproduce each seed's record?"
+          + ("  [--ttime: a DIFFERENT number is expected here]" if ARGS.ttime else ""))
     print("=" * 78)
     all_ok = True
     for k, s in enumerate(seeds):
