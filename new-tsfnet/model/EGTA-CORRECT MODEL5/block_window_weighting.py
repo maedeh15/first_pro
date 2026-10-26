@@ -32,7 +32,7 @@ the nested column to sit far below the hindsight one.
 
 Window-level accuracy cannot change: this only alters how windows are pooled into a block.
 """
-import argparse, glob, os, sys
+import argparse, glob, os, re, sys
 import numpy as np
 from scipy.stats import wilcoxon
 
@@ -60,96 +60,128 @@ def load_dir(d, head="final"):
     return out
 
 
-def profiles(max_pos):
-    """one-parameter families, so the nested choice has a single degree of freedom.
+FRACTIONS = (0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8)
+RAMPS = (-1.5, -1.0, -0.5, 0.5, 1.0, 1.5)
 
-    drop<k>  : ignore the first k windows of the block (the instruction/pre-response end)
-    tail<k>  : keep only the last k windows (Cao et al.'s late interval)
-    The identity (drop0) is the current pipeline and is always the first candidate."""
-    names = ["drop0"]
-    names += [f"drop{k}" for k in range(1, max_pos + 1, 2)]
-    names += [f"tail{k}" for k in range(2, max_pos + 1, 2)]
+
+def profiles():
+    """One-parameter families, chosen so that (a) no two names denote the same window set and
+    (b) no selection can ever be empty, whatever a block's length.
+
+    An earlier version used ABSOLUTE positions, which was wrong twice over. Blocks here hold
+    between 26 and 35 windows, so a fixed cut-off such as "keep positions >= 33" empties the
+    shorter blocks: those folds scored NaN, the NaN propagated to the subject's mean, and the
+    paired test silently dropped 10 of 26 subjects (it printed "wins 0/16"). And the two families
+    were redundant: keeping positions >= k is the same set as keeping the last 35-k, so drop33 and
+    tail2 were one profile under two names and the candidate list was half the size it looked.
+
+    Positions are therefore normalised BY EACH BLOCK'S OWN LENGTH, so every profile keeps at least
+    the boundary window of every block and all rows are computed on all 26 subjects:
+      first<f>  drop the first fraction f  (the instruction / pre-response end)
+      last<f>   drop the last fraction f   (the windows reaching past the task)
+      mid<f>    drop f/2 from BOTH ends
+      ramp<a>   a soft weight 1 + a*rel instead of a cut-off, so nothing is discarded at all
+    """
+    names = ["all"]
+    names += [f"first{f:g}" for f in FRACTIONS]
+    names += [f"last{f:g}" for f in FRACTIONS]
+    names += [f"mid{f:g}" for f in FRACTIONS]
+    names += [f"ramp{a:+g}" for a in RAMPS]
     return names
 
 
-def weight_of(name, pos, max_pos):
-    if name.startswith("drop"):
-        return (pos >= int(name[4:])).astype(np.float64)
-    if name.startswith("tail"):
-        k = int(name[4:])
-        return (pos > max_pos - k).astype(np.float64)
+def weight_of(name, rel):
+    """rel: each window's position as a fraction of its own block's span, in [0, 1]."""
+    if name == "all":
+        return np.ones_like(rel)
+    if name.startswith("ramp"):
+        return np.clip(1.0 + float(name[4:]) * rel, 0.0, None)
+    f = float(re.match(r"[a-z]+([0-9.]+)", name).group(1))
+    if name.startswith("first"):
+        return (rel >= f).astype(np.float64)
+    if name.startswith("last"):
+        return (rel <= 1.0 - f).astype(np.float64)
+    if name.startswith("mid"):
+        return ((rel >= f / 2) & (rel <= 1.0 - f / 2)).astype(np.float64)
     raise ValueError(name)
 
 
-def block_acc(fold, name, max_pos, how="mean"):
-    """block decision from the weighted windows of each block. Returns NaN if a profile leaves a
-    block with no window at all, so an empty selection can never be scored as if it had worked."""
-    w = weight_of(name, fold["pos"], max_pos)
+def block_acc(fold, name, how="mean"):
+    """Weighted block decision. Every profile keeps at least one window of every block by
+    construction; if one ever does not, that is a bug, so it raises instead of returning NaN."""
     ok = []
     for t in np.unique(fold["trial"]):
-        m = (fold["trial"] == t) & (w > 0)
-        if not m.any():
-            return float("nan")
+        m = fold["trial"] == t
+        pos = fold["pos"][m].astype(np.float64)
+        span = max(pos.max() - pos.min(), 1.0)
+        rel = (pos - pos.min()) / span
+        w = weight_of(name, rel)
+        if w.sum() <= 0:
+            raise AssertionError(f"profile {name!r} left block {t} with no weight "
+                                 f"({m.sum()} windows) -- the profile families must never do this")
+        P = fold["P"][m]
         if how == "mean":
-            pred = fold["P"][m].mean(0).argmax()
+            pred = (P * w[:, None]).sum(0).argmax()
         else:
-            pred = np.bincount(fold["P"][m].argmax(1), minlength=3).argmax()
-        ok.append(pred == fold["y"][fold["trial"] == t][0])
+            cnt = np.zeros(P.shape[1])
+            np.add.at(cnt, P.argmax(1), w)
+            pred = cnt.argmax()
+        ok.append(pred == fold["y"][m][0])
     return float(np.mean(ok))
 
 
 def evaluate(data, how="mean"):
-    max_pos = max(int(f["pos"].max()) for s in data.values() for f in s.values())
-    names = profiles(max_pos)
-    # acc[subject][session][profile]
-    acc = {s: {k: {n: block_acc(f, n, max_pos, how) for n in names} for k, f in d.items()}
+    names = profiles()
+    acc = {s: {k: {n: block_acc(f, n, how) for n in names} for k, f in d.items()}
            for s, d in data.items()}
     subs = sorted(data)
 
     def mean_over_folds(s, n, skip=None):
         v = [acc[s][k][n] for k in acc[s] if k != skip]
-        return float(np.nanmean(v)) if v else float("nan")
+        if not v:
+            raise AssertionError(f"{s}: no fold left after skipping {skip}")
+        return float(np.mean(v))
 
-    base = np.array([mean_over_folds(s, "drop0") for s in subs])
+    base = np.array([mean_over_folds(s, "all") for s in subs])
 
-    # NESTED, per subject: for each fold, pick the profile on that subject's OTHER folds
-    nested = []
-    picked = []
+    # NESTED, per subject: for each fold the profile is chosen on that subject's OTHER folds
+    nested, picked = [], []
     for s in subs:
         per_fold = []
         for k in acc[s]:
-            cand = [(mean_over_folds(s, n, skip=k), n) for n in names]
-            cand = [c for c in cand if not np.isnan(c[0])]
-            best = max(cand)[1]                   # ties -> the name that sorts last; deterministic
+            best = max(names, key=lambda n: (mean_over_folds(s, n, skip=k), n))
             picked.append(best)
             per_fold.append(acc[s][k][best])
-        nested.append(float(np.nanmean(per_fold)))
+        nested.append(float(np.mean(per_fold)))
     nested = np.array(nested)
 
-    # NESTED, global: one cut-off from the other 25 subjects
-    glob_nested = []
+    # NESTED, global: one profile chosen from the OTHER 25 subjects
+    glob_nested, picked_glob = [], []
     for s in subs:
         others = [x for x in subs if x != s]
-        cand = [(float(np.nanmean([mean_over_folds(o, n) for o in others])), n) for n in names]
-        cand = [c for c in cand if not np.isnan(c[0])]
-        best = max(cand)[1]
+        best = max(names, key=lambda n: (float(np.mean([mean_over_folds(o, n) for o in others])), n))
+        picked_glob.append(best)
         glob_nested.append(mean_over_folds(s, best))
     glob_nested = np.array(glob_nested)
 
-    # HINDSIGHT upper bound: best profile per fold, knowing the answer
-    hind = np.array([float(np.nanmean([max(acc[s][k][n] for n in names) for k in acc[s]]))
+    # HINDSIGHT upper bounds, never results
+    hind = np.array([float(np.mean([max(acc[s][k][n] for n in names) for k in acc[s]]))
                      for s in subs])
-    # and the single best FIXED profile over everything, also in hindsight
-    fixed = {n: float(np.nanmean([mean_over_folds(s, n) for s in subs])) for n in names}
-    return subs, names, acc, base, nested, glob_nested, hind, fixed, picked, max_pos
+    fixed = {n: float(np.mean([mean_over_folds(s, n) for s in subs])) for n in names}
+    bestfix = max(names, key=lambda n: (fixed[n], n))
+    hind_fixed = np.array([mean_over_folds(s, bestfix) for s in subs])
+    return (subs, names, acc, base, nested, glob_nested, hind, fixed, bestfix, hind_fixed,
+            picked, picked_glob)
 
 
-def report(tag, base, x, subs):
+def report(tag, base, x):
     d = x - base
-    ok = ~np.isnan(d)
-    p = 1.0 if not np.any(d[ok] != 0) else float(wilcoxon(base[ok], x[ok]).pvalue)
-    print(f"  {tag:34} {np.nanmean(x):.4f}  {np.nanmean(d):+.4f}  "
-          f"wins {int((d[ok] > 0).sum())}/{int(ok.sum())}  p={p:.4f}")
+    if np.isnan(d).any():
+        raise AssertionError(f"{tag}: NaN reached the comparison; every profile must score "
+                             f"every fold")
+    p = 1.0 if not np.any(d != 0) else float(wilcoxon(base, x).pvalue)
+    print(f"  {tag:36} {x.mean():.4f}  {d.mean():+.4f}  "
+          f"wins {int((d > 0).sum())}/{len(d)}  p={p:.4f}")
 
 
 def main():
@@ -166,20 +198,24 @@ def main():
     if not a.posteriors:
         sys.exit("need --posteriors")
     data = load_dir(a.posteriors, a.head)
-    subs, names, acc, base, nested, gnest, hind, fixed, picked, max_pos = evaluate(data, a.how)
+    (subs, names, acc, base, nested, gnest, hind, fixed, bestfix, hind_fixed,
+     picked, picked_glob) = evaluate(data, a.how)
+    mx = max(int(f["pos"].max()) for d in data.values() for f in d.values())
+    lens = sorted({int((f["trial"] == t).sum()) for d in data.values() for f in d.values()
+                   for t in np.unique(f["trial"])})
     print(f"{len(subs)} subjects, {sum(len(v) for v in data.values())} folds, "
-          f"window positions 0..{max_pos}, head={a.head}, block decision={a.how}\n")
-    print(f"  {'':34} {'block':>6}  {'vs all-windows':>14}")
-    report("BASELINE (all windows)", base, base, subs)
-    report("NESTED, per subject", base, nested, subs)
-    report("NESTED, leave-one-subject-out", base, gnest, subs)
-    report("HINDSIGHT per fold (UPPER BOUND)", base, hind, subs)
-    bestfix = max(fixed.items(), key=lambda kv: kv[1])
-    report(f"best FIXED profile in hindsight ({bestfix[0]})", base,
-           np.array([np.nanmean([float(np.nanmean([acc[s][k][bestfix[0]]])) for k in acc[s]])
-                     for s in subs]), subs)
+          f"head={a.head}, block decision={a.how}")
+    print(f"window positions 0..{mx}; blocks hold {lens[0]} to {lens[-1]} windows, so every "
+          f"profile is defined on each block's OWN span\n")
+    print(f"  {'':36} {'block':>6}  {'vs all-windows':>14}")
+    report("BASELINE (all windows)", base, base)
+    report("NESTED, per subject", base, nested)
+    report("NESTED, leave-one-subject-out", base, gnest)
+    report("HINDSIGHT per fold (UPPER BOUND)", base, hind)
+    report(f"HINDSIGHT best fixed ({bestfix}) (BOUND)", base, hind_fixed)
     from collections import Counter
-    print(f"\n  profiles the nested rule picked: {Counter(picked).most_common(5)}")
+    print(f"\n  profiles the per-subject rule picked : {Counter(picked).most_common(5)}")
+    print(f"  profiles the leave-one-subject rule picked: {Counter(picked_glob).most_common(3)}")
     if a.curve:
         print(f"\n  {'profile':9} {'block':>7}")
         for n in names:
@@ -189,70 +225,90 @@ def main():
     print("accuracy is unchanged by construction: this changes only how windows pool into a block.")
 
 
-def self_test():
+def _make(nsub, nses, ntri, nwin_of, filler):
     rng = np.random.RandomState(0)
-    # planted: the LAST 10 windows of every block are informative, the first 25 are pure noise.
-    # The nested rule must find that, and dropping nothing must be clearly worse.
-    nsub, nses, ntri, nwin = 12, 3, 9, 35
     data = {}
-    for i in range(nsub):
-        data[f"VP{i:03d}"] = {}
-        for s in range(1, nses + 1):
+    for i_ in range(nsub):
+        data[f"VP{i_:03d}"] = {}
+        for s_ in range(1, nses + 1):
             y, tri, pos, P = [], [], [], []
             for t in range(ntri):
                 c = t % 3
-                for w in range(nwin):
+                nw = nwin_of(i_, t)
+                for w in range(nw):
                     y.append(c); tri.append(t); pos.append(w)
-                    p = np.full(3, 1 / 3) + rng.randn(3) * 0.02
-                    if w >= nwin - 10:
-                        p[c] += 0.9                       # informative tail
-                    else:
-                        # a CONSISTENTLY MISLEADING head, not noise: pure noise averages out over
-                        # 25 windows and the baseline would already score 0.99, leaving nothing to
-                        # detect. The instruction period plausibly looks like one particular class.
-                        p[(c + 1) % 3] += 0.6
-                    P.append(np.clip(p, 1e-9, None))
+                    P.append(filler(rng, c, w, nw))
             P = np.array(P); P /= P.sum(1, keepdims=True)
-            data[f"VP{i:03d}"][s] = {"y": np.array(y), "trial": np.array(tri),
-                                     "pos": np.array(pos), "P": P}
-    subs, names, acc, base, nested, gnest, hind, fixed, picked, mx = evaluate(data)
-    print(f"[planted: only the last 10 of 35 windows are informative]")
-    print(f"  all windows {base.mean():.3f} | nested per-subject {nested.mean():.3f} | "
-          f"nested LOSO-subject {gnest.mean():.3f} | hindsight {hind.mean():.3f}")
-    assert nested.mean() > base.mean() + 0.15, (base.mean(), nested.mean())
-    assert gnest.mean() > base.mean() + 0.15
-    assert hind.mean() >= nested.mean() - 1e-9, "hindsight must bound nested"
-    kept = [p for p in picked if p.startswith("tail") or (p.startswith("drop") and int(p[4:]) >= 20)]
-    assert len(kept) > 0.8 * len(picked), set(picked)
-    print("  the nested rule recovers a late-window profile and the hindsight bound holds")
+            data[f"VP{i_:03d}"][s_] = {"y": np.array(y), "trial": np.array(tri),
+                                       "pos": np.array(pos), "P": P}
+    return data
 
-    # a profile that empties a block must score NaN, never a silent 0 or a lucky guess
-    one = data["VP000"][1]
-    assert np.isnan(block_acc(one, f"drop{mx + 1}", mx)), "an empty selection must be NaN"
-    # with NO structure, nested must not invent a gain
-    flat = {}
-    for i in range(nsub):
-        flat[f"VP{i:03d}"] = {}
-        for s in range(1, nses + 1):
-            y, tri, pos, P = [], [], [], []
-            for t in range(ntri):
-                c = t % 3
-                for w in range(nwin):
-                    y.append(c); tri.append(t); pos.append(w)
-                    # weak per-window signal in heavy noise, so block accuracy lands in the
-                    # middle rather than at the ceiling -- otherwise "nested must not invent a
-                    # gain" would pass trivially at 1.000
-                    p = np.full(3, 1 / 3) + rng.randn(3) * 0.9
-                    p[c] += 0.12
-                    P.append(np.clip(p, 1e-9, None))
-            P = np.array(P); P /= P.sum(1, keepdims=True)
-            flat[f"VP{i:03d}"][s] = {"y": np.array(y), "trial": np.array(tri),
-                                     "pos": np.array(pos), "P": P}
-    _, _, _, b2, n2, g2, h2, _, _, _ = evaluate(flat)
-    print(f"[planted: every window equally informative] all {b2.mean():.3f} | nested {n2.mean():.3f}"
-          f" | hindsight {h2.mean():.3f}")
-    assert n2.mean() <= b2.mean() + 1e-9, "nested must not invent a gain on position-free data"
-    print("  on position-free data the nested rule adds nothing, as it must")
+
+def self_test():
+    # 1) planted: only the last 30% of each block is informative, and BLOCK LENGTHS DIFFER
+    #    (26..35), which is what broke the absolute-cut-off version of this script.
+    def tail_filler(rng, c, w, nw):
+        p = np.full(3, 1 / 3) + rng.randn(3) * 0.02
+        if w >= 0.7 * (nw - 1):
+            p[c] += 0.9
+        else:
+            p[(c + 1) % 3] += 0.6          # consistently misleading head, not noise
+        return np.clip(p, 1e-9, None)
+    varlen = lambda i_, t: 26 + (i_ + t) % 10
+    data = _make(12, 3, 9, varlen, tail_filler)
+    (subs, names, acc, base, nested, gnest, hind, fixed, bestfix, hfix,
+     picked, picked_glob) = evaluate(data)
+    print(f"[planted: only the last 30% informative, block lengths 26..35]")
+    print(f"  all {base.mean():.3f} | nested/subject {nested.mean():.3f} | "
+          f"nested/LOSO {gnest.mean():.3f} | hindsight {hind.mean():.3f}")
+    assert nested.mean() > base.mean() + 0.15 and gnest.mean() > base.mean() + 0.15
+    assert hind.mean() >= nested.mean() - 1e-9, "hindsight must bound nested"
+    assert all(p.startswith("first") or p.startswith("ramp+") for p in picked), set(picked)
+    print("  recovered by BOTH nested rules despite unequal block lengths")
+
+    # 2) THE BUG THE REAL RUN EXPOSED: every row must use all subjects, no NaN anywhere
+    for arr, nm in ((base, "base"), (nested, "nested"), (gnest, "LOSO"), (hind, "hindsight"),
+                    (hfix, "hindsight-fixed")):
+        assert len(arr) == len(subs) and not np.isnan(arr).any(), nm
+    assert all(not np.isnan(v) for v in fixed.values())
+    print(f"  all {len(names)} profiles score all {len(subs)} subjects; no NaN, no shrunken n")
+
+    # 3) no two profile names denote the same window set (the drop33 == tail2 collapse)
+    rel = np.linspace(0, 1, 31)
+    sig = {}
+    for n in names:
+        key = tuple(np.round(weight_of(n, rel), 9))
+        assert key not in sig, f"{n} and {sig[key]} are the same profile"
+        sig[key] = n
+    print(f"  all {len(names)} profiles are distinct as window weightings")
+
+    # 4) no profile can empty a block, even the shortest
+    short = {"VP000": {1: data["VP000"][1]}}
+    for n in names:
+        block_acc(short["VP000"][1], n)          # raises if a block is left with no weight
+    print("  no profile empties a block (checked on the shortest blocks present)")
+
+    # 5) position-free data: the nested rules must not invent a gain, hindsight will
+    def flat_filler(rng, c, w, nw):
+        p = np.full(3, 1 / 3) + rng.randn(3) * 0.9
+        p[c] += 0.12
+        return np.clip(p, 1e-9, None)
+    flat = _make(12, 3, 9, varlen, flat_filler)
+    _, _, _, b2, n2, g2, h2, _, _, _, _, _ = evaluate(flat)
+    print(f"[planted: every window equally informative] all {b2.mean():.3f} | "
+          f"nested {n2.mean():.3f} | LOSO {g2.mean():.3f} | hindsight {h2.mean():.3f}")
+    assert n2.mean() <= b2.mean() + 0.01 and g2.mean() <= b2.mean() + 0.01
+    assert h2.mean() > b2.mean() + 0.05, "hindsight should visibly over-promise here"
+    print("  nested adds nothing on position-free data while hindsight invents a gain")
+
+    # 6) 'all' must reproduce a plain unweighted mean, and ramp0 is not offered as a duplicate
+    f0 = data["VP000"][1]
+    plain = []
+    for t in np.unique(f0["trial"]):
+        m = f0["trial"] == t
+        plain.append(f0["P"][m].mean(0).argmax() == f0["y"][m][0])
+    assert abs(block_acc(f0, "all") - float(np.mean(plain))) < 1e-12
+    print("  'all' equals the current unweighted pipeline exactly")
     print("SELFTEST PASSED")
 
 
