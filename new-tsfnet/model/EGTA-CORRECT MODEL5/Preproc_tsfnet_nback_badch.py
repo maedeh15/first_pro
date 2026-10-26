@@ -169,6 +169,20 @@ _arg_parser.add_argument("--fnirs-bandpass", type=str, default="off", choices=["
                                "the paper-spec 0.01-0.1Hz zero-phase Butterworth bandpass (STA-Net's "
                                "own stated filter) on the HbO/HbR signal before windowing. 'on' "
                                "writes to a SEPARATE output folder.")
+_arg_parser.add_argument("--fnirs-pca-rest", type=int, default=0,
+                          help="priority-PCAREST: remove the first K principal components of the "
+                               "fNIRS channel covariance estimated on the unlabeled 20 s REST "
+                               "periods that follow each task block, separately per session and "
+                               "per chromophore (Zhang et al. 2016 PCA filter; Santosa et al. "
+                               "2020's best substitute when no short-separation channel exists). "
+                               "0 (default) = off, prior behavior bit-for-bit. K>0 writes to a "
+                               "SEPARATE output folder. Uses no labels, but the rest period "
+                               "follows a labeled block and the statistic is per test session, "
+                               "i.e. TRANSDUCTIVE like AdaBN/E3 -- disclose it together with them.")
+_arg_parser.add_argument("--fnirs-pca-rest-skip", type=float, default=10.0,
+                          help="priority-PCAREST: seconds at the START of each 20 s rest period to "
+                               "discard, because the task's hemodynamic response is still decaying "
+                               "there (default 10 -> the last 10 s of each rest are used).")
 _arg_parser.add_argument("--eeg-cov-align", type=str, default="off", choices=["off", "session", "session_raw"],
                           help="priority-COVALIGN (isolated variable): 'off' (default) = prior "
                                "behavior bit-for-bit. 'session' = per-session Euclidean Alignment of "
@@ -255,6 +269,16 @@ if _EEG_COV_ALIGN_CLI == "session":
     OUTPUT_PATH = OUTPUT_PATH + "_covEA"
 elif _EEG_COV_ALIGN_CLI == "session_raw":
     OUTPUT_PATH = OUTPUT_PATH + "_covEAraw"
+FNIRS_PCA_REST_K = int(_cli_args.fnirs_pca_rest)
+FNIRS_PCA_REST_SKIP = float(_cli_args.fnirs_pca_rest_skip)
+if FNIRS_PCA_REST_K < 0:
+    raise ValueError(f"--fnirs-pca-rest must be >= 0, got {FNIRS_PCA_REST_K}")
+if not (0.0 <= FNIRS_PCA_REST_SKIP < 20.0):
+    raise ValueError(f"--fnirs-pca-rest-skip must be in [0, 20), got {FNIRS_PCA_REST_SKIP}")
+if FNIRS_PCA_REST_K > 0:
+    OUTPUT_PATH = OUTPUT_PATH + f"_fnirsPCA{FNIRS_PCA_REST_K}"
+    if FNIRS_PCA_REST_SKIP != 10.0:
+        OUTPUT_PATH = OUTPUT_PATH + f"skip{FNIRS_PCA_REST_SKIP:g}"
 _FNIRS_BANDPASS_CLI = _cli_args.fnirs_bandpass
 if _FNIRS_BANDPASS_CLI == "on":
     OUTPUT_PATH = OUTPUT_PATH + "_fnirsBP"
@@ -1335,6 +1359,60 @@ def preprocess_eeg(raw, subject_id, qc_dir):
 # ============================================================================
 # fNIRS PREPROCESSING (paper Sec. 2.2)
 # ============================================================================
+def pca_rest_filter(sig, trial_times_s, sfreq, k, skip_s, trials_per_session,
+                    series_len_s=62.0, rest_len_s=20.0, pad_s=10.0):
+    """Remove the first k principal components of the REST-period channel covariance.
+
+    sig            : (T, C) one chromophore, resampled, BEFORE per-channel z-score
+    trial_times_s  : trial-onset markers in seconds, same clock as sig
+    A series is 2 s instruction + 40 s task + 20 s rest, so the rest after the trial that
+    starts at t0 is [t0 + 42, t0 + 62); its first skip_s seconds are dropped (the task response
+    is still decaying). The PCA is fitted PER SESSION on that session's rest samples only and
+    applied to that session's span [first onset - pad, last onset + series + pad], so a session
+    never borrows another session's statistic. No label is used anywhere.
+
+    Returns (cleaned copy, list of per-session dicts with the variance fraction removed)."""
+    sig = np.asarray(sig, dtype=np.float64)
+    t = np.sort(np.asarray(trial_times_s, dtype=float))
+    if k <= 0:
+        return sig.copy(), []
+    if len(t) == 0 or len(t) % trials_per_session != 0:
+        raise ValueError(f"need a multiple of {trials_per_session} trial markers, got {len(t)}")
+    out = sig.copy()
+    T, C = sig.shape
+    if k >= C:
+        raise ValueError(f"cannot remove k={k} components from {C} channels")
+    info, prev_end = [], 0
+    for ses in range(len(t) // trials_per_session):
+        on = t[ses * trials_per_session:(ses + 1) * trials_per_session]
+        rest = []
+        for t0 in on:
+            a = int(round((t0 + series_len_s - rest_len_s + skip_s) * sfreq))
+            b = min(int(round((t0 + series_len_s) * sfreq)), T)
+            if a < 0 or a >= b:
+                continue                      # rest cut off by the end of the recording
+            rest.append(sig[a:b])
+        if not rest:
+            raise ValueError(f"session {ses + 1}: no rest samples inside the recording")
+        R = np.concatenate(rest, axis=0)
+        if R.shape[0] < 2 * C:
+            raise ValueError(f"session {ses + 1}: only {R.shape[0]} rest samples for {C} channels")
+        mu = R.mean(axis=0)
+        cov = np.cov(R - mu, rowvar=False)
+        w, V = np.linalg.eigh(cov)            # ascending
+        Vk = V[:, ::-1][:, :k]
+        a0 = max(int(round((on[0] - pad_s) * sfreq)), 0)
+        b0 = min(int(round((on[-1] + series_len_s + pad_s) * sfreq)), T)
+        if a0 < prev_end:
+            raise ValueError(f"session {ses + 1} span overlaps the previous one")
+        prev_end = b0
+        Y = sig[a0:b0]
+        out[a0:b0] = Y - (Y - mu) @ Vk @ Vk.T
+        info.append({"session": ses + 1, "n_rest": int(R.shape[0]),
+                     "var_removed": float(w[::-1][:k].sum() / max(w.sum(), 1e-30))})
+    return out, info
+
+
 def preprocess_fnirs(subject_id, qc_dir, grid_bbox=None):
     oxy_raw, deoxy_raw, sfreq_raw, mnt_struct, ch_names, ev_time, ev_code = load_fnirs_data(subject_id)
 
@@ -1413,6 +1491,21 @@ def preprocess_fnirs(subject_id, qc_dir, grid_bbox=None):
     #   - The .fif save and QC plot above intentionally use the PRE-normalization hbo_rs/hbr_rs
     #     (real physical mmol/L units) so they stay visually/physically interpretable; only the
     #     grid tensor built below (and everything downstream of it) is normalized.
+    if FNIRS_PCA_REST_K > 0:
+        # priority-PCAREST. Needs the trial markers; refuse rather than silently write an
+        # uncorrected tensor into a folder whose name says it was corrected.
+        if ev_time is None or ev_code is None:
+            raise ValueError(f"{subject_id}: --fnirs-pca-rest needs the fNIRS trial markers")
+        _m = np.isin(ev_code, list(FNIRS_TRIAL_LABEL_MAP.keys()))
+        _t_trials = np.asarray(ev_time, dtype=float)[_m] / 1000.0
+        hbo_rs, _io = pca_rest_filter(hbo_rs, _t_trials, SFREQ_FNIRS, FNIRS_PCA_REST_K,
+                                      FNIRS_PCA_REST_SKIP, TRIALS_PER_SESSION)
+        hbr_rs, _ir = pca_rest_filter(hbr_rs, _t_trials, SFREQ_FNIRS, FNIRS_PCA_REST_K,
+                                      FNIRS_PCA_REST_SKIP, TRIALS_PER_SESSION)
+        log_message(f"  {subject_id}: PCA-rest filter k={FNIRS_PCA_REST_K} skip={FNIRS_PCA_REST_SKIP:g}s "
+                    f"| variance removed per session HbO "
+                    f"{[round(x['var_removed'], 3) for x in _io]} HbR "
+                    f"{[round(x['var_removed'], 3) for x in _ir]}")
     hbo_mean, hbo_std = hbo_rs.mean(axis=0, keepdims=True), hbo_rs.std(axis=0, keepdims=True) + 1e-8
     hbr_mean, hbr_std = hbr_rs.mean(axis=0, keepdims=True), hbr_rs.std(axis=0, keepdims=True) + 1e-8
     hbo_rs_norm = (hbo_rs - hbo_mean) / hbo_std
