@@ -20,7 +20,7 @@ def main():
                          "posteriors are in the csv, so no --save-posteriors run is needed)")
     a = ap.parse_args()
     if a.trials:
-        dirs = sorted(glob.glob(os.path.join(a.root, "**", "ensemble_trials*.csv"), recursive=True))
+        dirs = sorted(glob.glob(os.path.join(a.root, "**", "*ensemble_trials*.csv"), recursive=True))
         loader = load_trials
     else:
         dirs = sorted({os.path.dirname(f) for f in
