@@ -8,7 +8,21 @@ does not hold the 3/3/3 composition is reported as skipped, not silently dropped
 import argparse, glob, os
 import numpy as np
 from scipy.stats import wilcoxon
-from balanced_assignment_eval import load, load_trials, evaluate
+from collections import defaultdict
+from balanced_assignment_eval import load, evaluate
+
+
+def load_trials(path):
+    """ensemble_trials.csv carries the block posteriors (p0,p1,p2) directly, one row per block.
+    Defined here as well as in balanced_assignment_eval so this file works with either version."""
+    import csv
+    rows = defaultdict(list)
+    for r in csv.DictReader(open(path, encoding="utf-8")):
+        rows[(r["subject_id"], int(r["test_session"]))].append(
+            (int(r["label"]), [float(r["p0"]), float(r["p1"]), float(r["p2"])]))
+    if not rows:
+        raise SystemExit(f"{path} has no rows")
+    return {k: (np.array([p for _, p in v]), np.array([y for y, _ in v])) for k, v in rows.items()}
 
 
 def main():
