@@ -395,6 +395,7 @@ def collect_fold_posteriors(full, test_idx, ckpt_path, device):
     if ARGS.ttime:
         return ttime_fold_posteriors(model, full, test_idx, device)
     out = {h: [] for h in HEADS}
+    riem_out = []                      # only with --riem-branch member: the in-network head's own posterior
     seen = []
     with torch.no_grad():
         for _batch in loader:
@@ -405,6 +406,8 @@ def collect_fold_posteriors(full, test_idx, ckpt_path, device):
             y_eeg, y_fusion, y_fnirs, y_pred, _aux = model(x_eeg, x_fnirs, x_conn, x_chan)
             for h, v in zip(HEADS, (y_pred, y_eeg, y_fusion, y_fnirs)):
                 out[h].append(v.cpu().numpy())
+            if _aux.get("y_riem") is not None:
+                riem_out.append(_aux["y_riem"].cpu().numpy())
             seen.append(y.numpy())
     del model
     if str(device).startswith("cuda"):
@@ -413,6 +416,14 @@ def collect_fold_posteriors(full, test_idx, ckpt_path, device):
     if not ARGS.raw_posteriors:
         for h in HEADS:
             res[h] = res[h] / np.clip(res[h].sum(axis=1, keepdims=True), 1e-12, None)
+    if riem_out:
+        # y_final = (1-b) * y_deep + b * y_riem exactly (TSFNet.forward), so the deep half is recovered by
+        # subtraction rather than by a second forward pass. EXTRA keys: HEADS, and so every table, are unchanged.
+        b = float(ARGS.riem_blend)
+        res["riem"] = np.concatenate(riem_out, axis=0).astype(np.float64)
+        res["deep"] = np.clip((np.concatenate(out["final"], axis=0).astype(np.float64)
+                               - b * res["riem"]) / (1.0 - b), 1e-12, None)
+        res["deep"] = res["deep"] / res["deep"].sum(axis=1, keepdims=True)
     return res, np.concatenate(seen)
 
 
@@ -593,7 +604,8 @@ def main():
                 np.savez_compressed(
                     os.path.join(pdir, f"{sid}_session{test_session}.npz"),
                     seeds=np.array(seeds), y=y_win, trial_ids=tri_ids, pos_in_trial=pos,
-                    **{f"P_{h}": np.stack([post[k][h] for k in range(K)], axis=0).astype(np.float32) for h in HEADS})
+                    **{f"P_{h}": np.stack([post[k][h] for k in range(K)], axis=0).astype(np.float32)
+                       for h in HEADS + tuple(x for x in ("riem", "deep") if x in post[0])})
 
             f = fold["final"]
             print(f"[{sid} s{test_session}] singles(win)=" +

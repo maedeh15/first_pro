@@ -38,7 +38,7 @@ import argparse, glob, itertools, os, sys
 import numpy as np
 from scipy.stats import wilcoxon
 
-HEADS = ("final", "eeg", "fusion", "fnirs")
+HEADS = ("final", "eeg", "fusion", "fnirs", "riem", "deep")
 
 
 def load_dir(d, head):
