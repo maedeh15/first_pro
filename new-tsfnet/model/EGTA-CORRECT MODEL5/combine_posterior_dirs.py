@@ -129,6 +129,10 @@ def main():
     ap.add_argument("--labels", nargs="+", default=None)
     ap.add_argument("--head", default="final", choices=list(HEADS))
     ap.add_argument("--how", default="arith", choices=["arith", "geo"])
+    ap.add_argument("--save-combined", default=None,
+                    help="write the combined window posteriors of ALL members to this folder, in the "
+                         "same *_session<k>.npz layout ensemble_eval.py --save-posteriors writes, so "
+                         "balanced_assignment_eval.py (or a second combine) can read it")
     ap.add_argument("--self-test", action="store_true")
     a = ap.parse_args()
     if a.self_test:
@@ -191,6 +195,16 @@ def main():
             rest = [j for j in range(K) if j != i]
             _, w_r, _, _ = score(members, keys, rest, a.how)
             print(f"  without {lab[:28]:28} {w_r.mean():8.4f}  ({w_all.mean() - w_r.mean():+.4f})")
+
+    if a.save_combined:
+        os.makedirs(a.save_combined, exist_ok=True)
+        for (sid, ses) in keys:
+            ref = members[0][(sid, ses)]
+            Pw = comb([m[(sid, ses)]["P"] for m in members], a.how)
+            np.savez(os.path.join(a.save_combined, f"{sid}_session{ses}.npz"),
+                     **{f"P_{a.head}": Pw[None].astype(np.float32)},
+                     y=ref["y"], trial_ids=ref["trial"], pos_in_trial=ref["pos"])
+        print(f"\nwrote {len(keys)} combined folds ({a.how}, head={a.head}) to {a.save_combined}")
 
     print("\nThis is K networks: K times the parameters and K times the inference cost. Report it")
     print("as an ensemble of K configurations. The member folders must be fixed before looking at")
