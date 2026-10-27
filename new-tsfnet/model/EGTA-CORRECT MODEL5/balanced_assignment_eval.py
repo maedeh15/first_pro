@@ -65,6 +65,18 @@ def load(d, head):
     return folds
 
 
+def load_trials(path):
+    """ensemble_trials.csv carries the block posteriors (p0,p1,p2) directly, one row per block."""
+    import csv
+    rows = defaultdict(list)
+    for r in csv.DictReader(open(path, encoding="utf-8")):
+        rows[(r["subject_id"], int(r["test_session"]))].append(
+            (int(r["label"]), [float(r["p0"]), float(r["p1"]), float(r["p2"])]))
+    if not rows:
+        raise SystemExit(f"{path} has no rows")
+    return {k: (np.array([p for _, p in v]), np.array([y for y, _ in v])) for k, v in rows.items()}
+
+
 def evaluate(folds):
     comp = {tuple(np.bincount(yb, minlength=3)) for _, yb in folds.values()}
     if comp != {(3, 3, 3)}:
