@@ -133,6 +133,10 @@ def main():
                     help="write the combined window posteriors of ALL members to this folder, in the "
                          "same *_session<k>.npz layout ensemble_eval.py --save-posteriors writes, so "
                          "balanced_assignment_eval.py (or a second combine) can read it")
+    ap.add_argument("--save-key", default=None, choices=list(HEADS),
+                    help="with --save-combined: store the combined posteriors under P_<save-key> instead of "
+                         "P_<head>. Use 'final' to feed late_fusion_riemann.py (which reads P_final) with, e.g., "
+                         "the combined DEEP halves (--head deep --save-key final)")
     ap.add_argument("--self-test", action="store_true")
     a = ap.parse_args()
     if a.self_test:
@@ -202,7 +206,7 @@ def main():
             ref = members[0][(sid, ses)]
             Pw = comb([m[(sid, ses)]["P"] for m in members], a.how)
             np.savez(os.path.join(a.save_combined, f"{sid}_session{ses}.npz"),
-                     **{f"P_{a.head}": Pw[None].astype(np.float32)},
+                     **{f"P_{a.save_key or a.head}": Pw[None].astype(np.float32)},
                      y=ref["y"], trial_ids=ref["trial"], pos_in_trial=ref["pos"])
         print(f"\nwrote {len(keys)} combined folds ({a.how}, head={a.head}) to {a.save_combined}")
 
