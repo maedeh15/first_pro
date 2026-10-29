@@ -1484,7 +1484,8 @@ class RiemLRHead(nn.Module):
         # guard: the buffered forward must reproduce sklearn's own probabilities
         n = min(len(X), 64)
         with torch.no_grad():
-            mine = self.forward(torch.as_tensor(X[:n], dtype=torch.float32)).double().numpy()
+            # the model is already on its device when fit() runs: put the probe rows where the buffers are
+            mine = self.forward(torch.as_tensor(X[:n], dtype=torch.float32, device=self.mean.device)).double().cpu().numpy()
         err = float(np.abs(mine - clf.predict_proba(sc.transform(X[:n]))).max())
         if err > 1e-4:
             raise RuntimeError(f"RiemLRHead disagrees with sklearn by {err:.2e}")
