@@ -1499,6 +1499,27 @@ class RiemLRHead(nn.Module):
         return F.softmax(z @ self.W.t() + self.b, dim=-1)
 
 
+def load_with_attached_riem_head(model, state_dict, X_fit, y_fit):
+    """priority-ATTACH: build ONE model from a trunk trained WITHOUT any Riemannian branch plus a closed-form head.
+
+    state_dict comes from a plain run (no riem keys). The only keys allowed to be missing are the
+    RiemLRHead buffers ('riem_head.*'); any other missing or unexpected key means the architecture flags differ
+    from the training run and is refused. The head is then fitted on (X_fit, y_fit), which must be training-session
+    windows only. Result: one nn.Module whose forward is (1-b)*y_deep + b*y_riem, with the trunk bit-identical to
+    the plain run -- the offline late fusion, packaged as a single network so one checkpoint and one forward serve
+    every downstream analysis (XAI included). Report it as TSFNet + a separately fitted linear member.
+    """
+    if not isinstance(getattr(model, "riem_head", None), RiemLRHead):
+        raise ValueError("model must be built with riem_branch='member' and riem_head_fit='lr' or 'lr_all'")
+    res = model.load_state_dict(state_dict, strict=False)
+    bad = [k for k in res.missing_keys if not k.startswith("riem_head.")]
+    if bad or res.unexpected_keys:
+        raise RuntimeError(f"trunk checkpoint does not match the model: missing {bad[:4]}, "
+                           f"unexpected {list(res.unexpected_keys)[:4]}")
+    model.riem_head.fit(X_fit, y_fit)
+    return model
+
+
 class TSFNet(nn.Module):
     """
     num_classes=3 (0-/2-/3-back) -- the paper's original tasks (MI, MA, WG)

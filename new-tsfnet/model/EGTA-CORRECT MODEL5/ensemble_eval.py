@@ -163,6 +163,13 @@ p.add_argument("--riem-branch", type=str, default="none", choices=["none", "memb
                     "{sid}_eeg_riem.npy from build_riem_features.py).")
 p.add_argument("--riem-head-fit", type=str, default="sgd", choices=["sgd", "lr", "lr_all"],
                 help="must match the training run: the closed-form head keeps its fitted scaler and weights in buffers")
+p.add_argument("--attach-riem-head", action="store_true", default=False,
+                help="the checkpoints are from a PLAIN run (no Riemannian branch): build the single integrated model "
+                     "by attaching a closed-form head fitted on each fold's training sessions (needs --riem-branch "
+                     "member --riem-head-fit lr_all). Trunk weights are used unchanged.")
+p.add_argument("--save-assembled-dir", type=str, default=None,
+                help="with --attach-riem-head: write each assembled model's state_dict here, "
+                     "<dir>/<results folder name>/<sid>_session<k>_best.pt, loadable as a normal integrated model")
 p.add_argument("--riem-blend", type=float, default=0.5, help="blend of the Riemannian member (match training)")
 p.add_argument("--riem-dim", type=int, default=1624, help="tangent-feature dimension (4 bands x 28*29/2 = 1624)")
 p.add_argument("--eeg-filterbank", type=str, default="none", choices=["none", "fixed", "learnable"])
@@ -183,6 +190,10 @@ p.add_argument("--norm-mode", type=str, default="batch", choices=["batch", "grou
 p.add_argument("--use-fc-features", action="store_true", default=False)
 
 ARGS = p.parse_args()
+if ARGS.attach_riem_head and not (ARGS.riem_branch == "member" and ARGS.riem_head_fit != "sgd"):
+    p.error("--attach-riem-head needs --riem-branch member and --riem-head-fit lr_all (or lr)")
+if ARGS.save_assembled_dir and not ARGS.attach_riem_head:
+    p.error("--save-assembled-dir needs --attach-riem-head")
 
 try:
     _this_dir = os.path.dirname(os.path.abspath(__file__))
@@ -385,11 +396,20 @@ def ttime_fold_posteriors(model, full, test_idx, device):
     return {h: np.concatenate(v, axis=0) for h, v in out.items()}, np.concatenate(seen)
 
 
-def collect_fold_posteriors(full, test_idx, ckpt_path, device):
+def collect_fold_posteriors(full, test_idx, ckpt_path, device, train_idx=None):
     model = build_model(device)
-    # strict=True: a key mismatch means the architecture flags differ from the run that
-    # wrote this checkpoint; scoring a partly random model silently would be worse.
-    model.load_state_dict(torch.load(ckpt_path, map_location=device), strict=True)
+    if ARGS.attach_riem_head:
+        # priority-ATTACH: the checkpoint is a PLAIN run's; attach a closed-form head fitted on the other sessions
+        sd = torch.load(ckpt_path, map_location=device)
+        load_with_attached_riem_head(model, sd, full.channels[train_idx], full.labels.numpy()[train_idx])
+        if ARGS.save_assembled_dir:
+            dst = os.path.join(ARGS.save_assembled_dir, os.path.basename(os.path.dirname(ckpt_path)))
+            os.makedirs(dst, exist_ok=True)
+            torch.save(model.state_dict(), os.path.join(dst, os.path.basename(ckpt_path)))
+    else:
+        # strict=True: a key mismatch means the architecture flags differ from the run that
+        # wrote this checkpoint; scoring a partly random model silently would be worse.
+        model.load_state_dict(torch.load(ckpt_path, map_location=device), strict=True)
     model.eval()
     loader = DataLoader(Subset(full, test_idx), batch_size=ARGS.batch_size, shuffle=False)
     if ARGS.adabn:
@@ -556,7 +576,7 @@ def main():
             try:
                 post, ok = [], True
                 for c in ckpts:
-                    pst, seen = collect_fold_posteriors(full, test_idx, c, device)
+                    pst, seen = collect_fold_posteriors(full, test_idx, c, device, train_idx=_tr)
                     if len(seen) != len(y_win) or not np.array_equal(seen, y_win):
                         print(f"[{sid} s{test_session}] FAILED -- loader order != test_idx; refusing to aggregate.")
                         ok = False

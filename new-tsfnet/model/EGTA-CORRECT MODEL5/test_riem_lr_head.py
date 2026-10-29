@@ -77,6 +77,38 @@ def main():
     except ValueError:
         pass
     print("[7] invalid values and lr without --riem-branch member are refused -> OK")
+    # [8] attaching a closed-form head to a PLAIN checkpoint (priority-ATTACH)
+    torch.manual_seed(7)
+    plain = M.TSFNet()                                     # no riem branch: the baseline architecture
+    sd = {k: v.clone() for k, v in plain.state_dict().items()}
+    torch.manual_seed(8)
+    asm = M.TSFNet(riem_branch="member", riem_dim=D, riem_head_fit="lr_all")
+    M.load_with_attached_riem_head(asm, sd, torch.as_tensor(X, dtype=torch.float32), torch.as_tensor(y))
+    got = asm.state_dict()
+    assert all(torch.equal(got[k], v) for k, v in sd.items()), "trunk weights were altered by the attach"
+    assert float(asm.riem_head.fitted) == 1.0
+    extra = dict(sd); extra["not_a_layer.weight"] = torch.zeros(1)
+    try:
+        M.load_with_attached_riem_head(M.TSFNet(riem_branch="member", riem_dim=D, riem_head_fit="lr_all"), extra,
+                                      torch.as_tensor(X, dtype=torch.float32), torch.as_tensor(y))
+        raise SystemExit("an unexpected key was NOT refused")
+    except RuntimeError as e:
+        assert "does not match" in str(e)
+    short = {k: v for k, v in sd.items() if not k.startswith("fnirs_branch")} if any(k.startswith("fnirs_branch") for k in sd) \
+        else dict(list(sd.items())[:-3])
+    try:
+        M.load_with_attached_riem_head(M.TSFNet(riem_branch="member", riem_dim=D, riem_head_fit="lr_all"), short,
+                                      torch.as_tensor(X, dtype=torch.float32), torch.as_tensor(y))
+        raise SystemExit("a missing trunk key was NOT refused")
+    except RuntimeError as e:
+        assert "does not match" in str(e)
+    try:
+        M.load_with_attached_riem_head(M.TSFNet(riem_branch="member", riem_dim=D), sd,
+                                       torch.as_tensor(X, dtype=torch.float32), torch.as_tensor(y))
+        raise SystemExit("a gradient-trained head was accepted")
+    except ValueError:
+        pass
+    print("[8] attach: trunk bit-identical, head fitted; a foreign key, a missing trunk key and a gradient head are refused -> OK")
     print("ALL PASSED")
 
 
