@@ -161,6 +161,8 @@ p.add_argument("--erp-branch", type=str, default="none", choices=["none", "eeg",
 p.add_argument("--riem-branch", type=str, default="none", choices=["none", "member"],
                help="priority-RIEM: must match the training flag (adds the Riemannian member head; needs "
                     "{sid}_eeg_riem.npy from build_riem_features.py).")
+p.add_argument("--riem-head-fit", type=str, default="sgd", choices=["sgd", "lr", "lr_all"],
+                help="must match the training run: the closed-form head keeps its fitted scaler and weights in buffers")
 p.add_argument("--riem-blend", type=float, default=0.5, help="blend of the Riemannian member (match training)")
 p.add_argument("--riem-dim", type=int, default=1624, help="tangent-feature dimension (4 bands x 28*29/2 = 1624)")
 p.add_argument("--eeg-filterbank", type=str, default="none", choices=["none", "fixed", "learnable"])
@@ -304,7 +306,7 @@ def build_model(device):
         eeg_band_mode=ARGS.eeg_band_mode, norm_mode=ARGS.norm_mode,
         efgf_gate_mode=ARGS.efgf_gate_mode, efgf_gate_init=ARGS.efgf_gate_init,
         fusion_fnirs_inject=ARGS.fusion_fnirs_inject, erp_branch=ARGS.erp_branch,
-        riem_branch=ARGS.riem_branch, riem_blend=ARGS.riem_blend,
+        riem_branch=ARGS.riem_branch, riem_blend=ARGS.riem_blend, riem_head_fit=ARGS.riem_head_fit,
         riem_dim=(ARGS.riem_dim if ARGS.riem_branch != "none" else 0),
         eeg_filterbank=ARGS.eeg_filterbank, eeg_filterbank_scope=ARGS.eeg_filterbank_scope,
         fnirs_chroma_split=ARGS.fnirs_chroma_split,

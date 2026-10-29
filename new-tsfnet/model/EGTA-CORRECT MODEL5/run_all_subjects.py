@@ -410,6 +410,11 @@ _arg_parser.add_argument("--riem-weight-decay", type=float, default=1e-2,
 _arg_parser.add_argument("--riem-dropout", type=float, default=0.5,
                           help="dropout on the Riemannian head's input features (0.5 = the existing behaviour; "
                                "the folder subtag changes only when this differs from 0.5)")
+_arg_parser.add_argument("--riem-head-fit", type=str, default="sgd", choices=["sgd", "lr", "lr_all"],
+                          help="how the Riemannian head is obtained: sgd = trained by gradient with the network "
+                               "(default, unchanged); lr = closed-form logistic regression on the fold's training "
+                               "windows, frozen; lr_all = same on train+val windows (the offline member's recipe, "
+                               "exploratory). Not an end-to-end layer: report as TSFNet + a separately fitted member.")
 _arg_parser.add_argument("--egta-pcc-lambda", type=float, default=0.0,
                           help="priority-EGTAPCC: weight of STA-Net's L_egta = 1 - mean|PCC("
                                "F_fusion, F_fnirs(ta))| on the PURE EGTA-pooled fNIRS feature "
@@ -858,6 +863,9 @@ RIEM_BLEND = SEED_ARGS.riem_blend
 RIEM_LAMBDA = SEED_ARGS.riem_lambda
 RIEM_WEIGHT_DECAY = SEED_ARGS.riem_weight_decay
 RIEM_DROPOUT = SEED_ARGS.riem_dropout
+RIEM_HEAD_FIT = SEED_ARGS.riem_head_fit
+if RIEM_HEAD_FIT != "sgd" and SEED_ARGS.riem_branch != "member":
+    raise SystemExit("--riem-head-fit lr / lr_all needs --riem-branch member")
 if not (0.0 <= RIEM_DROPOUT < 1.0):
     raise SystemExit(f"--riem-dropout must be in [0, 1), got {RIEM_DROPOUT}")
 EEG_FILTERBANK = SEED_ARGS.eeg_filterbank
@@ -1194,6 +1202,7 @@ _ERP_SUBTAG += f"_egtapcc{EGTA_PCC_LAMBDA:g}" if EGTA_PCC_LAMBDA > 0.0 else ""  
 _ERP_SUBTAG += "_cafepccabs" if CAFE_PCC_MODE == "abs" else ""   # priority-CAFEPCCABS
 _ERP_SUBTAG += (f"_riem{RIEM_BLEND:g}l{RIEM_LAMBDA:g}wd{RIEM_WEIGHT_DECAY:g}" if RIEM_BRANCH == "member" else "")   # priority-RIEM
 _ERP_SUBTAG += (f"do{RIEM_DROPOUT:g}" if (RIEM_BRANCH == "member" and RIEM_DROPOUT != 0.5) else "")   # priority-RIEMDROP
+_ERP_SUBTAG += (f"fit{RIEM_HEAD_FIT}" if (RIEM_BRANCH == "member" and RIEM_HEAD_FIT != "sgd") else "")   # priority-RIEMFIT
 _ERP_SUBTAG += (f"_fb{EEG_FILTERBANK}{'' if EEG_FILTERBANK_SCOPE == 'both' else '-eegonly'}"
                 if EEG_FILTERBANK != "none" else "")                                  # priority-FILTERBANK
 _ERP_SUBTAG += f"_cs{FNIRS_CHROMA_SPLIT}" if FNIRS_CHROMA_SPLIT != "none" else ""      # priority-CHROMASPLIT
@@ -1447,7 +1456,7 @@ with CrashSafeLogger(os.path.join(RESULTS_DIR_VARIANT, f"baseline_run_log_{RUN_T
                 cafe_pcc_mode=CAFE_PCC_MODE,                 # priority-CAFEPCCABS
                 riem_branch=RIEM_BRANCH, riem_blend=RIEM_BLEND,   # priority-RIEM: 'none' (default) = off
                 riem_lambda=RIEM_LAMBDA, riem_weight_decay=RIEM_WEIGHT_DECAY,
-                riem_dropout=RIEM_DROPOUT,                # priority-RIEMDROP: 0.5 (default) = unchanged
+                riem_dropout=RIEM_DROPOUT, riem_head_fit=RIEM_HEAD_FIT,                # priority-RIEMDROP: 0.5 (default) = unchanged
                 egta_pcc_lambda=EGTA_PCC_LAMBDA,          # priority-EGTAPCC: 0.0 (default) = term off
                 eeg_filterbank=EEG_FILTERBANK,            # priority-FILTERBANK: "none" (default) = off
                 fnirs_chroma_split=FNIRS_CHROMA_SPLIT,    # priority-CHROMASPLIT: "none" (default) = off

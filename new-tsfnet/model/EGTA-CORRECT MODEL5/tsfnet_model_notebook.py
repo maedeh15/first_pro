@@ -1445,6 +1445,59 @@ class RiemHead(nn.Module):
         return F.softmax(self.fc(self.drop(z)), dim=-1)
 
 
+class RiemLRHead(nn.Module):
+    """priority-RIEMFIT: the Riemannian member as a CLOSED-FORM logistic regression, not a gradient-trained layer.
+
+    The offline member (late_fusion_riemann.eeg_posteriors) is StandardScaler + LogisticRegression(C=0.1) fitted
+    to convergence on the training windows. The gradient-trained RiemHead is measurably weaker (window 0.6243 vs
+    0.6497 for the same features; swapping it for the offline member recovers the late-fusion accuracy, section
+    5-3-18). This head IS that classifier: fit(X, y) is called once per fold BEFORE training, the fitted scaler and
+    coefficients live in BUFFERS (so state_dict, the best checkpoint and ensemble_eval carry them), and there is
+    nothing for the optimizer to update. It is not a network trained end to end; report it as TSFNet + a
+    separately fitted linear member blended at a fixed weight.
+    """
+
+    def __init__(self, in_dim, num_classes=3, C=0.1):
+        super().__init__()
+        self.C = float(C)
+        self.register_buffer("mean", torch.zeros(in_dim))
+        self.register_buffer("scale", torch.ones(in_dim))
+        self.register_buffer("W", torch.zeros(num_classes, in_dim))
+        self.register_buffer("b", torch.zeros(num_classes))
+        self.register_buffer("fitted", torch.zeros(1))
+
+    def fit(self, X, y):
+        from sklearn.linear_model import LogisticRegression
+        X = X.detach().cpu().numpy() if torch.is_tensor(X) else np.asarray(X)
+        y = y.detach().cpu().numpy() if torch.is_tensor(y) else np.asarray(y)
+        X = X.astype(np.float64)
+        sc = StandardScaler().fit(X)
+        clf = LogisticRegression(C=self.C, max_iter=3000).fit(sc.transform(X), y)
+        if list(clf.classes_) != list(range(self.W.shape[0])):
+            raise ValueError(f"RiemLRHead needs every class {list(range(self.W.shape[0]))} in the fitting windows, "
+                             f"got {list(clf.classes_)}")
+        self.mean.copy_(torch.as_tensor(sc.mean_, dtype=torch.float32))
+        self.scale.copy_(torch.as_tensor(sc.scale_, dtype=torch.float32))
+        self.W.copy_(torch.as_tensor(clf.coef_, dtype=torch.float32))
+        self.b.copy_(torch.as_tensor(clf.intercept_, dtype=torch.float32))
+        self.fitted.fill_(1.0)
+        # guard: the buffered forward must reproduce sklearn's own probabilities
+        n = min(len(X), 64)
+        with torch.no_grad():
+            mine = self.forward(torch.as_tensor(X[:n], dtype=torch.float32)).double().numpy()
+        err = float(np.abs(mine - clf.predict_proba(sc.transform(X[:n]))).max())
+        if err > 1e-4:
+            raise RuntimeError(f"RiemLRHead disagrees with sklearn by {err:.2e}")
+
+    def forward(self, x):
+        if x.dim() != 2:
+            raise ValueError(f"RiemLRHead expects (B, D) tangent features, got {tuple(x.shape)}")
+        if float(self.fitted) != 1.0:
+            raise RuntimeError("RiemLRHead.forward before fit(): call model.riem_head.fit(X_train, y_train) first")
+        z = (x - self.mean) / self.scale
+        return F.softmax(z @ self.W.t() + self.b, dim=-1)
+
+
 class TSFNet(nn.Module):
     """
     num_classes=3 (0-/2-/3-back) -- the paper's original tasks (MI, MA, WG)
@@ -1489,7 +1542,8 @@ class TSFNet(nn.Module):
                  fusion_fnirs_inject="none", erp_branch="none",
                  egta_pcc_lambda=0.0, cafe_pcc_mode="signed",
                  riem_branch="none", riem_dim=0, riem_blend=0.5, riem_lambda=0.2,
-                 riem_weight_decay=1e-2, riem_dropout=0.5, eeg_filterbank="none", eeg_filterbank_scope="both",
+                 riem_weight_decay=1e-2, riem_dropout=0.5, riem_head_fit="sgd",
+                 eeg_filterbank="none", eeg_filterbank_scope="both",
                  fnirs_chroma_split="none",
                  bandtok_d_model=32, bandtok_heads=4, bandtok_norm="none"):
         super().__init__()
@@ -1548,6 +1602,10 @@ class TSFNet(nn.Module):
         # y_pred <- (1-b) * normalise(y_deep) + b * y_riem with a FIXED blend b (the pre-registered 0.5 of the
         # offline late fusion), plus a separate CE term lambda_riem * L(y_riem) so the head is a proper
         # classifier. The features travel in the x_chan batch slot (like ERP / LaBraM).
+        if riem_head_fit not in ("sgd", "lr", "lr_all"):
+            raise ValueError(f"riem_head_fit must be 'sgd', 'lr' or 'lr_all', got {riem_head_fit!r}")
+        if riem_head_fit != "sgd" and riem_branch != "member":
+            raise ValueError("riem_head_fit != 'sgd' needs riem_branch='member'")
         if riem_branch not in ("none", "member"):
             raise ValueError(f"riem_branch must be 'none' or 'member', got {riem_branch!r}")
         if riem_branch == "member":
@@ -2134,7 +2192,12 @@ class TSFNet(nn.Module):
         # priority-RIEM: built LAST, after every other module, so each baseline parameter keeps the
         # initial value it has without this branch (rule 6); 'none' constructs nothing.
         if riem_branch == "member":
+            # the gradient head is ALWAYS constructed, so the torch RNG stream after construction is identical
+            # whatever riem_head_fit is; the closed-form head replaces it afterwards (rule 6, RNG-neutral)
             self.riem_head = RiemHead(riem_dim, num_classes, dropout=riem_dropout)
+            if riem_head_fit != "sgd":
+                self.riem_head = RiemLRHead(riem_dim, num_classes)
+        self.riem_head_fit = riem_head_fit
 
     def _apply_fnirs_input_gate(self, x_fnirs):
         """priority-FNIRSGATE: soft (0,2)-bounded multiplicative gate over the
@@ -4309,7 +4372,7 @@ def run_subject_cross_session(subject_dir, subject_id, device="cuda" if torch.cu
                                fusion_fnirs_inject="none", erp_branch="none",
                                egta_pcc_lambda=0.0, cafe_pcc_mode="signed",
                                riem_branch="none", riem_blend=0.5, riem_lambda=0.2, riem_weight_decay=1e-2,
-                               riem_dropout=0.5,
+                               riem_dropout=0.5, riem_head_fit="sgd",
                                eeg_filterbank="none", eeg_filterbank_scope="both",
                                fnirs_chroma_split="none",
                                bandtok_d_model=32, bandtok_heads=4, bandtok_norm="none",
@@ -4748,6 +4811,7 @@ def run_subject_cross_session(subject_dir, subject_id, device="cuda" if torch.cu
                         egta_pcc_lambda=egta_pcc_lambda, cafe_pcc_mode=cafe_pcc_mode,
                         riem_branch=riem_branch, riem_blend=riem_blend, riem_lambda=riem_lambda,
                         riem_weight_decay=riem_weight_decay, riem_dropout=riem_dropout,
+                        riem_head_fit=riem_head_fit,
                         riem_dim=(int(full.channels.shape[1]) if riem_branch != "none" else 0),
                         eeg_filterbank=eeg_filterbank, eeg_filterbank_scope=eeg_filterbank_scope,
                         fnirs_chroma_split=fnirs_chroma_split,
@@ -4815,6 +4879,15 @@ def run_subject_cross_session(subject_dir, subject_id, device="cuda" if torch.cu
                 model.load_state_dict(_sd, strict=True)
                 if _announce:
                     print(f"  [pretrained] {subject_id} test session {test_session}: starts from {_ck}")
+        if riem_branch == "member" and riem_head_fit != "sgd":
+            # priority-RIEMFIT: fit the member on this fold's TRAINING windows only ('lr'), or on train+val
+            # windows ('lr_all', the offline member's exact recipe; exploratory: val windows then also
+            # inform the head that checkpoint selection scores). Never test windows.
+            _fit_idx = train_idx if riem_head_fit == "lr" else np.concatenate([train_idx, val_idx])
+            model.riem_head.fit(full.channels[_fit_idx], labels_np[_fit_idx])
+            if test_session == sorted(np.unique(session_ids))[0]:
+                print(f"  [riem_head_fit] {riem_head_fit!r}: closed-form StandardScaler + LogisticRegression(C=0.1) "
+                      f"on {len(_fit_idx)} training windows, frozen buffers (priority-RIEMFIT)")
         ckpt_path = os.path.join(results_dir, f"{subject_id}_session{test_session}_best.pt")
         active_focal_gamma = focal_gamma if class_weighting_scheme == "focal" else None
         if fnirs_chroma_mode != "both" and test_session == sorted(np.unique(session_ids))[0]:
