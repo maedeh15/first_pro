@@ -111,7 +111,7 @@ def fold_rows(sid, s, Pdeep_seeds, Pe, y, tid):
     return rows
 
 
-def run(data, post_dir, multiband=True, subjects=None, verbose=True):
+def run(data, post_dir, multiband=True, subjects=None, verbose=True, save_member=None):
     files = sorted(glob.glob(os.path.join(post_dir, "*_session*.npz")))
     if not files:
         raise SystemExit("no *_session*.npz in --posteriors-dir (run ensemble_eval.py --save-posteriors)")
@@ -142,6 +142,10 @@ def run(data, post_dir, multiband=True, subjects=None, verbose=True):
                 continue
             Pd = norm_rows(z["P_final"].astype(np.float64))
             Pe = eeg_posteriors(X, y, ses, s)
+            if save_member:                        # the offline member's own window posteriors, in the
+                os.makedirs(save_member, exist_ok=True)   # posteriors/ layout, for decompose_integrated --member
+                np.savez(os.path.join(save_member, f"{sid}_session{s}.npz"), P_final=np.asarray(Pe, dtype=np.float32)[None],
+                         y=z["y"], trial_ids=z["trial_ids"], pos_in_trial=z["pos_in_trial"])
             rows += fold_rows(sid, s, Pd, Pe, y[te], tid[te])
         if verbose:
             print(f"[{sid}] done ({len(by_sid[sid])} folds)", flush=True)
@@ -227,6 +231,14 @@ def self_test():
                      trial_ids=tid[m], pos_in_trial=np.zeros(m.sum(), np.int32),
                      P_final=P, P_eeg=P, P_fusion=P, P_fnirs=P)
         rows, skipped = run(dd, pdir, multiband=False, verbose=False)
+        mdir = os.path.join(dd, "member_out")          # --save-member writes aligned, normalised window posteriors
+        run(dd, pdir, multiband=False, verbose=False, save_member=mdir)
+        for fn in sorted(os.listdir(mdir)):
+            zm, zd = np.load(os.path.join(mdir, fn)), np.load(os.path.join(pdir, fn))
+            assert np.array_equal(zm["y"], zd["y"]) and np.array_equal(zm["trial_ids"], zd["trial_ids"])
+            assert zm["P_final"].shape == (1, len(zd["y"]), 3), zm["P_final"].shape
+            assert np.allclose(zm["P_final"].sum(-1), 1.0, atol=1e-4)
+        print("[save-member] aligned with the deep folds, rows sum to 1 -> OK")
         ok = not skipped
         get = lambda deep, w: np.mean([r["win"] for r in rows if r["deep"] == deep and r["w"] == w])
         d0, d5, d1 = get("ensemble", 0.0), get("ensemble", 0.5), get("ensemble", 1.0)
@@ -263,6 +275,7 @@ def main():
                          "equivalent in check_riemannian_eeg / fusion_controls: 0.6760 vs 0.6765 fused window).")
     ap.add_argument("--subjects", nargs="+")
     ap.add_argument("--out", help="write per-fold rows to this csv")
+    ap.add_argument("--save-member", help="write the EEG member's own window posteriors to this folder")
     a = ap.parse_args()
     if a.self_test:
         raise SystemExit(self_test())
@@ -271,7 +284,8 @@ def main():
     global MEMBER_MODE
     MEMBER_MODE = a.mode
     print(f"EEG member: multiband={'no' if a.no_multiband else 'yes'}, domain mode = {a.mode}")
-    rows, skipped = run(a.data, a.posteriors_dir, multiband=not a.no_multiband, subjects=a.subjects)
+    rows, skipped = run(a.data, a.posteriors_dir, multiband=not a.no_multiband, subjects=a.subjects,
+                        save_member=a.save_member)
     for sid, why in skipped:
         print(f"[skipped] {sid}: {why}")
     if not rows:
