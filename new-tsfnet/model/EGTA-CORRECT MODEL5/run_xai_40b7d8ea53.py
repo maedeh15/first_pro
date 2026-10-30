@@ -39,6 +39,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from tsfnet_model_notebook import TSFNet, NBackDataset, _unpack_batch
+from xai_trunk import trunk_state                       # drops 'riem_head.*' so a member-branch checkpoint loads into the plain trunk
 from xai_extensions import (
     run_shap_analysis, plot_fusion_gating_weights,
     plot_efgf_gating_scalars, plot_efgf_attention_map,
@@ -163,7 +164,7 @@ for ck_path in ckpts:
         fnirs_temporal_align="egta",
         efgf_gate_mode="sigmoid",
     ).to(DEVICE)
-    model.load_state_dict(sd, strict=True)
+    model.load_state_dict(trunk_state(sd), strict=True)
     model.eval()
 
     subject_dir = os.path.join(DATA_ROOT, SUBJECT_ID)

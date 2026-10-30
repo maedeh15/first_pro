@@ -72,6 +72,7 @@ from scipy.stats import spearmanr, wilcoxon
 from torch.utils.data import DataLoader, Subset
 
 from tsfnet_model_notebook import TSFNet, NBackDataset, _unpack_batch, adapt_batchnorm_to_target
+from xai_trunk import trunk_state                       # drops 'riem_head.*' so a member-branch checkpoint loads into the plain trunk
 
 p = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter,
                             description=__doc__.split("USAGE")[0])
@@ -172,7 +173,7 @@ def subject_consensus(sid, results_dir, data_root, device, batch_size, adabn, ig
             continue
         model = build_model(n_segments).to(device)
         state = torch.load(ckpt_path, map_location=device)
-        model.load_state_dict(state, strict=True)
+        model.load_state_dict(trunk_state(state), strict=True)
         model.eval()
 
         test_idx = np.flatnonzero(full.session_ids == test_session)
