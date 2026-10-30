@@ -410,11 +410,12 @@ _arg_parser.add_argument("--riem-weight-decay", type=float, default=1e-2,
 _arg_parser.add_argument("--riem-dropout", type=float, default=0.5,
                           help="dropout on the Riemannian head's input features (0.5 = the existing behaviour; "
                                "the folder subtag changes only when this differs from 0.5)")
-_arg_parser.add_argument("--riem-head-fit", type=str, default="sgd", choices=["sgd", "lr", "lr_all"],
+_arg_parser.add_argument("--riem-head-fit", type=str, default="sgd", choices=["sgd", "lr", "lr_all", "post"],
                           help="how the Riemannian head is obtained: sgd = trained by gradient with the network "
                                "(default, unchanged); lr = closed-form logistic regression on the fold's training "
                                "windows, frozen; lr_all = same on train+val windows (the offline member's recipe, "
-                               "exploratory). Not an end-to-end layer: report as TSFNet + a separately fitted member.")
+                               "exploratory); post = trunk trained and selected with NO head (a plain run), then the head "
+                               "fitted on all training-session windows and blended. Not an end-to-end layer: report as TSFNet + a separately fitted member.")
 _arg_parser.add_argument("--egta-pcc-lambda", type=float, default=0.0,
                           help="priority-EGTAPCC: weight of STA-Net's L_egta = 1 - mean|PCC("
                                "F_fusion, F_fnirs(ta))| on the PURE EGTA-pooled fNIRS feature "

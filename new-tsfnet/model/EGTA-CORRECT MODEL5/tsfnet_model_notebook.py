@@ -1624,8 +1624,8 @@ class TSFNet(nn.Module):
         # y_pred <- (1-b) * normalise(y_deep) + b * y_riem with a FIXED blend b (the pre-registered 0.5 of the
         # offline late fusion), plus a separate CE term lambda_riem * L(y_riem) so the head is a proper
         # classifier. The features travel in the x_chan batch slot (like ERP / LaBraM).
-        if riem_head_fit not in ("sgd", "lr", "lr_all"):
-            raise ValueError(f"riem_head_fit must be 'sgd', 'lr' or 'lr_all', got {riem_head_fit!r}")
+        if riem_head_fit not in ("sgd", "lr", "lr_all", "post"):
+            raise ValueError(f"riem_head_fit must be 'sgd', 'lr', 'lr_all' or 'post', got {riem_head_fit!r}")
         if riem_head_fit != "sgd" and riem_branch != "member":
             raise ValueError("riem_head_fit != 'sgd' needs riem_branch='member'")
         if riem_branch not in ("none", "member"):
@@ -2516,9 +2516,13 @@ class TSFNet(nn.Module):
             if x_chan is None:
                 raise ValueError("TSFNet was built with riem_branch='member' but forward() received x_chan=None "
                                  "-- build the dataset with load_riem=True (build_riem_features.py first).")
-            y_riem = self.riem_head(x_chan)
-            y_deep = y_pred / (y_pred.sum(dim=-1, keepdim=True) + 1e-8)
-            y_pred = (1.0 - self.riem_blend) * y_deep + self.riem_blend * y_riem
+            if self.riem_head_fit == "post" and float(self.riem_head.fitted) != 1.0:
+                pass        # priority-RIEMPOST, training phase: the head does not exist yet, so the trunk is trained
+                            # and its checkpoint selected EXACTLY as a plain run (loss on its own y_pred, no blend)
+            else:
+                y_riem = self.riem_head(x_chan)
+                y_deep = y_pred / (y_pred.sum(dim=-1, keepdim=True) + 1e-8)
+                y_pred = (1.0 - self.riem_blend) * y_deep + self.riem_blend * y_riem
 
         aux = {
             "y_riem": y_riem,              # priority-RIEM: None unless riem_branch='member'
@@ -3781,8 +3785,12 @@ def train_one_fold(model, train_loader, val_loader, test_loader, device,
                     noise_aware_snr_db=None, noise_aware_prob=0.0,
                     swa_enabled=False, swa_start_epoch=None, swa_lr=None,
                     efgf_lambda=1.0, cafe_lambda=1.0,
-                    best_min_epoch=1, stage1_fixed_epochs=0):
+                    best_min_epoch=1, stage1_fixed_epochs=0, post_select_hook=None):
     """
+    post_select_hook: priority-RIEMPOST. None (default) = nothing, bit-exact. A callable(model) run once, right after the
+      final checkpoint is restored and BEFORE any test-set evaluation; the checkpoint is then re-saved so the file on disk is
+      the complete model that the reported numbers came from (a replay by ensemble_eval reproduces them).
+
     best_min_epoch / stage1_fixed_epochs: priority-BESTSEL (checkpoint selection).
       Diagnosis (baseline run60, 78 folds): validation uses ONE trial per class,
       so val_acc is a handful of discrete values; corr(val_acc, test_acc) = -0.04,
@@ -4310,6 +4318,9 @@ def train_one_fold(model, train_loader, val_loader, test_loader, device,
             log_fn(f"  [stage2] reached max epochs ({stage2_max_epochs}) without meeting loss target.")
 
     model.load_state_dict(torch.load(ckpt_path, map_location=device))
+    if post_select_hook is not None:
+        post_select_hook(model)
+        torch.save(model.state_dict(), ckpt_path)
     # priority-E4 / tta_mode: applied AFTER the final checkpoint is restored
     # and BEFORE any test-set evaluation, so (a) the on-disk checkpoint keeps
     # the unadapted, source-session statistics and stays reusable/comparable
@@ -4901,7 +4912,7 @@ def run_subject_cross_session(subject_dir, subject_id, device="cuda" if torch.cu
                 model.load_state_dict(_sd, strict=True)
                 if _announce:
                     print(f"  [pretrained] {subject_id} test session {test_session}: starts from {_ck}")
-        if riem_branch == "member" and riem_head_fit != "sgd":
+        if riem_branch == "member" and riem_head_fit in ("lr", "lr_all"):
             # priority-RIEMFIT: fit the member on this fold's TRAINING windows only ('lr'), or on train+val
             # windows ('lr_all', the offline member's exact recipe; exploratory: val windows then also
             # inform the head that checkpoint selection scores). Never test windows.
@@ -4910,6 +4921,17 @@ def run_subject_cross_session(subject_dir, subject_id, device="cuda" if torch.cu
             if test_session == sorted(np.unique(session_ids))[0]:
                 print(f"  [riem_head_fit] {riem_head_fit!r}: closed-form StandardScaler + LogisticRegression(C=0.1) "
                       f"on {len(_fit_idx)} training windows, frozen buffers (priority-RIEMFIT)")
+        _post_hook = None
+        if riem_branch == "member" and riem_head_fit == "post":
+            # priority-RIEMPOST: train and select the trunk with NO head (identical to a plain run), then fit the
+            # closed-form head on ALL windows of the training sessions (train + val; never the test session) and blend.
+            _all_fit_idx = np.concatenate([train_idx, val_idx])
+
+            def _post_hook(m, _idx=_all_fit_idx):
+                m.riem_head.fit(full.channels[_idx], labels_np[_idx])
+                if test_session == sorted(np.unique(session_ids))[0]:
+                    print(f"  [riem_head_fit] 'post': trunk selected without a head; closed-form head fitted afterwards on "
+                          f"{len(_idx)} training-session windows and blended (priority-RIEMPOST)")
         ckpt_path = os.path.join(results_dir, f"{subject_id}_session{test_session}_best.pt")
         active_focal_gamma = focal_gamma if class_weighting_scheme == "focal" else None
         if fnirs_chroma_mode != "both" and test_session == sorted(np.unique(session_ids))[0]:
@@ -4979,6 +5001,7 @@ def run_subject_cross_session(subject_dir, subject_id, device="cuda" if torch.cu
             normalize_ypred=normalize_ypred,
             no_decay_scalars=no_decay_scalars,
             stage2_stop_mode=stage2_stop_mode,
+            post_select_hook=_post_hook,
             **train_kwargs)
         fold_accs.append(acc)
         fold_kappas.append(kappa)
