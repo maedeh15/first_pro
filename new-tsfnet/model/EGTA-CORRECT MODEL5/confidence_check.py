@@ -25,12 +25,14 @@ from scipy.stats import wilcoxon
 EPS = 1e-12
 
 
-def load(d):
+def load(d, key="final"):
     out = {}
     for f in sorted(glob.glob(os.path.join(d, "*_session*.npz"))):
         z = np.load(f)
         sid, ses = os.path.basename(f)[:-4].split("_session")
-        P = z["P_final"].astype(np.float64)
+        if f"P_{key}" not in z:
+            raise SystemExit(f"{f} has no P_{key} (keys: {sorted(z.files)})")
+        P = z[f"P_{key}"].astype(np.float64)
         P = P / np.clip(P.sum(-1, keepdims=True), EPS, None)
         out[(sid, int(ses))] = (P, z["y"])
     if not out:
@@ -74,8 +76,8 @@ def fold_stats(Pd, Pm, y):
                 acc_f_dis=float((fused.argmax(1)[dis] == y[dis]).sum() / nd))
 
 
-def run(deep_dir, member_dir, seed_index=0):
-    D, M = load(deep_dir), load(member_dir)
+def run(deep_dir, member_dir, seed_index=0, deep_key="final", member_key="final"):
+    D, M = load(deep_dir, deep_key), load(member_dir, member_key)
     if set(D) != set(M):
         raise SystemExit(f"the two folders cover different folds, e.g. {sorted(set(D) ^ set(M))[:3]}")
     rows = {}
@@ -146,6 +148,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--deep", help="posteriors/ folder of the trunk (P_final), e.g. the seed-42 baseline")
     ap.add_argument("--member", help="posteriors/ folder of the offline member (late_fusion_riemann.py --save-member)")
+    ap.add_argument("--deep-key", default="final", help="posterior key of the trunk: final (a plain run) or deep (a member-branch run)")
+    ap.add_argument("--member-key", default="final", help="posterior key of the member: final (offline folder) or riem (in-network head)")
     ap.add_argument("--seed-index", type=int, default=0, help="which seed of the trunk folder to use (default the first)")
     ap.add_argument("--self-test", action="store_true")
     a = ap.parse_args()
@@ -153,7 +157,7 @@ def main():
         return self_test()
     if not (a.deep and a.member):
         sys.exit("need --deep and --member")
-    report(*run(a.deep, a.member, a.seed_index))
+    report(*run(a.deep, a.member, a.seed_index, a.deep_key, a.member_key))
 
 
 if __name__ == "__main__":
