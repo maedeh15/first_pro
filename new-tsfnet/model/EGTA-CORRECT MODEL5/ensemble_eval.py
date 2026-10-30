@@ -161,7 +161,7 @@ p.add_argument("--erp-branch", type=str, default="none", choices=["none", "eeg",
 p.add_argument("--riem-branch", type=str, default="none", choices=["none", "member"],
                help="priority-RIEM: must match the training flag (adds the Riemannian member head; needs "
                     "{sid}_eeg_riem.npy from build_riem_features.py).")
-p.add_argument("--riem-head-fit", type=str, default="sgd", choices=["sgd", "lr", "lr_all", "post"],
+p.add_argument("--riem-head-fit", type=str, default="sgd", choices=["sgd", "lr", "lr_all", "post", "post_oof"],
                 help="must match the training run: the closed-form head keeps its fitted scaler and weights in buffers")
 p.add_argument("--attach-riem-head", action="store_true", default=False,
                 help="the checkpoints are from a PLAIN run (no Riemannian branch): build the single integrated model "

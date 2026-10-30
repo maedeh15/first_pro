@@ -1499,6 +1499,28 @@ class RiemLRHead(nn.Module):
         return F.softmax(z @ self.W.t() + self.b, dim=-1)
 
 
+def oof_head_posteriors(F, y, sessions, C=0.1):
+    """priority-RIEMOOF: out-of-SESSION posteriors of the closed-form head for training-session windows.
+
+    F (n, D) features, y (n,) labels, sessions (n,) session ids -- all windows of the TRAINING sessions of one fold. For
+    each session s, StandardScaler + LogisticRegression(C) is fitted on the windows of the other training sessions and
+    scores session s. Returns (n, 3). Never touches the held-out test session (the caller passes none of its windows)."""
+    from sklearn.linear_model import LogisticRegression
+    F = np.asarray(F, dtype=np.float64); y = np.asarray(y); sessions = np.asarray(sessions)
+    uniq = np.unique(sessions)
+    if len(uniq) < 2:
+        raise ValueError("out-of-session posteriors need at least two training sessions")
+    out = np.zeros((len(F), 3))
+    for s in uniq:
+        te = sessions == s
+        sc = StandardScaler().fit(F[~te])
+        clf = LogisticRegression(C=C, max_iter=3000).fit(sc.transform(F[~te]), y[~te])
+        if list(clf.classes_) != [0, 1, 2]:
+            raise ValueError(f"fitting sessions miss a class: {list(clf.classes_)}")
+        out[te] = clf.predict_proba(sc.transform(F[te]))
+    return out
+
+
 def load_with_attached_riem_head(model, state_dict, X_fit, y_fit):
     """priority-ATTACH: build ONE model from a trunk trained WITHOUT any Riemannian branch plus a closed-form head.
 
@@ -1624,8 +1646,8 @@ class TSFNet(nn.Module):
         # y_pred <- (1-b) * normalise(y_deep) + b * y_riem with a FIXED blend b (the pre-registered 0.5 of the
         # offline late fusion), plus a separate CE term lambda_riem * L(y_riem) so the head is a proper
         # classifier. The features travel in the x_chan batch slot (like ERP / LaBraM).
-        if riem_head_fit not in ("sgd", "lr", "lr_all", "post"):
-            raise ValueError(f"riem_head_fit must be 'sgd', 'lr', 'lr_all' or 'post', got {riem_head_fit!r}")
+        if riem_head_fit not in ("sgd", "lr", "lr_all", "post", "post_oof"):
+            raise ValueError(f"riem_head_fit must be 'sgd', 'lr', 'lr_all', 'post' or 'post_oof', got {riem_head_fit!r}")
         if riem_head_fit != "sgd" and riem_branch != "member":
             raise ValueError("riem_head_fit != 'sgd' needs riem_branch='member'")
         if riem_branch not in ("none", "member"):
@@ -1647,6 +1669,7 @@ class TSFNet(nn.Module):
                 raise ValueError("riem_branch='member' requires norm_mode='batch' (its BatchNorm1d must not be "
                                  "converted to GroupNorm)")
         self.riem_mode = riem_branch
+        self.riem_dim = int(riem_dim)
         self.riem_blend = float(riem_blend)
         self.riem_lambda = float(riem_lambda)
         self.riem_weight_decay = float(riem_weight_decay)
@@ -2520,7 +2543,19 @@ class TSFNet(nn.Module):
                 pass        # priority-RIEMPOST, training phase: the head does not exist yet, so the trunk is trained
                             # and its checkpoint selected EXACTLY as a plain run (loss on its own y_pred, no blend)
             else:
-                y_riem = self.riem_head(x_chan)
+                if self.riem_head_fit == "post_oof":
+                    if float(self.riem_head.fitted) != 1.0:
+                        # priority-RIEMOOF, training phase: the head's posterior is a CONSTANT carried in the three
+                        # columns after the features -- fitted on the OTHER training session, so it is honest on the
+                        # window it scores (a head fitted on these windows would be right on all of them and teach
+                        # the trunk nothing). After the hook the real head replaces it.
+                        if x_chan.shape[1] != self.riem_dim + 3:
+                            raise ValueError(f"post_oof training expects {self.riem_dim + 3} columns, got {x_chan.shape[1]}")
+                        y_riem = x_chan[:, self.riem_dim:self.riem_dim + 3]
+                    else:
+                        y_riem = self.riem_head(x_chan[:, :self.riem_dim])
+                else:
+                    y_riem = self.riem_head(x_chan)
                 y_deep = y_pred / (y_pred.sum(dim=-1, keepdim=True) + 1e-8)
                 y_pred = (1.0 - self.riem_blend) * y_deep + self.riem_blend * y_riem
 
@@ -4845,7 +4880,7 @@ def run_subject_cross_session(subject_dir, subject_id, device="cuda" if torch.cu
                         riem_branch=riem_branch, riem_blend=riem_blend, riem_lambda=riem_lambda,
                         riem_weight_decay=riem_weight_decay, riem_dropout=riem_dropout,
                         riem_head_fit=riem_head_fit,
-                        riem_dim=(int(full.channels.shape[1]) if riem_branch != "none" else 0),
+                        riem_dim=(int(getattr(full, "_riem_base_dim", full.channels.shape[1])) if riem_branch != "none" else 0),
                         eeg_filterbank=eeg_filterbank, eeg_filterbank_scope=eeg_filterbank_scope,
                         fnirs_chroma_split=fnirs_chroma_split,
                         bandtok_d_model=bandtok_d_model, bandtok_heads=bandtok_heads,
@@ -4922,13 +4957,29 @@ def run_subject_cross_session(subject_dir, subject_id, device="cuda" if torch.cu
                 print(f"  [riem_head_fit] {riem_head_fit!r}: closed-form StandardScaler + LogisticRegression(C=0.1) "
                       f"on {len(_fit_idx)} training windows, frozen buffers (priority-RIEMFIT)")
         _post_hook = None
-        if riem_branch == "member" and riem_head_fit == "post":
+        if riem_branch == "member" and riem_head_fit == "post_oof":
+            # priority-RIEMOOF: append the out-of-session head posteriors (3 columns) to the feature tensor of this
+            # fold's training-session windows; test windows get zeros and never use them (the head replaces them).
+            if not hasattr(full, "_riem_base_dim"):
+                full._riem_base_dim = int(full.channels.shape[1])
+            _bd = full._riem_base_dim
+            _base = full.channels[:, :_bd]
+            _oi = np.concatenate([train_idx, val_idx])
+            _P = oof_head_posteriors(_base[_oi].numpy(), labels_np[_oi], session_ids[_oi])
+            _extra = torch.zeros(len(_base), 3)
+            _extra[torch.as_tensor(_oi)] = torch.as_tensor(_P, dtype=torch.float32)
+            full.channels = torch.cat([_base, _extra], dim=1)
+            _oof_acc = float((_P.argmax(1) == labels_np[_oi]).mean())
+            if test_session == sorted(np.unique(session_ids))[0]:
+                print(f"  [riem_head_fit] 'post_oof': out-of-session head posteriors on {len(_oi)} training windows "
+                      f"(accuracy {_oof_acc:.3f}, an honest estimate of the head the trunk is trained against)")
+        if riem_branch == "member" and riem_head_fit in ("post", "post_oof"):
             # priority-RIEMPOST: train and select the trunk with NO head (identical to a plain run), then fit the
             # closed-form head on ALL windows of the training sessions (train + val; never the test session) and blend.
             _all_fit_idx = np.concatenate([train_idx, val_idx])
 
             def _post_hook(m, _idx=_all_fit_idx):
-                m.riem_head.fit(full.channels[_idx], labels_np[_idx])
+                m.riem_head.fit(full.channels[_idx][:, :m.riem_dim], labels_np[_idx])
                 if test_session == sorted(np.unique(session_ids))[0]:
                     print(f"  [riem_head_fit] 'post': trunk selected without a head; closed-form head fitted afterwards on "
                           f"{len(_idx)} training-session windows and blended (priority-RIEMPOST)")
