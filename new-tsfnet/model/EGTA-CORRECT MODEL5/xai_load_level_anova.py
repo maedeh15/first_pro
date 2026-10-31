@@ -182,7 +182,7 @@ def subject_profile(sid, results_dir, data_root, device, batch_size, adabn):
             continue
         test_idx = np.flatnonzero(full.session_ids == test_session)
         signals = collect_fold_signals(full, test_idx, ckpt_path, device, batch_size, adabn)
-        labels_w = full.labels[test_idx]
+        labels_w = full.labels[test_idx].numpy()   # a torch Long tensor cannot be averaged (mean() needs a float dtype)
         trial_ids_w = full.trial_ids[test_idx]
         trials, lab_per_trial = trial_mean(labels_w, trial_ids_w)
         lab_per_trial = np.round(lab_per_trial).astype(int)
