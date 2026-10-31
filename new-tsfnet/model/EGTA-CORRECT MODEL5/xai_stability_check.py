@@ -263,7 +263,7 @@ def main():
 
     ids = sorted(per_subject)
     if len(ids) < 6:
-        sys.exit("ERROR: fewer than 6 subjects produced usable cross-seed data.")
+        sys.exit(f"ERROR: only {len(ids)} subject(s) usable; fewer than 6 subjects produced usable cross-seed data.. The group tests (Wilcoxon, bootstrap) need at least 6 subjects: run with --subjects 1-6 or more (the per-subject lines above are already valid).")
 
     rhos = np.array([per_subject[s]["mean_pairwise_rho"] for s in ids])
     iccs = np.array([per_subject[s]["icc_2_1"] for s in ids])

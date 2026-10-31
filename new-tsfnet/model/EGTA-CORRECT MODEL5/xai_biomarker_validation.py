@@ -280,7 +280,7 @@ def main():
             print(f"[{sid}] SKIP -- {type(e).__name__}: {e}")
     ids = sorted(s for s in all_rows if all_rows[s])
     if len(ids) < 6:
-        sys.exit("ERROR: fewer than 6 subjects processed -- check --results-dir / --data-root.")
+        sys.exit(f"ERROR: only {len(ids)} subject(s) processed, and the group tests need at least 6: re-run with --subjects 1-6 or more (or check --results-dir / --data-root).")
 
     res = {sig: {} for sig in SIGNALS}
     for s in ids:

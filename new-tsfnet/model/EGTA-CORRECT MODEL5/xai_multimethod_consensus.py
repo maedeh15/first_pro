@@ -247,7 +247,7 @@ def main():
 
     ids = sorted(per_subject)
     if len(ids) < 6:
-        sys.exit("ERROR: fewer than 6 subjects produced usable consensus data.")
+        sys.exit(f"ERROR: only {len(ids)} subject(s) usable; fewer than 6 subjects produced usable consensus data.. The group tests (Wilcoxon, bootstrap) need at least 6 subjects: run with --subjects 1-6 or more (the per-subject lines above are already valid).")
 
     hline = "=" * 100
     print("\n" + hline)
