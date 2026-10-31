@@ -85,6 +85,14 @@ p.add_argument("--ig-steps", type=int, default=20)
 p.add_argument("--adabn", action="store_true", default=True)
 p.add_argument("--no-adabn", dest="adabn", action="store_false")
 p.add_argument("--n-bootstrap", type=int, default=2000)
+p.add_argument("--seed", type=int, default=0, help="seed of the bootstrap (it used the global, unseeded numpy RNG before)")
+p.add_argument("--target", choices=["true", "pred"], default="true",
+               help="class explained: the TRUE label (default, as before) or the class the model PREDICTS on the real input "
+                    "(an explanation of the model's own decision; the class is fixed from the real input, not re-chosen along the IG path)")
+p.add_argument("--objective", choices=["prob", "logprob"], default="prob",
+               help="prob (default, as before; saturates when the model is confident) or log-probability (does not saturate)")
+p.add_argument("--rho-threshold", type=float, default=0.5,
+               help="Spearman agreement counted as 'strong' in READING. It was a hard-coded 0.5; state it BEFORE looking at the result.")
 p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
 ARGS = p.parse_args()
 
@@ -114,6 +122,12 @@ def true_class_prob(y_pred, y):
     return y_pred.gather(1, y.view(-1, 1)).squeeze(1)
 
 
+def target_value(y_pred, cls):
+    """quantity differentiated by saliency / IG: P(cls) or log P(cls), per --objective"""
+    p = y_pred.gather(1, cls.view(-1, 1)).squeeze(1)
+    return p if ARGS.objective == "prob" else torch.log(p.clamp_min(1e-8))
+
+
 def per_segment_mean(vol):
     """vol: (B, S, H, W, T, C) -> (B, S), mean |.| over the non-segment dims."""
     return vol.abs().mean(dim=tuple(range(2, vol.dim())))
@@ -122,13 +136,14 @@ def per_segment_mean(vol):
 def three_methods(model, x_eeg, x_fnirs, y, x_conn, x_chan, ig_steps):
     # 1. attention (no grad needed, just read the module's own stored weights)
     with torch.no_grad():
-        model(x_eeg, x_fnirs, x_conn, x_chan)
+        y_pred0 = model(x_eeg, x_fnirs, x_conn, x_chan)[3]
         attn = model.cafe._last_egta_weights.mean(dim=1)   # (B, S)
+    cls = y if ARGS.target == "true" else y_pred0.argmax(1)      # fixed ONCE, from the real input
 
     # 2. plain input-gradient saliency
     x_fnirs_g = x_fnirs.clone().requires_grad_(True)
     _, _, _, y_pred, _ = model(x_eeg, x_fnirs_g, x_conn, x_chan)
-    target = true_class_prob(y_pred, y).sum()
+    target = target_value(y_pred, cls).sum()
     grad = torch.autograd.grad(target, x_fnirs_g, retain_graph=False)[0]
     saliency = per_segment_mean(grad.detach())
 
@@ -139,7 +154,7 @@ def three_methods(model, x_eeg, x_fnirs, y, x_conn, x_chan, ig_steps):
         alpha = (step + 0.5) / ig_steps
         x_interp = (baseline + alpha * (x_fnirs - baseline)).clone().requires_grad_(True)
         _, _, _, y_pred_i, _ = model(x_eeg, x_interp, x_conn, x_chan)
-        target_i = true_class_prob(y_pred_i, y).sum()
+        target_i = target_value(y_pred_i, cls).sum()
         g = torch.autograd.grad(target_i, x_interp, retain_graph=False)[0]
         total_grad = total_grad + g.detach()
     avg_grad = total_grad / ig_steps
@@ -151,11 +166,14 @@ def three_methods(model, x_eeg, x_fnirs, y, x_conn, x_chan, ig_steps):
             "integrated_gradients": ig_vec.cpu().numpy()}
 
 
+_BOOT_RNG = np.random.RandomState(ARGS.seed)
+
+
 def bootstrap_ci(values, n_boot, alpha=0.05):
     if len(values) < 3:
         return float("nan"), float("nan")
     arr = np.array(values)
-    boots = [np.random.choice(arr, size=len(arr), replace=True).mean() for _ in range(n_boot)]
+    boots = [_BOOT_RNG.choice(arr, size=len(arr), replace=True).mean() for _ in range(n_boot)]
     lo, hi = np.percentile(boots, [100 * alpha / 2, 100 * (1 - alpha / 2)])
     return float(lo), float(hi)
 
@@ -191,7 +209,8 @@ def subject_consensus(sid, results_dir, data_root, device, batch_size, adabn, ig
             for b in range(B):
                 for pair in METHOD_PAIRS:
                     a, b_ = vecs[pair[0]][b], vecs[pair[1]][b]
-                    if np.allclose(a, a[0]) or np.allclose(b_, b_[0]):
+                    # scale-free constancy test (np.allclose's absolute tolerance 1e-8 would discard small probability gradients)
+                    if np.ptp(a) <= 1e-9 * (np.abs(a).max() + 1e-300) or np.ptp(b_) <= 1e-9 * (np.abs(b_).max() + 1e-300):
                         continue
                     rho, _ = spearmanr(a, b_)
                     if not np.isnan(rho):
@@ -263,7 +282,13 @@ def main():
     print("\nREADING")
     all_means = [summary["pairs"][f"{a} vs {b}"]["mean_rho"] for a, b in METHOD_PAIRS]
     all_ps = [summary["pairs"][f"{a} vs {b}"]["wilcoxon_p_greater"] for a, b in METHOD_PAIRS]
-    if all(m > 0.5 for m in all_means) and all(p < 0.05 for p in all_ps):
+    thr = ARGS.rho_threshold
+    frac = {f"{a} vs {b}": float(np.mean([np.mean(per_subject[s][(a, b)]) > thr for s in ids if per_subject[s][(a, b)]])) for a, b in METHOD_PAIRS}
+    print(f"  threshold for 'strong' agreement: rho > {thr} (set with --rho-threshold; state it before looking). Fraction of subjects above it: "
+          + "; ".join(f"{k} {v:.2f}" for k, v in frac.items()))
+    print(f"  target = {ARGS.target} label, objective = {ARGS.objective}; the Wilcoxon test is one-sided (rho>0) and with ~26 subjects it is passed by "
+          f"almost any positive correlation, so the MAGNITUDE and the fraction above threshold are the informative numbers.")
+    if all(m > thr for m in all_means) and all(p < 0.05 for p in all_ps):
         print("  All three architecturally-independent methods (a LEARNED attention weight and two POST-HOC "
               "gradient methods, one local and one path-integrated) agree STRONGLY on which fNIRS segments "
               "matter, and each pairwise agreement is statistically significant. This is a form of "

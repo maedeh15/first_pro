@@ -119,6 +119,43 @@ def cosine(a, b):
     return float(a @ b / (np.linalg.norm(a) * np.linalg.norm(b) + 1e-30))
 
 
+def haufe_pattern(Z, w):
+    """Haufe et al. 2014 activation pattern of the linear score s = Z @ w: a = cov(Z, s) / var(s).
+    Weights can be large on a feature that carries NO class information (a suppressor that cancels noise shared with another feature);
+    the pattern cannot, because it is the covariance of each feature with the score. Z: (n, D) standardised training windows."""
+    Zc = Z - Z.mean(0)
+    s = Zc @ w
+    return (Zc.T @ s) / ((len(s) - 1) * (s.var(ddof=1) + 1e-30))
+
+
+def auc_of_ranking(importance, truth):
+    """probability that a planted feature outranks a non-planted one (Mann-Whitney); 0.5 = chance"""
+    from scipy.stats import rankdata
+    r = rankdata(importance)
+    n1, n0 = int(truth.sum()), int((~truth).sum())
+    return float((r[truth].sum() - n1 * (n1 + 1) / 2) / (n1 * n0))
+
+
+def planted_benchmark(F, y, ses, delta, rng, n_plant=6, band=1, d_chan=28):
+    """GROUND-TRUTH recovery. Add a known load effect (delta x the feature's own std, along -1/0/+1 for 0-/2-/3-back) to n_plant random
+    DIAGONAL features of one band of the REAL feature matrix, refit the member on the training sessions, and ask how well the ranking by
+    |weight| and by |Haufe pattern| puts the planted features first (AUC). Everything else stays real, including its correlated noise."""
+    iu, nb, _ = layout(d_chan)
+    diag = np.flatnonzero(iu[0] == iu[1]) + band * nb
+    plant = rng.choice(diag, n_plant, replace=False)
+    g = np.where(y == 0, -1.0, np.where(y == 2, 1.0, 0.0))
+    Fp = F.copy()
+    Fp[:, plant] += delta * F[:, plant].std(0) * g[:, None]
+    truth = np.zeros(F.shape[1], dtype=bool); truth[plant] = True
+    aw, ap = [], []
+    for t in np.unique(ses):
+        tr = ses != t
+        h = fit_member(Fp[tr], y[tr]); c = contrast(h["W"])
+        Z = (Fp[tr] - h["mean"]) / h["scale"]
+        aw.append(auc_of_ranking(np.abs(c), truth)); ap.append(auc_of_ranking(np.abs(haufe_pattern(Z, c)), truth))
+    return float(np.mean(aw)), float(np.mean(ap))
+
+
 def deletion_tests(head, Fte, yte, imp_channel, k=5, n_random=10, seed=0, d_chan=28):
     """accuracy after deleting (a) each band, (b) the top-k, bottom-k and random-k channels ranked by importance"""
     rng = np.random.RandomState(seed)
@@ -146,12 +183,13 @@ def run_subject(F, y, ses, tid, head_for_fold, n_null, rng, d_chan=28):
         te, tr = ses == t, ses != t
         head = head_for_fold(t, F[tr], y[tr])
         c = contrast(head["W"])
+        pat = haufe_pattern((F[tr] - head["mean"]) / head["scale"], c)
         base, bdel, top, bot, rnd = deletion_tests(head, F[te], y[te], channel_importance(c, d_chan).sum(0), d_chan=d_chan)
         nulls = []
         for _ in range(n_null):
             yp = block_permuted_labels(y[tr], ses[tr], tid[tr], rng)
             nulls.append(contrast(fit_member(F[tr], yp)["W"]))
-        rows.append(dict(session=int(t), W=head["W"], contrast=c, base=base, band_drop=bdel, top=top, bottom=bot, rand=rnd, nulls=nulls))
+        rows.append(dict(session=int(t), W=head["W"], contrast=c, pattern=pat, base=base, band_drop=bdel, top=top, bottom=bot, rand=rnd, nulls=nulls))
     return rows
 
 
@@ -183,6 +221,10 @@ def summarise(per_subject, names=None, frontal=None, parietal=None, d_chan=28):
     out["base"] = np.array([np.mean([r["base"] for r in per_subject[s]]) for s in subs])
     out["channel_importance"] = np.array([np.mean([channel_importance(r["contrast"], d_chan) for r in per_subject[s]], axis=0) for s in subs])
     out["subjects"] = subs
+    out["pattern_band_share"] = np.array([np.mean([band_importance(r["pattern"], d_chan) for r in per_subject[s]], axis=0) for s in subs]).mean(0)
+    from scipy.stats import spearmanr
+    out["rank_agree"] = np.array([np.mean([spearmanr(channel_importance(r["contrast"], d_chan).sum(0), channel_importance(r["pattern"], d_chan).sum(0))[0]
+                                           for r in per_subject[s]]) for s in subs])
     # pre-stated literature checks on the diagonal of the load contrast (names required)
     if names is not None and frontal and parietal:
         iu = layout(d_chan)[0]; nb = layout(d_chan)[1]; dg = np.flatnonzero(iu[0] == iu[1])
@@ -221,6 +263,11 @@ def report(o):
         print("\n  PRE-STATED LITERATURE CHECKS (diagonal of the load contrast, one-sided Wilcoxon over subjects, Holm over the two):")
         print(f"    H1 frontal theta increases with load : mean {L['theta_frontal'].mean():+.4f}, positive in {int((L['theta_frontal'] > 0).sum())}/{n}, p={L['p'][0]:.4f}")
         print(f"    H2 parietal alpha decreases with load: mean {L['alpha_parietal'].mean():+.4f}, negative in {int((L['alpha_parietal'] < 0).sum())}/{n}, p={L['p'][1]:.4f}")
+    print(f"\n  HAUFE ACTIVATION PATTERN of the same contrast (what each feature CARRIES, not what the classifier happens to weight):")
+    print("    band share of the pattern: " + "  ".join(f"{nm} {100 * o['pattern_band_share'][b, 0]:.1f}%" for b, nm in enumerate(BANDS)))
+    ra = o["rank_agree"]
+    print(f"    channel ranking by weights vs by pattern: Spearman {ra.mean():+.3f} +/- {ra.std(ddof=1):.3f} across subjects "
+          f"(low = suppressor effects: weights and pattern tell different stories, prefer the pattern)")
     print("\n  Limits: whitening mixes electrodes (channel maps are approximate); coefficients rank standardised features, they are not physical effect")
     print("  sizes; the deletion test removes information from one fitted member and does not show the brain uses those features.")
 
@@ -263,6 +310,28 @@ def self_test():
     on = summarise(rows_n, d_chan=d)
     assert abs(on["top"].mean() - on["rand"].mean()) < 0.03, (on["top"].mean(), on["rand"].mean())
     print(f"[4] pure noise: top-5 vs random deletion differ by {on['top'].mean() - on['rand'].mean():+.3f} (must be ~0) -> no false causal claim")
+    # Haufe: a classic suppressor. Feature 0 = signal + noise n; feature 1 = n only. The best linear readout weights feature 1 NEGATIVELY
+    # to cancel n, so |weight| ranks feature 1 as important although it carries no class information; the pattern does not.
+    n = 4000
+    yy = rng.randint(0, 2, n).astype(float); noise = rng.randn(n)
+    X = np.c_[yy + noise, noise] + 0.0
+    X = np.c_[X, rng.randn(n, 6)]
+    Z = (X - X.mean(0)) / X.std(0)
+    from sklearn.linear_model import LogisticRegression
+    w = LogisticRegression(C=100.0, max_iter=2000).fit(Z, yy).coef_[0]
+    a = haufe_pattern(Z, w)
+    assert abs(w[1]) > 0.5 * abs(w[0]), (w[0], w[1])
+    assert abs(a[1]) < 0.5 * abs(a[0]), (a[0], a[1])
+    print(f"[5] suppressor: weights give the noise-only feature {abs(w[1]) / abs(w[0]):.2f}x the signal feature's weight; the pattern gives {abs(a[1]) / abs(a[0]):.2f}x")
+    # planted-effect benchmark on correlated-noise features: both rankings should beat chance, and the AUCs are valid probabilities
+    d6 = 6; nb6 = len(np.triu_indices(d6)[0]); D6 = 4 * nb6
+    L = rng.randn(D6, D6) * 0.35 + np.eye(D6)
+    Fb = rng.randn(len(y), D6) @ L
+    aw, ap = planted_benchmark(Fb, y, ses, delta=1.0, rng=np.random.RandomState(1), n_plant=3, band=1, d_chan=d6)
+    assert 0.5 < aw <= 1.0 and 0.5 < ap <= 1.0, (aw, ap)
+    aw0, ap0 = planted_benchmark(Fb, y, ses, delta=0.0, rng=np.random.RandomState(1), n_plant=3, band=1, d_chan=d6)
+    assert abs(aw0 - 0.5) < 0.2 and abs(ap0 - 0.5) < 0.2, (aw0, ap0)
+    print(f"[6] planted-effect benchmark: AUC weights {aw:.2f}, pattern {ap:.2f} with the effect; {aw0:.2f}/{ap0:.2f} with none (chance)")
     print("SELFTEST PASSED")
 
 
@@ -274,6 +343,9 @@ def main():
     ap.add_argument("--n-null", type=int, default=3, help="block-permutation refits per fold for the stability null (0 = skip)")
     ap.add_argument("--channel-names", default=None, help="text file with the 28 electrode names in data order (one per line or comma separated)")
     ap.add_argument("--out-dir", default=None)
+    ap.add_argument("--benchmark", action="store_true",
+                    help="ground-truth recovery: plant a known load effect in real features and score weights vs Haufe patterns (no checkpoints needed)")
+    ap.add_argument("--delta", type=float, default=0.3, help="planted effect in units of the feature's own std (default 0.3)")
     ap.add_argument("--self-test", action="store_true")
     a = ap.parse_args()
     if a.self_test:
@@ -288,6 +360,22 @@ def main():
     lo, hi = (a.subjects.split("-") + [a.subjects])[:2] if "-" in a.subjects else (a.subjects, a.subjects)
     ids = range(int(lo), int(hi) + 1)
     rng = np.random.RandomState(0)
+    if a.benchmark:
+        res = []
+        for i in ids:
+            sid = f"VP{i:03d}"; d = os.path.join(a.data_root, sid)
+            try:
+                F = np.load(os.path.join(d, f"{sid}_eeg_riem.npy")).astype(np.float64)
+                y = np.load(os.path.join(d, f"{sid}_labels.npy")); ses = np.load(os.path.join(d, f"{sid}_session_ids.npy"))
+            except OSError as e:
+                print(f"[{sid}] skipped: {e}"); continue
+            res.append(planted_benchmark(F, y, ses, a.delta, np.random.RandomState(i)))
+            print(f"[{sid}] AUC weights {res[-1][0]:.3f} | pattern {res[-1][1]:.3f}", flush=True)
+        r = np.array(res); d_ = r[:, 1] - r[:, 0]
+        p = 1.0 if not np.any(d_ != 0) else float(wilcoxon(r[:, 0], r[:, 1]).pvalue)
+        print(f"\nPLANTED-EFFECT RECOVERY (delta={a.delta} sd, 6 diagonal theta features, real covariance structure), {len(r)} subjects")
+        print(f"  AUC |weight| {r[:, 0].mean():.3f} | AUC |pattern| {r[:, 1].mean():.3f} | pattern minus weight {d_.mean():+.3f}, better in {int((d_ > 0).sum())}/{len(d_)}, p={p:.4f}   (0.5 = chance, 1 = perfect)")
+        return
     per = {}
     for i in ids:
         sid = f"VP{i:03d}"; d = os.path.join(a.data_root, sid)

@@ -193,6 +193,16 @@ def main():
         return self_test()
     if a.integrated:
         deep, member = load(a.integrated, "deep"), load(a.integrated, "riem")
+        try:
+            fin = load(a.integrated, "final")
+        except SystemExit:
+            fin = None
+        if fin is not None:
+            # (1-b)*P_deep + b*P_riem must reproduce the model's own P_final, or --w differs from the blend the model was run with
+            worst = max(float(np.abs((1 - a.w) * deep[k][0] + a.w * member[k][0] - fin[k][0]).max()) for k in deep)
+            if worst > 1e-4:
+                sys.exit(f"(1-w)*P_deep + w*P_riem differs from P_final by up to {worst:.2e}: wrong --w, or a stale posteriors folder")
+            print(f"identity (1-w)*P_deep + w*P_riem == P_final verified (max |diff| {worst:.1e})")
     elif a.deep_dir and a.member_dir:
         deep, member = load(a.deep_dir, "final"), load(a.member_dir, "final")
     else:

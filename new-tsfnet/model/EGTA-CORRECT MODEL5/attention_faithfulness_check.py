@@ -98,6 +98,11 @@ def parse_subjects(spec):
     return [f"VP{i:03d}" for i in out]
 
 
+def _is_constant(v):
+    """scale-free: np.allclose's absolute tolerance (1e-8) would call a vector of tiny probability changes constant"""
+    return np.ptp(v) <= 1e-9 * (np.abs(v).max() + 1e-300)
+
+
 def build_model(n_segments):
     return TSFNet(num_classes=3, fusion_combination="paper_mean",
                   fnirs_num_segments=n_segments, fnirs_temporal_align="egta",
@@ -133,7 +138,7 @@ def egta_faithfulness(model, x_eeg, x_fnirs, y, x_conn, x_chan, device):
     w_np, impact_np = w.cpu().numpy(), impact.cpu().numpy()
     rhos = []
     for b in range(B):
-        if np.allclose(impact_np[b], impact_np[b, 0]) or np.allclose(w_np[b], w_np[b, 0]):
+        if _is_constant(impact_np[b]) or _is_constant(w_np[b]):
             continue   # degenerate (no variation) -- correlation undefined, skip this sample
         rho, _ = spearmanr(w_np[b], impact_np[b])
         if not np.isnan(rho):
@@ -198,7 +203,7 @@ def efgf_faithfulness(model, x_eeg, x_fnirs, y, x_conn, x_chan, device, which="e
     rank_phi = np.array([3, 2, 1, 0])
     rhos = []
     for b in range(B):
-        if np.allclose(bin_impact[b], bin_impact[b, 0]):
+        if _is_constant(bin_impact[b]):
             continue
         rho, _ = spearmanr(rank_phi, bin_impact[b])
         if not np.isnan(rho):

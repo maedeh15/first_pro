@@ -59,3 +59,20 @@ version, and whether the same subjects are hard for both. From saved posteriors 
 ## What was considered and NOT added
 - Haufe activation patterns for the member (would turn weights into scalp patterns; needs per-fold covariance bookkeeping through the whitening): listed as future work.
 - SHAP/Grad-CAM on the blended system: the member's input is a precomputed covariance feature, not the raw EEG, so gradients do not reach the signal through it.
+
+## Update after an external review (what was checked, what was changed)
+Reviewer points were checked against the code before acting; the ones that held are fixed below. One literature claim was verified at the abstract level
+([Ravindran & Contreras-Vidal 2023, Sci Rep](https://www.nature.com/articles/s41598-023-43871-8): sanity checks by weight and label randomisation, saliency
+not class- or model-specific, DeepLift most reliable); the other cited reviews were not checked and should be verified before they are cited.
+
+| point | held? | change |
+|---|---|---|
+| agreement between methods is not validity; add randomisation sanity checks | yes | NEW `xai_sanity_check.py` (cascading parameter randomisation, with a model-independent control that must stay at rho = 1) |
+| IG / saliency explain the TRUE label via a saturating probability | yes (`true_class_prob`) | `xai_multimethod_consensus.py --target {true,pred} --objective {prob,logprob}`; defaults unchanged; for `pred` the class is fixed once from the real input |
+| unseeded bootstrap, one-sided test, hard-coded 0.5 | yes | `--seed`, `--rho-threshold` (printed, with the fraction of subjects above it); text now says the one-sided test is passed by almost any positive rho |
+| `np.allclose` constancy test discards tiny gradients | found while testing | scale-free test in the consensus, sanity and faithfulness scripts |
+| `xai_component_attribution.py` did not check the blend identity | yes | `--integrated` now verifies (1-w) P_deep + w P_riem == P_final and refuses a wrong `--w` |
+| member weights can rank a suppressor feature as important; scalp maps need patterns | yes | Haufe activation patterns added to `xai_member_coefficients.py` (a synthetic suppressor shows weights 0.87x vs pattern 0.11x) |
+| ground-truth validation | yes | `xai_member_coefficients.py --benchmark` plants a known load effect in the REAL features and scores weights vs patterns (AUC). The same for the trunk (planting a signal in training AND test fNIRS and retraining) needs GPU runs and is NOT implemented |
+| DeepLift | not added | needs captum, not verified here; the cited study found it most reliable, so it is a reasonable next method |
+| randomised-LABEL variant of the sanity check | not added | needs one retraining per configuration |
