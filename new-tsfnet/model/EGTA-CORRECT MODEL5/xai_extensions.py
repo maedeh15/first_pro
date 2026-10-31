@@ -806,8 +806,8 @@ def run_group_level_tsne(model_builder, subject_checkpoints, subject_test_loader
 
     for i, key in enumerate(keys):
         model = model_builder().to(device)
-        from xai_trunk import trunk_state
-        model.load_state_dict(trunk_state(torch.load(subject_checkpoints[key], map_location=device)))
+        from xai_trunk import trunk_state, load_checkpoint
+        model.load_state_dict(trunk_state(load_checkpoint(subject_checkpoints[key], map_location=device)))
         model.eval()
 
         if loader_builder is not None:

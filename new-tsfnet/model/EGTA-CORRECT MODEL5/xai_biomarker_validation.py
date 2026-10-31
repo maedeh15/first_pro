@@ -84,7 +84,7 @@ from scipy.stats import binomtest, chi2, spearmanr, wilcoxon
 from torch.utils.data import DataLoader, Subset
 
 from tsfnet_model_notebook import TSFNet, NBackDataset, _unpack_batch, adapt_batchnorm_to_target
-from xai_trunk import trunk_state                       # drops 'riem_head.*' so a member-branch checkpoint loads into the plain trunk
+from xai_trunk import trunk_state, load_checkpoint                       # drops 'riem_head.*' so a member-branch checkpoint loads into the plain trunk
 
 p = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter,
                             description=__doc__.split("USAGE")[0])
@@ -169,7 +169,7 @@ def build_model(fnirs_num_segments):
 def collect_fold_signals(full, test_idx, ckpt_path, device, batch_size, adabn):
     n_segments = full.fnirs.shape[1] if full.fnirs.ndim == 5 else 21
     model = build_model(n_segments).to(device)
-    state = torch.load(ckpt_path, map_location=device)
+    state = load_checkpoint(ckpt_path, map_location=device)
     model.load_state_dict(trunk_state(state), strict=True)
     model.eval()
 

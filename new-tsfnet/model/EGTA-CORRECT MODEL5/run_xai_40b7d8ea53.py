@@ -39,7 +39,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from tsfnet_model_notebook import TSFNet, NBackDataset, _unpack_batch
-from xai_trunk import trunk_state                       # drops 'riem_head.*' so a member-branch checkpoint loads into the plain trunk
+from xai_trunk import trunk_state, load_checkpoint                       # drops 'riem_head.*' so a member-branch checkpoint loads into the plain trunk
 from xai_extensions import (
     run_shap_analysis, plot_fusion_gating_weights,
     plot_efgf_gating_scalars, plot_efgf_attention_map,
@@ -151,7 +151,7 @@ for ck_path in ckpts:
         continue
     test_session = int(m.group(1))
 
-    ckpt = torch.load(ck_path, map_location="cpu")
+    ckpt = load_checkpoint(ck_path, map_location="cpu")
     sd = ckpt.get("model_state_dict", ckpt) if isinstance(ckpt, dict) else ckpt
 
     # Architecture MUST match the accepted config exactly, or load_state_dict

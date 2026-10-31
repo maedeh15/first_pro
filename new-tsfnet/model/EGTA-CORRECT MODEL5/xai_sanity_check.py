@@ -264,7 +264,7 @@ def main():
         sys.exit("need --results-dir and --data-root")
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from tsfnet_model_notebook import TSFNet, NBackDataset, _unpack_batch, adapt_batchnorm_to_target
-    from xai_trunk import trunk_state
+    from xai_trunk import trunk_state, load_checkpoint
     out_dir = a.out_dir or os.path.join(a.results_dir, "xai_sanity_check"); os.makedirs(out_dir, exist_ok=True)
     per, ratios = {}, {}
     ML = method_list(a.deeplift)
@@ -278,7 +278,7 @@ def main():
                 print(f"[{sid} s{ts}] SKIP -- no checkpoint"); continue
             model = TSFNet(num_classes=3, fusion_combination="paper_mean", fnirs_num_segments=nseg, fnirs_temporal_align="egta",
                            efgf_gate_mode="sigmoid", efgf_gate_init=-2.0).to(a.device)
-            model.load_state_dict(trunk_state(torch.load(ck, map_location=a.device)), strict=True); model.eval()
+            model.load_state_dict(trunk_state(load_checkpoint(ck, map_location=a.device)), strict=True); model.eval()
             idx = np.flatnonzero(full.session_ids == ts)
             loader = DataLoader(Subset(full, idx), batch_size=a.batch_size, shuffle=False)
             readapt = (lambda m, loader=loader: adapt_batchnorm_to_target(m, loader, a.device, log_fn=lambda *x, **k: None)) if a.adabn else None

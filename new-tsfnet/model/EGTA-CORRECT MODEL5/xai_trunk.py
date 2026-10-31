@@ -17,6 +17,19 @@ What this means for interpretation (say it wherever the numbers are quoted):
 _ANNOUNCED = False
 
 
+def load_checkpoint(path, map_location="cpu"):
+    """torch.load without the 'weights_only=False' FutureWarning (and without unpickling arbitrary objects): a state_dict is tensors and
+    plain python containers, which weights_only=True loads. If a checkpoint holds something else, fall back to the old behaviour, loudly."""
+    import torch
+    try:
+        return torch.load(path, map_location=map_location, weights_only=True)
+    except TypeError:                                   # torch < 1.13 has no such argument
+        return torch.load(path, map_location=map_location)
+    except Exception as e:
+        print(f"  [xai] {path}: not loadable with weights_only=True ({type(e).__name__}); loading it the old way -- only do this for files you trust")
+        return torch.load(path, map_location=map_location, weights_only=False)
+
+
 def trunk_state(state):
     global _ANNOUNCED
     if isinstance(state, dict) and "model_state_dict" in state:
@@ -36,6 +49,11 @@ def self_test():
     assert list(out) == ["a.weight"]
     assert list(trunk_state({"model_state_dict": sd})) == ["a.weight"]
     assert list(trunk_state({"a.weight": 1})) == ["a.weight"]          # a plain checkpoint passes through untouched
+    import tempfile, os, warnings
+    f = os.path.join(tempfile.mkdtemp(), "c.pt"); torch.save({"a.weight": torch.ones(2)}, f)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")                                  # the FutureWarning must be gone
+        assert torch.equal(load_checkpoint(f)["a.weight"], torch.ones(2))
     print("xai_trunk self-test passed")
 
 

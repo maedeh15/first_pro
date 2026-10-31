@@ -98,7 +98,8 @@ def fit_member(F, y):
 
 def head_from_checkpoint(path):
     import torch
-    sd = torch.load(path, map_location="cpu")
+    from xai_trunk import load_checkpoint
+    sd = load_checkpoint(path, map_location="cpu")
     sd = sd.get("model_state_dict", sd)
     need = ("riem_head.W", "riem_head.b", "riem_head.mean", "riem_head.scale")
     if not all(k in sd for k in need):
