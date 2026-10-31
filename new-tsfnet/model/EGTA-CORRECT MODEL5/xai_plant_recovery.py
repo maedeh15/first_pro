@@ -160,8 +160,14 @@ def main():
         pct = np.array([res[s][m][0] for s in subs]); h1 = np.array([res[s][m][1] for s in subs]); h3 = np.array([res[s][m][2] for s in subs])
         pv = wilcoxon(pct - 0.5, alternative="greater").pvalue if len(subs) >= 6 and np.any(pct != 0.5) else float("nan")
         ph3 = wilcoxon(h3 - 3 / S, alternative="greater").pvalue if len(subs) >= 6 and np.any(h3 != 3 / S) else float("nan")
-        ok = pct.mean() >= a.recover_percentile and (np.isnan(ph3) or ph3 < 0.05)
-        tag = "CONTROL (weight-free)" if m == "input_magnitude" else ("RECOVERS" if ok else "does not recover")
+        enough = len(subs) >= 6
+        ok = pct.mean() >= a.recover_percentile and enough and ph3 < 0.05
+        if m == "input_magnitude":
+            tag = "CONTROL (weight-free)"
+        elif not enough and pct.mean() >= a.recover_percentile:
+            tag = "percentile reached, but the pre-registered hit@3 significance needs >= 6 subjects: NOT a verdict"
+        else:
+            tag = "RECOVERS" if ok else "does not recover"
         print(f"  {m:22} {pct.mean():16.3f} {h1.mean():8.3f} {h3.mean():8.3f}   {pv:12.4g}  {tag}")
     ck_, co_ = np.array([caus[s][0] for s in subs]), np.array([caus[s][1] for s in subs])
     d = ck_ - co_
