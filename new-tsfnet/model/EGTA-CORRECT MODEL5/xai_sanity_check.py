@@ -97,6 +97,17 @@ def method_list(deeplift=False):
     return METHODS[:3] + (("deeplift",) if deeplift else ()) + METHODS[3:]
 
 
+def captum_available():
+    """True if captum imports. Checked ONCE at start-up so a missing package costs seconds, not the minutes of attributions before it."""
+    try:
+        import captum  # noqa: F401
+        return True
+    except ImportError:
+        print("  [xai] --deeplift needs captum, which is not installed: continuing WITHOUT DeepLift. Install it with  pip install captum  (in this "
+              "same Python environment) and run again to include it.")
+        return False
+
+
 class _FnirsOnly(torch.nn.Module):
     """captum wants a module whose first argument is the attributed input; the other model inputs travel as additional args"""
     def __init__(self, model):
@@ -262,6 +273,8 @@ def main():
         return self_test()
     if not (a.results_dir and a.data_root):
         sys.exit("need --results-dir and --data-root")
+    if a.deeplift and not captum_available():
+        a.deeplift = False
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from tsfnet_model_notebook import TSFNet, NBackDataset, _unpack_batch, adapt_batchnorm_to_target
     from xai_trunk import trunk_state, load_checkpoint

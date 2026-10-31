@@ -26,7 +26,7 @@ import torch
 from torch.utils.data import DataLoader, Subset
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from xai_sanity_check import attributions, method_list, mean_rho, parse_subjects       # noqa: E402
+from xai_sanity_check import attributions, method_list, mean_rho, parse_subjects, captum_available       # noqa: E402
 
 
 def compare_models(model_a, model_b, batches, ig_steps, target, objective, deeplift=False):
@@ -90,6 +90,8 @@ def main():
         return self_test()
     if not (a.true_dir and a.shuffled_dir and a.data_root):
         sys.exit("need --true-dir, --shuffled-dir and --data-root")
+    if a.deeplift and not captum_available():
+        a.deeplift = False
     os.environ.pop("TSFNET_PLANT", None)
     from tsfnet_model_notebook import TSFNet, NBackDataset, _unpack_batch, adapt_batchnorm_to_target
     from xai_trunk import trunk_state, load_checkpoint

@@ -31,7 +31,7 @@ import torch
 from torch.utils.data import DataLoader, Subset
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from xai_sanity_check import attributions, method_list, parse_subjects        # noqa: E402
+from xai_sanity_check import attributions, method_list, parse_subjects, captum_available        # noqa: E402
 
 
 def rank_percentile(v, k):
@@ -110,6 +110,8 @@ def main():
         return self_test()
     if not (a.results_dir and a.data_root):
         sys.exit("need --results-dir and --data-root")
+    if a.deeplift and not captum_available():
+        a.deeplift = False
     os.environ["TSFNET_PLANT"] = a.plant                 # the dataset must contain exactly the planted data the network saw
     from tsfnet_model_notebook import TSFNet, NBackDataset, _unpack_batch, adapt_batchnorm_to_target, parse_plant_spec
     from xai_trunk import trunk_state, load_checkpoint
