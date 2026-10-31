@@ -76,3 +76,19 @@ not class- or model-specific, DeepLift most reliable); the other cited reviews w
 | ground-truth validation | yes | `xai_member_coefficients.py --benchmark` plants a known load effect in the REAL features and scores weights vs patterns (AUC). The same for the trunk (planting a signal in training AND test fNIRS and retraining) needs GPU runs and is NOT implemented |
 | DeepLift | not added | needs captum, not verified here; the cited study found it most reliable, so it is a reasonable next method |
 | randomised-LABEL variant of the sanity check | not added | needs one retraining per configuration |
+
+## Second update: ground-truth and randomisation tools (all written and unit-tested on CPU; none run on real data here)
+| tool | what it does | needs |
+|---|---|---|
+| `xai_sanity_check.py --deeplift` | adds DeepLift (captum 0.9.0, pip-installable here) with a completeness gate: mean\|delta\| / mean\|f(x)-f(baseline)\| must be < 0.1, because TSFNet's functional sigmoid/softmax fall back to the gradient rule inside captum | a trained checkpoint set |
+| `run_all_subjects.py --plant-fnirs "seg=K,strength=S"` | plants a known load-dependent response in fNIRS segment K of every window (patch, HRF, HbO +1 / HbR -0.5, -1/0/+1 by class); sets `TSFNET_PLANT`, default off and bit-identical | GPU, ~6 min/subject |
+| `xai_plant_recovery.py` | rank percentile / hit@1 / hit@3 of segment K per method, plus the causal check (zeroing K vs other segments) | the planted run |
+| `run_all_subjects.py --shuffle-train-labels SEED` | permutes the labels of whole blocks of the training sessions (test session keeps true labels); default off | GPU, ~6 min/subject |
+| `xai_label_randomisation.py` | rho between the explanations of a true-label and a shuffled-label network on the same held-out windows; refuses to interpret if the shuffled network is above chance | both runs |
+| `test_xai_groundtruth.py` | CPU tests of the planting and the block shuffle | none |
+Run order and pre-registered rules: `NEXT_RUN_xai_groundtruth.md`.
+
+### MSTFDN (not XAI)
+`mstfdn/MSTFDN_train_LOSO_3class.py` already implements the paper's cross-session training on its OWN preprocessing (`MSTFDN_PREPROCESSED_NBACK_V3`: 5 frequency bands x 28
+channels, fNIRS in channel space with HbO/HbR/HbT). It could not be fed with the TSFNet preprocessing as is, because TSFNet stores fNIRS interpolated on a 16x16 grid. What was
+missing was a seed: it now seeds everything with `SEED = 42` (set `SEED = None` to restore the old unseeded behaviour) and logs that the result is single-seed.

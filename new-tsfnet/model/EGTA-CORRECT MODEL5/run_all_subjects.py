@@ -407,6 +407,13 @@ _arg_parser.add_argument("--riem-lambda", type=float, default=0.2,
                           help="weight of the separate CE term on the Riemannian member's own posterior")
 _arg_parser.add_argument("--riem-weight-decay", type=float, default=1e-2,
                           help="weight decay of the Riemannian head only (analogue of LogisticRegression(C=0.1))")
+_arg_parser.add_argument("--plant-fnirs", type=str, default="",
+                          help="GROUND TRUTH for XAI: plant a known load-dependent response in one fNIRS segment of EVERY window, e.g. "
+                               "'seg=3,strength=1.0' (optional row,col,size). Default '' = data untouched. Sets TSFNET_PLANT, so scripts "
+                               "that build the dataset afterwards in the same process see the same data; any later script must set it too.")
+_arg_parser.add_argument("--shuffle-train-labels", type=int, default=-1,
+                          help="XAI data-randomisation test: permute the labels of whole blocks of the TRAINING sessions with this seed "
+                               "(the held-out session keeps its true labels, so its accuracy should fall to chance). -1 = off.")
 _arg_parser.add_argument("--riem-dropout", type=float, default=0.5,
                           help="dropout on the Riemannian head's input features (0.5 = the existing behaviour; "
                                "the folder subtag changes only when this differs from 0.5)")
@@ -866,6 +873,12 @@ RIEM_BLEND = SEED_ARGS.riem_blend
 RIEM_LAMBDA = SEED_ARGS.riem_lambda
 RIEM_WEIGHT_DECAY = SEED_ARGS.riem_weight_decay
 RIEM_DROPOUT = SEED_ARGS.riem_dropout
+PLANT_FNIRS = SEED_ARGS.plant_fnirs
+SHUFFLE_TRAIN_LABELS = None if SEED_ARGS.shuffle_train_labels < 0 else SEED_ARGS.shuffle_train_labels
+if PLANT_FNIRS:
+    os.environ["TSFNET_PLANT"] = PLANT_FNIRS
+else:
+    os.environ.pop("TSFNET_PLANT", None)       # a stale value from an earlier run in the same kernel must not leak into this one
 RIEM_HEAD_FIT = SEED_ARGS.riem_head_fit
 if RIEM_HEAD_FIT != "sgd" and SEED_ARGS.riem_branch != "member":
     raise SystemExit("--riem-head-fit lr / lr_all needs --riem-branch member")
@@ -1205,6 +1218,8 @@ _ERP_SUBTAG += f"_egtapcc{EGTA_PCC_LAMBDA:g}" if EGTA_PCC_LAMBDA > 0.0 else ""  
 _ERP_SUBTAG += "_cafepccabs" if CAFE_PCC_MODE == "abs" else ""   # priority-CAFEPCCABS
 _ERP_SUBTAG += (f"_riem{RIEM_BLEND:g}l{RIEM_LAMBDA:g}wd{RIEM_WEIGHT_DECAY:g}" if RIEM_BRANCH == "member" else "")   # priority-RIEM
 _ERP_SUBTAG += (f"do{RIEM_DROPOUT:g}" if (RIEM_BRANCH == "member" and RIEM_DROPOUT != 0.5) else "")   # priority-RIEMDROP
+_ERP_SUBTAG += (f"_plant{PLANT_FNIRS.replace('=', '').replace(',', '-')}" if PLANT_FNIRS else "")             # priority-PLANT
+_ERP_SUBTAG += (f"_shuf{SHUFFLE_TRAIN_LABELS}" if SHUFFLE_TRAIN_LABELS is not None else "")                    # priority-SHUFFLE
 _ERP_SUBTAG += (f"fit{RIEM_HEAD_FIT}" if (RIEM_BRANCH == "member" and RIEM_HEAD_FIT != "sgd") else "")   # priority-RIEMFIT
 _ERP_SUBTAG += (f"_fb{EEG_FILTERBANK}{'' if EEG_FILTERBANK_SCOPE == 'both' else '-eegonly'}"
                 if EEG_FILTERBANK != "none" else "")                                  # priority-FILTERBANK
@@ -1459,7 +1474,7 @@ with CrashSafeLogger(os.path.join(RESULTS_DIR_VARIANT, f"baseline_run_log_{RUN_T
                 cafe_pcc_mode=CAFE_PCC_MODE,                 # priority-CAFEPCCABS
                 riem_branch=RIEM_BRANCH, riem_blend=RIEM_BLEND,   # priority-RIEM: 'none' (default) = off
                 riem_lambda=RIEM_LAMBDA, riem_weight_decay=RIEM_WEIGHT_DECAY,
-                riem_dropout=RIEM_DROPOUT, riem_head_fit=RIEM_HEAD_FIT,                # priority-RIEMDROP: 0.5 (default) = unchanged
+                riem_dropout=RIEM_DROPOUT, riem_head_fit=RIEM_HEAD_FIT, shuffle_train_labels=SHUFFLE_TRAIN_LABELS,                # priority-RIEMDROP: 0.5 (default) = unchanged
                 egta_pcc_lambda=EGTA_PCC_LAMBDA,          # priority-EGTAPCC: 0.0 (default) = term off
                 eeg_filterbank=EEG_FILTERBANK,            # priority-FILTERBANK: "none" (default) = off
                 fnirs_chroma_split=FNIRS_CHROMA_SPLIT,    # priority-CHROMASPLIT: "none" (default) = off

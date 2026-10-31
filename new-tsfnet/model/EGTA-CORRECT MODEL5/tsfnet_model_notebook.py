@@ -3086,6 +3086,56 @@ def smote_oversample_fold(eeg, fnirs, labels, k_neighbors=5, random_state=None):
             torch.from_numpy(labels_aug).long())
 
 
+def block_shuffled_labels(labels_true, session_ids, trial_ids, idx, seed):
+    """priority-SHUFFLE: labels for the windows `idx` after permuting the class label of whole BLOCKS (windows of one trial move
+    together, class counts are preserved). Windows outside `idx` are not touched by the caller."""
+    key = session_ids[idx].astype(np.int64) * 100000 + trial_ids[idx].astype(np.int64)
+    ub, first = np.unique(key, return_index=True)
+    blk = labels_true[idx][first].copy()
+    np.random.RandomState(int(seed)).shuffle(blk)
+    m = dict(zip(ub.tolist(), blk.tolist()))
+    return np.array([m[k] for k in key.tolist()], dtype=labels_true.dtype)
+
+
+def parse_plant_spec(spec):
+    """'seg=3,strength=1.0[,row=6,col=6,size=4]' -> dict (priority-PLANT). Empty / None -> None (nothing planted)."""
+    if not spec:
+        return None
+    d = dict(seg=None, strength=1.0, row=6, col=6, size=4)
+    for part in str(spec).split(","):
+        k, v = part.split("=")
+        k = k.strip()
+        if k not in d:
+            raise ValueError(f"unknown plant key {k!r}; allowed: seg, strength, row, col, size")
+        d[k] = int(v) if k in ("seg", "row", "col", "size") else float(v)
+    if d["seg"] is None:
+        raise ValueError("plant spec needs seg=<segment index>")
+    return d
+
+
+def plant_fnirs(fnirs, labels, seg, strength, row=6, col=6, size=4):
+    """priority-PLANT: GROUND TRUTH for XAI. Add, IN PLACE, a known load-dependent hemodynamic response to ONE fNIRS segment:
+    a size x size spatial patch, an HRF-shaped time course (gamma-like, peak 1), HbO +1 / HbR -0.5, scaled by `strength` x the
+    array's std and by -1 / 0 / +1 for 0- / 2- / 3-back. fnirs: (N, S, H, W, T, C). A model trained on this data can use the
+    planted response, so an explanation method either points at `seg` or it does not."""
+    N, S, H, W, T, C = fnirs.shape
+    if not 0 <= seg < S:
+        raise ValueError(f"seg {seg} outside 0..{S - 1}")
+    if row + size > H or col + size > W:
+        raise ValueError("planted patch falls outside the grid")
+    t = np.arange(T, dtype=np.float64)
+    tau = max(T / 6.0, 1.0)
+    hrf = (t / tau) ** 2 * np.exp(-t / tau)
+    hrf = hrf / hrf.max()
+    chrom = np.array([1.0, -0.5])[:C]
+    g = np.where(labels == 0, -1.0, np.where(labels == 2, 1.0, 0.0))
+    patch = np.zeros((H, W)); patch[row:row + size, col:col + size] = 1.0
+    sig = (patch[:, :, None, None] * hrf[None, None, :, None] * chrom[None, None, None, :]).astype(np.float32)
+    amp = float(strength) * float(fnirs.std())
+    fnirs[:, seg] += (amp * g).astype(np.float32)[:, None, None, None, None] * sig[None]
+    return fnirs
+
+
 class NBackDataset(Dataset):
     """Loads one subject's preprocessed windows and exposes them as a
     standard PyTorch Dataset. session_ids/trial_ids are kept alongside so
@@ -3116,6 +3166,9 @@ class NBackDataset(Dataset):
         labels = np.load(os.path.join(subject_dir, f"{subject_id}_labels.npy"))
         session_ids = np.load(os.path.join(subject_dir, f"{subject_id}_session_ids.npy"))
         trial_ids = np.load(os.path.join(subject_dir, f"{subject_id}_trial_ids.npy"))
+        _plant = parse_plant_spec(os.environ.get("TSFNET_PLANT", ""))
+        if _plant is not None:        # priority-PLANT: unset (the default) leaves the data untouched
+            fnirs = plant_fnirs(fnirs, labels, **_plant)
 
         conn_path = os.path.join(subject_dir, f"{subject_id}_eeg_connectivity.npy")
         connectivity = np.load(conn_path) if os.path.exists(conn_path) else None
@@ -4440,7 +4493,7 @@ def run_subject_cross_session(subject_dir, subject_id, device="cuda" if torch.cu
                                fusion_fnirs_inject="none", erp_branch="none",
                                egta_pcc_lambda=0.0, cafe_pcc_mode="signed",
                                riem_branch="none", riem_blend=0.5, riem_lambda=0.2, riem_weight_decay=1e-2,
-                               riem_dropout=0.5, riem_head_fit="sgd",
+                               riem_dropout=0.5, riem_head_fit="sgd", shuffle_train_labels=None,
                                eeg_filterbank="none", eeg_filterbank_scope="both",
                                fnirs_chroma_split="none",
                                bandtok_d_model=32, bandtok_heads=4, bandtok_norm="none",
@@ -4718,6 +4771,18 @@ def run_subject_cross_session(subject_dir, subject_id, device="cuda" if torch.cu
     for test_session in sorted(np.unique(session_ids)):
         print(f"\n=== {subject_id} | test session {test_session} ===")
         train_val_idx, test_idx = session_holdout_split(session_ids, test_session)
+        if shuffle_train_labels is not None:
+            # priority-SHUFFLE: DATA RANDOMISATION for the XAI sanity check (Adebayo et al.). The class labels of whole BLOCKS of the
+            # training sessions (train and val windows) are permuted, so the network can only memorise; the test session keeps its true
+            # labels, so its accuracy should fall to chance. Restored at the start of every fold.
+            if not hasattr(full, "_labels_true"):
+                full._labels_true = full.labels.clone()
+            full.labels.copy_(full._labels_true)
+            full.labels[torch.as_tensor(train_val_idx)] = torch.as_tensor(
+                block_shuffled_labels(full._labels_true.numpy(), session_ids, trial_ids, train_val_idx,
+                                      int(shuffle_train_labels) + int(test_session)), dtype=full.labels.dtype)
+            print(f"  [shuffle_train_labels] block labels of the training sessions permuted (seed {int(shuffle_train_labels) + int(test_session)}); "
+                  f"the test session keeps its true labels")
 
         tv_trial_ids = trial_ids[train_val_idx]
         tv_labels = labels_np[train_val_idx]

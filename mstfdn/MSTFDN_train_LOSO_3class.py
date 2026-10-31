@@ -66,6 +66,10 @@ ALL_SUBJECTS = [f"VP{i:03d}" for i in range(1, 27)]
 
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
+# Seed of this run. The script had NO seed control, so two runs were not comparable and "single seed" could not be stated. 42 is the project's
+# accepted seed (the one the TSFNet baseline was selected on); set SEED = None to reproduce the old unseeded behaviour.
+SEED = 42
+
 # ===========================================================================
 #  MODEL CONFIG (N-back dataset — از مقاله Table A.1)
 # ===========================================================================
@@ -412,6 +416,11 @@ def main():
     if DEVICE == 'cuda':
         log(f"GPU    : {torch.cuda.get_device_name(0)}")
         log(f"VRAM   : {torch.cuda.get_device_properties(0).total_memory/1e9:.1f} GB")
+    if SEED is not None:
+        import random
+        random.seed(SEED); np.random.seed(SEED); torch.manual_seed(SEED); torch.cuda.manual_seed_all(SEED)
+        torch.backends.cudnn.deterministic = True; torch.backends.cudnn.benchmark = False
+    log(f"Seed   : {SEED}  ({'SINGLE-SEED result: report it as such' if SEED is not None else 'unseeded'})")
     log(f"Subjects: {len(ALL_SUBJECTS)}")
     log(f"Preprocessed data: {PREPROCESSED_PATH}")
     log(f"Output: {OUTPUT_PATH}")

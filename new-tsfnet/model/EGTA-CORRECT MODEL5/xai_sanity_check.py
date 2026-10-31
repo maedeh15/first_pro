@@ -60,7 +60,7 @@ def randomise_upto(model, level, seed):
             return tuple(_det(x) for x in v)
         if isinstance(v, list):
             return [_det(x) for x in v]
-        if isinstance(v, dict):
+        if type(v) is dict:                    # exactly dict: torch keeps its hook registries in OrderedDicts, which must stay OrderedDicts
             return {k: _det(x) for k, x in v.items()}
         return v
     for mod in model.modules():
@@ -92,7 +92,39 @@ def target_value(y_pred, cls, objective):
     return p if objective == "prob" else torch.log(p.clamp_min(1e-8))
 
 
-def attributions(model, x_eeg, x_fnirs, y, x_conn, x_chan, ig_steps, target="true", objective="prob"):
+def method_list(deeplift=False):
+    """the three explanation methods (+ DeepLift when requested) and, always last, the weight-independent control"""
+    return METHODS[:3] + (("deeplift",) if deeplift else ()) + METHODS[3:]
+
+
+class _FnirsOnly(torch.nn.Module):
+    """captum wants a module whose first argument is the attributed input; the other model inputs travel as additional args"""
+    def __init__(self, model):
+        super().__init__(); self.model = model
+
+    def forward(self, x_fnirs, x_eeg, x_conn=None, x_chan=None):
+        return self.model(x_eeg, x_fnirs, x_conn, x_chan)[3]
+
+
+def deeplift_vector(model, x_eeg, x_fnirs, cls, x_conn, x_chan):
+    """DeepLift (Shrikumar et al. 2017, via captum) per fNIRS segment, zero baseline, with its COMPLETENESS check.
+
+    DeepLift's rules are applied by captum to nn.Module non-linearities only; TSFNet also uses functional sigmoid/softmax inside its
+    attention and gates, which fall back to the gradient rule. Completeness (the attributions of a sample sum to f(x) - f(baseline)) is
+    the check that this approximation is acceptable: returned as the ratio mean|delta| / mean|f(x)-f(baseline)|; a ratio above ~0.1 means
+    DeepLift is NOT trustworthy for this model and must not be reported as DeepLift."""
+    from captum.attr import DeepLift
+    base = torch.zeros_like(x_fnirs)
+    fo = _FnirsOnly(model)
+    attr, delta = DeepLift(fo).attribute(x_fnirs, baselines=base, target=cls, additional_forward_args=(x_eeg, x_conn, x_chan),
+                                         return_convergence_delta=True)
+    with torch.no_grad():
+        diff = (fo(x_fnirs, x_eeg, x_conn, x_chan) - fo(base, x_eeg, x_conn, x_chan)).gather(1, cls.view(-1, 1)).squeeze(1)
+    ratio = float(delta.abs().mean() / (diff.abs().mean() + 1e-12))
+    return per_segment_mean(attr.detach()).cpu().numpy(), ratio
+
+
+def attributions(model, x_eeg, x_fnirs, y, x_conn, x_chan, ig_steps, target="true", objective="prob", deeplift=False):
     with torch.no_grad():
         y0 = model(x_eeg, x_fnirs, x_conn, x_chan)[3]
         attn = model.cafe._last_egta_weights.mean(dim=1)
@@ -107,8 +139,11 @@ def attributions(model, x_eeg, x_fnirs, y, x_conn, x_chan, ig_steps, target="tru
         tot = tot + torch.autograd.grad(target_value(yi, cls, objective).sum(), xi)[0].detach()
     ig = per_segment_mean((x_fnirs - base) * tot / ig_steps)
     mag = per_segment_mean(x_fnirs.detach())
-    return {"attention": attn.detach().cpu().numpy(), "input_gradient": sal.cpu().numpy(),
-            "integrated_gradients": ig.cpu().numpy(), "input_magnitude": mag.cpu().numpy()}
+    out = {"attention": attn.detach().cpu().numpy(), "input_gradient": sal.cpu().numpy(),
+           "integrated_gradients": ig.cpu().numpy(), "input_magnitude": mag.cpu().numpy()}
+    if deeplift:
+        out["deeplift"], out["deeplift_delta_ratio"] = deeplift_vector(model, x_eeg, x_fnirs, cls, x_conn, x_chan)
+    return out
 
 
 def mean_rho(A, B):
@@ -123,27 +158,34 @@ def mean_rho(A, B):
     return float(np.mean(r)) if r else float("nan")
 
 
-def batch_report(model, batches, ig_steps, seed, target, objective, readapt=None):
+def batch_report(model, batches, ig_steps, seed, target, objective, readapt=None, deeplift=False):
     """batches: list of (x_eeg, x_fnirs, y, x_conn, x_chan). Returns {level: {method: rho}}"""
-    trained = {m: [] for m in METHODS}
+    ml = method_list(deeplift)
+    # copy BEFORE any captum call: captum leaves hook attributes on the modules that make a later deepcopy fail
+    rms = [randomise_upto(model, lvl, seed + lvl)[0] for lvl in range(len(LEVELS))]
+    trained = {m: [] for m in ml}
+    ratios = []
     for bt in batches:
-        v = attributions(model, *bt, ig_steps, target, objective)
-        for m in METHODS:
+        v = attributions(model, *bt, ig_steps, target, objective, deeplift)
+        ratios.append(v.get("deeplift_delta_ratio", np.nan))
+        for m in ml:
             trained[m].append(v[m])
     trained = {m: np.concatenate(v) for m, v in trained.items()}
     out = {}
     for lvl in range(len(LEVELS)):
-        rm, _ = randomise_upto(model, lvl, seed + lvl)
+        rm = rms[lvl]
         rm.eval()
         if readapt is not None:
             readapt(rm)
-        rnd = {m: [] for m in METHODS}
+        rnd = {m: [] for m in ml}
         for bt in batches:
-            v = attributions(rm, *bt, ig_steps, target, objective)
-            for m in METHODS:
+            v = attributions(rm, *bt, ig_steps, target, objective, deeplift)
+            for m in ml:
                 rnd[m].append(v[m])
         rnd = {m: np.concatenate(v) for m, v in rnd.items()}
-        out[lvl] = {m: mean_rho(trained[m], rnd[m]) for m in METHODS}
+        out[lvl] = {m: mean_rho(trained[m], rnd[m]) for m in ml}
+    if deeplift:
+        out["deeplift_delta_ratio"] = float(np.nanmean(ratios))
     return out
 
 
@@ -209,6 +251,8 @@ def main():
     p.add_argument("--target", choices=["true", "pred"], default="pred")
     p.add_argument("--objective", choices=["prob", "logprob"], default="logprob")
     p.add_argument("--pass-rho", type=float, default=0.3)
+    p.add_argument("--deeplift", action="store_true", help="add DeepLift (captum) with its completeness gate; pip install captum")
+    p.add_argument("--max-delta-ratio", type=float, default=0.1, help="DeepLift is reported only if mean|delta| / mean|f(x)-f(baseline)| is below this")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--adabn", action="store_true", default=True); p.add_argument("--no-adabn", dest="adabn", action="store_false")
     p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
@@ -222,7 +266,8 @@ def main():
     from tsfnet_model_notebook import TSFNet, NBackDataset, _unpack_batch, adapt_batchnorm_to_target
     from xai_trunk import trunk_state
     out_dir = a.out_dir or os.path.join(a.results_dir, "xai_sanity_check"); os.makedirs(out_dir, exist_ok=True)
-    per = {}
+    per, ratios = {}, {}
+    ML = method_list(a.deeplift)
     for sid in parse_subjects(a.subjects):
         full = NBackDataset(os.path.join(a.data_root, sid), sid)
         nseg = full.fnirs.shape[1] if full.fnirs.ndim == 5 else 21
@@ -246,27 +291,33 @@ def main():
                 xe, xf, y, xc, xch = _unpack_batch(b)
                 batches.append((xe.to(a.device), xf.to(a.device), y.to(a.device),
                                 xc.to(a.device) if xc is not None else None, xch.to(a.device) if xch is not None else None))
-            rows.append(batch_report(model, batches, a.ig_steps, a.seed + 1000 * ts, a.target, a.objective, readapt))
+            rows.append(batch_report(model, batches, a.ig_steps, a.seed + 1000 * ts, a.target, a.objective, readapt, a.deeplift))
             del model
             if str(a.device).startswith("cuda"):
                 torch.cuda.empty_cache()
         if rows:
-            per[sid] = {l: {m: float(np.nanmean([r[l][m] for r in rows])) for m in METHODS} for l in range(len(LEVELS))}
-            print(f"[{sid}] done: after full randomisation " + ", ".join(f"{m} {per[sid][len(LEVELS) - 1][m]:+.2f}" for m in METHODS), flush=True)
+            per[sid] = {l: {m: float(np.nanmean([r[l][m] for r in rows])) for m in ML} for l in range(len(LEVELS))}
+            if a.deeplift:
+                ratios.setdefault(sid, float(np.nanmean([r["deeplift_delta_ratio"] for r in rows])))
+            print(f"[{sid}] done: after full randomisation " + ", ".join(f"{m} {per[sid][len(LEVELS) - 1][m]:+.2f}" for m in ML), flush=True)
     subs = sorted(per)
     print(f"\n{len(subs)} subjects; mean Spearman rho between the TRAINED and the randomised explanation of the same window "
           f"(target={a.target}, objective={a.objective})\n")
-    print(f"  {'randomised up to':22}" + "".join(f"{m:>22}" for m in METHODS))
+    print(f"  {'randomised up to':22}" + "".join(f"{m:>22}" for m in ML))
     for l, nm in enumerate(LEVELS):
-        print(f"  {nm:22}" + "".join(f"{np.nanmean([per[s][l][m] for s in subs]):22.3f}" for m in METHODS))
+        print(f"  {nm:22}" + "".join(f"{np.nanmean([per[s][l][m] for s in subs]):22.3f}" for m in ML))
     ok_ctrl = abs(np.nanmean([per[s][len(LEVELS) - 1]['input_magnitude'] for s in subs]) - 1.0) < 1e-6
     print(f"\n  control (input magnitude) invariant: {'YES' if ok_ctrl else 'NO -- the pipeline is broken, ignore everything below'}")
-    for m in METHODS[:3]:
+    if a.deeplift:
+        rr = float(np.nanmean(list(ratios.values())))
+        print(f"  DeepLift completeness: mean|delta| / mean|f(x)-f(baseline)| = {rr:.3f} "
+              f"({'acceptable' if rr < a.max_delta_ratio else 'ABOVE ' + str(a.max_delta_ratio) + ': DeepLift is NOT trustworthy for this model, do not report it as DeepLift'})")
+    for m in ML[:-1]:
         last = np.array([per[s][len(LEVELS) - 1][m] for s in subs])
         print(f"  {m:22} full-randomisation rho {np.nanmean(last):+.3f}; below {a.pass_rho} in {int(np.sum(last < a.pass_rho))}/{len(subs)} subjects"
               f"  -> {'PASS (depends on what was learned)' if np.nanmean(last) < a.pass_rho else 'FAIL (does not depend on the learned weights)'}")
     np.savez(os.path.join(out_dir, "sanity_check.npz"), subjects=np.array(subs),
-             rho=np.array([[[per[s][l][m] for m in METHODS] for l in range(len(LEVELS))] for s in subs]), methods=np.array(METHODS), levels=np.array(LEVELS))
+             rho=np.array([[[per[s][l][m] for m in ML] for l in range(len(LEVELS))] for s in subs]), methods=np.array(ML), levels=np.array(LEVELS))
     print("\n  Not tested here: the shuffled-label (data randomisation) variant, which needs a retrained model.")
 
 
