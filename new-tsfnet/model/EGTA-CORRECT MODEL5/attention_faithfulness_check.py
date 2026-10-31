@@ -98,6 +98,9 @@ def parse_subjects(spec):
     return [f"VP{i:03d}" for i in out]
 
 
+_EFGF_WARNED = set()
+
+
 def _is_constant(v):
     """scale-free: np.allclose's absolute tolerance (1e-8) would call a vector of tiny probability changes constant"""
     return np.ptp(v) <= 1e-9 * (np.abs(v).max() + 1e-300)
@@ -174,7 +177,13 @@ def efgf_faithfulness(model, x_eeg, x_fnirs, y, x_conn, x_chan, device, which="e
     handle.remove()
 
     B = phi0.shape[0]
-    phi_spatial = phi0.amax(dim=-1)[:, 0]        # (B, h, w) -- collapse Phi's time axis (max, not mean,
+    # EFGF returns Phi as (B, h, w, t) in this model (the hook comment said (B, 1, h, w, t)); accept both
+    phi_spatial = phi0.amax(dim=-1)
+    if phi_spatial.dim() == 4:
+        phi_spatial = phi_spatial[:, 0]
+    if phi_spatial.dim() != 3:
+        raise ValueError(f"unexpected Phi shape {tuple(phi0.shape)}; expected (B, h, w, t) or (B, 1, h, w, t)")
+    #                                            # (B, h, w) -- collapse Phi's time axis (max, not mean,
                                                   # so a bin flagged "high" really contains a peak, not
                                                   # just a long near-zero stretch)
     flat = phi_spatial.reshape(B, -1)
@@ -252,7 +261,10 @@ def subject_faithfulness(sid, results_dir, data_root, device, batch_size, adabn)
                 r1 = efgf_faithfulness(model, x_eeg, x_fnirs, y, x_conn, x_chan, device, "efgf1")
                 efgf1_rhos.extend(r1)
             except Exception as e:
-                print(f"  [{sid} s{test_session}] EFGF1 faithfulness skipped ({type(e).__name__}: {e})")
+                _msg = f"{type(e).__name__}: {e}"
+                if _msg not in _EFGF_WARNED:          # the same error used to be printed once per batch (hundreds of lines)
+                    _EFGF_WARNED.add(_msg)
+                    print(f"  [{sid} s{test_session}] EFGF1 faithfulness skipped ({_msg}); further identical errors are not repeated")
 
         del model
         if str(device).startswith("cuda"):
