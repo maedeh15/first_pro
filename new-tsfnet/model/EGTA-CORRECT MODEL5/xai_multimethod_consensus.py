@@ -72,7 +72,7 @@ from scipy.stats import spearmanr, wilcoxon
 from torch.utils.data import DataLoader, Subset
 
 from tsfnet_model_notebook import TSFNet, NBackDataset, _unpack_batch, adapt_batchnorm_to_target
-from xai_trunk import trunk_state, load_checkpoint                       # drops 'riem_head.*' so a member-branch checkpoint loads into the plain trunk, set_xai_output
+from xai_trunk import trunk_state, load_checkpoint, set_xai_output   # trunk_state drops 'riem_head.*' so a member-branch checkpoint loads into the plain trunk
 
 p = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter,
                             description=__doc__.split("USAGE")[0])
