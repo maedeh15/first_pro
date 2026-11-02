@@ -268,7 +268,7 @@ def report(o):
     print("    band share of the pattern: " + "  ".join(f"{nm} {100 * o['pattern_band_share'][b, 0]:.1f}%" for b, nm in enumerate(BANDS)))
     ra = o["rank_agree"]
     print(f"    channel ranking by weights vs by pattern: Spearman {ra.mean():+.3f} +/- {ra.std(ddof=1):.3f} across subjects "
-          f"(low = suppressor effects: weights and pattern tell different stories, prefer the pattern)")
+          f"(low = weights and pattern answer different questions; the planted benchmark found weights recover planted features better, so report both and prefer neither)")
     print("\n  Limits: whitening mixes electrodes (channel maps are approximate); coefficients rank standardised features, they are not physical effect")
     print("  sizes; the deletion test removes information from one fitted member and does not show the brain uses those features.")
 
