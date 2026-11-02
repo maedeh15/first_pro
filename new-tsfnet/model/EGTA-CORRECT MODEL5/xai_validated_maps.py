@@ -97,7 +97,7 @@ def deletion(model, xe, xf, xc, xh, c, p0, scores, k, rng):
             sets = {"top": order[:, :k], "bottom": order[:, -k:], "random": np.stack([rng.choice(S, k, replace=False) for _ in range(B)])}
             for nm, idx in sets.items():
                 mask = torch.zeros(B, S, dtype=torch.bool, device=xf.device)
-                mask.scatter_(1, torch.as_tensor(idx, device=xf.device), True)
+                mask.scatter_(1, torch.as_tensor(np.asarray(idx, dtype=np.int64), device=xf.device), True)   # int64: on Windows rng.choice returns int32
                 xa = torch.where(mask.view(B, S, 1, 1, 1, 1), rep, xf)
                 res.setdefault(m, {})[nm] = (p0 - pc(model(xe, xa, xc, xh)[3], c)).cpu().numpy()
     return res
