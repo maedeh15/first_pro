@@ -161,7 +161,7 @@ _arg_parser.add_argument("--per-session-norm", type=str, default="on", choices=[
                                "per-session/per-segment re-normalization layer and no transductive "
                                "use of the held-out session's unlabeled inputs. 'off' writes to a "
                                "SEPARATE output folder.")
-_arg_parser.add_argument("--fnirs-bandpass", type=str, default="off", choices=["on", "off"],
+_arg_parser.add_argument("--fnirs-bandpass", type=str, default="off", choices=["on", "off", "hp001", "lp02", "lp05", "lp001"],
                           help="priority-ablation5 toggle (isolated variable): 'off' (default) = "
                                "prior behavior bit-for-bit, ENABLE_FNIRS_BANDPASS=False (the "
                                "project's current accepted baseline, per the MSTFDN large-"
@@ -282,6 +282,11 @@ if FNIRS_PCA_REST_K > 0:
 _FNIRS_BANDPASS_CLI = _cli_args.fnirs_bandpass
 if _FNIRS_BANDPASS_CLI == "on":
     OUTPUT_PATH = OUTPUT_PATH + "_fnirsBP"
+elif _FNIRS_BANDPASS_CLI != "off":
+    # fNIRS filter-component decomposition (extra modes, 'on'/'off' unchanged bit-for-bit): which part of the 0.01-0.1 Hz band-pass matters?
+    #   hp001 = high-pass 0.01 Hz only (drift removed, everything faster kept)      lp02 / lp05 = low-pass 0.2 / 0.5 Hz only (no drift removal)
+    #   lp001 = low-pass 0.01 Hz only (the SLOW-BAND-ONLY control for time-in-session trends)
+    OUTPUT_PATH = OUTPUT_PATH + "_fnirs" + _FNIRS_BANDPASS_CLI.upper()
 
 # NOTE (confirmed from Dataset_description_MATLAB.pdf / Shin et al. 2018, Sci Data): 26 subjects,
 # 3 sessions/subject, 9 trials/session (3 repeats x 0-/2-/3-back, counterbalanced order) -> 27
@@ -326,7 +331,7 @@ APPLY_NOTCH = False
 # rewritten) -- only whether it's CALLED is gated by this flag -- so ablation #6 (isolated
 # Baseline-correction test) can later toggle this same flag independently to get its
 # filter-on/off x baseline-on/off 2x2 factorial without any further code changes here.
-ENABLE_FNIRS_BANDPASS = (_FNIRS_BANDPASS_CLI == "on")
+ENABLE_FNIRS_BANDPASS = (_FNIRS_BANDPASS_CLI != "off")     # any filter mode; the band itself is chosen by fnirs_filter() below
 FNIRS_BP_LOW = 0.01
 FNIRS_BP_HIGH = 0.1
 # EFFECTIVE (documented/intended) order of the zero-phase fNIRS bandpass. The paper does not
@@ -738,6 +743,18 @@ def fnirs_bandpass(data, fs, low=FNIRS_BP_LOW, high=FNIRS_BP_HIGH, order=FNIRS_B
     for ch in range(data.shape[1]):
         filtered[:, ch] = filtfilt(b, a, data[:, ch])
     return filtered
+
+
+def fnirs_filter(data, fs, mode):
+    """mode 'on' -> the unchanged 0.01-0.1 Hz band-pass above; the other modes are single-sided Butterworth filters of the same design order, zero-phase (filtfilt)"""
+    if mode == "on":
+        return fnirs_bandpass(data, fs)
+    spec = {"hp001": ("highpass", 0.01), "lp02": ("lowpass", 0.2), "lp05": ("lowpass", 0.5), "lp001": ("lowpass", 0.01)}[mode]
+    b, a = butter(FNIRS_BP_ORDER, spec[1] / (0.5 * fs), btype=spec[0])
+    out = np.zeros_like(data)
+    for ch in range(data.shape[1]):
+        out[:, ch] = filtfilt(b, a, data[:, ch])
+    return out
 
 
 # ============================================================================
@@ -1422,8 +1439,8 @@ def preprocess_fnirs(subject_id, qc_dir, grid_bbox=None):
         hbo, hbr = modified_beer_lambert(oxy_raw, deoxy_raw)
 
     if ENABLE_FNIRS_BANDPASS:
-        hbo_f = fnirs_bandpass(hbo, sfreq_raw)
-        hbr_f = fnirs_bandpass(hbr, sfreq_raw)
+        hbo_f = fnirs_filter(hbo, sfreq_raw, _FNIRS_BANDPASS_CLI)
+        hbr_f = fnirs_filter(hbr, sfreq_raw, _FNIRS_BANDPASS_CLI)
     else:
         # ablation #5: filter disabled -- pass the (Beer-Lambert-resolved, per the branch
         # above) HbO/HbR straight through unfiltered. Resample step right below is
@@ -1466,7 +1483,7 @@ def preprocess_fnirs(subject_id, qc_dir, grid_bbox=None):
         axes[0].plot(t_raw, oxy_raw[:, 0], color="tab:red", linewidth=0.5)
         axes[0].set_title(f"{subject_id} - fNIRS RAW HbO (ch 0)")
         axes[1].plot(t_proc, hbo_rs[:, 0], color="tab:blue", linewidth=0.5)
-        _filt_desc = f"{FNIRS_BP_LOW}-{FNIRS_BP_HIGH}Hz" if ENABLE_FNIRS_BANDPASS else "NO bandpass (ablation #5)"
+        _filt_desc = (f"{FNIRS_BP_LOW}-{FNIRS_BP_HIGH}Hz" if _FNIRS_BANDPASS_CLI == "on" else f"filter mode {_FNIRS_BANDPASS_CLI}") if ENABLE_FNIRS_BANDPASS else "NO bandpass (ablation #5)"
         axes[1].set_title(f"{subject_id} - fNIRS PREPROCESSED HbO (Beer-Lambert + {_filt_desc} + resample)")
         plt.tight_layout()
         fig.savefig(os.path.join(qc_dir, f"{subject_id}_fnirs_before_after.png"), dpi=150)
@@ -2334,7 +2351,8 @@ def process_subject(subject_id):
             "eeg_bandpass_hz": [EEG_BP_LOW, EEG_BP_HIGH],
             "eeg_bandpass_order": EEG_BP_ORDER,
             "fnirs_bandpass_enabled": ENABLE_FNIRS_BANDPASS,      # ablation #5 flag
-            "fnirs_bandpass_hz": [FNIRS_BP_LOW, FNIRS_BP_HIGH] if ENABLE_FNIRS_BANDPASS else None,
+            "fnirs_bandpass_hz": [FNIRS_BP_LOW, FNIRS_BP_HIGH] if _FNIRS_BANDPASS_CLI == "on" else None,
+            "fnirs_filter_mode": _FNIRS_BANDPASS_CLI,
             "fnirs_bandpass_design_order": FNIRS_BP_ORDER if ENABLE_FNIRS_BANDPASS else None,
             "fnirs_bandpass_effective_order": FNIRS_BP_EFFECTIVE_ORDER,  # true zero-phase order after filtfilt
             "baseline_window_s": [BASELINE_TMIN, BASELINE_TMAX],
