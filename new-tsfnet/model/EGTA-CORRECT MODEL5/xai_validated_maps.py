@@ -140,7 +140,8 @@ def run_subject(sid, a, rng):
         model = TSFNet(num_classes=3, fusion_combination="paper_mean", fnirs_num_segments=S, fnirs_temporal_align="egta",
                        efgf_gate_mode="sigmoid", efgf_gate_init=-2.0).to(a.device)
         model.load_state_dict(trunk_state(load_checkpoint(ck, map_location=a.device)), strict=True); model.eval()
-        dl = DataLoader(Subset(full, np.flatnonzero(full.session_ids == ts)), batch_size=a.batch_size, shuffle=False)
+        idx = np.random.RandomState(1000 * int(sid[2:]) + ts).permutation(np.flatnonzero(full.session_ids == ts))   # random windows of the session, not its first ones
+        dl = DataLoader(Subset(full, idx), batch_size=a.batch_size, shuffle=False)
         if a.adabn:
             adapt_batchnorm_to_target(model, dl, a.device, log_fn=lambda *x, **k: None)
         rmodel, _ = randomise_upto(model, len(GROUPS) - 1, a.seed); rmodel = rmodel.to(a.device).eval()

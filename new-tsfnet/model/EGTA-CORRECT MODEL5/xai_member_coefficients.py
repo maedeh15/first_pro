@@ -16,7 +16,7 @@ is a coupling between two whitened coordinates.
 
 HONEST LIMITS (also printed at the end)
   * whitening mixes electrodes, so "channel c" is a whitened coordinate that is close to, not identical with, electrode c. Read the
-    topography as approximate. Converting weights to activation patterns (Haufe et al. 2014) is not done here.
+    topography as approximate. Activation patterns (Haufe et al. 2014) are computed alongside the weights and scored in --benchmark; neither is preferred a priori.
   * coefficients live in STANDARDISED feature space (each feature rescaled by the training windows' std), the space in which the
     classifier was fitted; they rank features, they are not physical effect sizes.
   * three-class model: importance is computed for the LOAD CONTRAST (3-back minus 0-back logit weights) and for each class separately.

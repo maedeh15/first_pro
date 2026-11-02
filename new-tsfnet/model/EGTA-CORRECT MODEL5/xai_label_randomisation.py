@@ -78,6 +78,7 @@ def main():
     p.add_argument("--true-dir"); p.add_argument("--shuffled-dir"); p.add_argument("--data-root")
     p.add_argument("--subjects", default="1-3"); p.add_argument("--out-dir", default=None)
     p.add_argument("--batch-size", type=int, default=16); p.add_argument("--max-batches", type=int, default=3)
+    p.add_argument("--random-windows", action="store_true", help="take the --max-batches batches from a seeded random permutation of the session instead of its first windows (the first windows are one contiguous stretch of one class order)")
     p.add_argument("--ig-steps", type=int, default=10)
     p.add_argument("--target", choices=["true", "pred"], default="pred"); p.add_argument("--objective", choices=["prob", "logprob"], default="logprob")
     p.add_argument("--pass-rho", type=float, default=0.3)
@@ -115,6 +116,8 @@ def main():
         rows, accA, accB = [], [], []
         for ts in (1, 2, 3):
             idx = np.flatnonzero(full.session_ids == ts)
+            if a.random_windows:
+                idx = np.random.RandomState(1000 * int(sid[2:]) + ts).permutation(idx)
             loader = DataLoader(Subset(full, idx), batch_size=a.batch_size, shuffle=False)
             ma, mb = load(a.true_dir, sid, ts, nseg, loader), load(a.shuffled_dir, sid, ts, nseg, loader)
             if ma is None or mb is None:

@@ -258,6 +258,7 @@ def main():
     p.add_argument("--subjects", default="1-26"); p.add_argument("--out-dir", default=None)
     p.add_argument("--batch-size", type=int, default=16)
     p.add_argument("--max-batches", type=int, default=3, help="batches per fold (cost: (1 + 5 levels) x (2 + ig-steps) passes each)")
+    p.add_argument("--random-windows", action="store_true", help="take the --max-batches batches from a seeded random permutation of the session instead of its first windows (the first windows are one contiguous stretch of one class order)")
     p.add_argument("--ig-steps", type=int, default=10)
     p.add_argument("--target", choices=["true", "pred"], default="pred")
     p.add_argument("--objective", choices=["prob", "logprob"], default="logprob")
@@ -293,6 +294,8 @@ def main():
                            efgf_gate_mode="sigmoid", efgf_gate_init=-2.0).to(a.device)
             model.load_state_dict(trunk_state(load_checkpoint(ck, map_location=a.device)), strict=True); model.eval()
             idx = np.flatnonzero(full.session_ids == ts)
+            if a.random_windows:
+                idx = np.random.RandomState(1000 * int(sid[2:]) + ts).permutation(idx)
             loader = DataLoader(Subset(full, idx), batch_size=a.batch_size, shuffle=False)
             readapt = (lambda m, loader=loader: adapt_batchnorm_to_target(m, loader, a.device, log_fn=lambda *x, **k: None)) if a.adabn else None
             if readapt:
