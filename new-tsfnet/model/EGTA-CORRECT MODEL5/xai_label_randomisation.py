@@ -95,7 +95,7 @@ def main():
         a.deeplift = False
     os.environ.pop("TSFNET_PLANT", None)
     from tsfnet_model_notebook import TSFNet, NBackDataset, _unpack_batch, adapt_batchnorm_to_target
-    from xai_trunk import trunk_state, load_checkpoint
+    from xai_trunk import trunk_state, load_checkpoint, set_xai_output
     ml = method_list(a.deeplift)
     out_dir = a.out_dir or os.path.join(a.shuffled_dir, "xai_label_randomisation"); os.makedirs(out_dir, exist_ok=True)
     per, accs = {}, {}
@@ -106,7 +106,7 @@ def main():
             return None
         m = TSFNet(num_classes=3, fusion_combination="paper_mean", fnirs_num_segments=nseg, fnirs_temporal_align="egta",
                    efgf_gate_mode="sigmoid", efgf_gate_init=-2.0).to(a.device)
-        m.load_state_dict(trunk_state(load_checkpoint(ck, map_location=a.device)), strict=True); m.eval()
+        m.load_state_dict(trunk_state(load_checkpoint(ck, map_location=a.device)), strict=True); set_xai_output(m); m.eval()
         if a.adabn:
             adapt_batchnorm_to_target(m, loader, a.device, log_fn=lambda *x, **k: None)
         return m

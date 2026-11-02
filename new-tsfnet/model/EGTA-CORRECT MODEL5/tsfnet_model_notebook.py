@@ -2583,6 +2583,8 @@ class TSFNet(nn.Module):
             "eeg_band_gate": (band_gate_value.detach()
                               if band_gate_value is not None else None),  # priority-D-1-safe
         }
+        if getattr(self, "xai_normalise_output", False):   # XAI only (xai_trunk.set_xai_output): explain the row-normalised posterior that the reported accuracies use
+            y_pred = y_pred / (y_pred.sum(dim=-1, keepdim=True) + 1e-8)
         return y_eeg, y_fusion, y_fnirs, y_pred, aux
 
 

@@ -17,7 +17,7 @@ import numpy as np, torch
 from scipy.stats import spearmanr, wilcoxon
 from torch.utils.data import DataLoader, Subset
 from tsfnet_model_notebook import TSFNet, NBackDataset, _unpack_batch, adapt_batchnorm_to_target
-from xai_trunk import trunk_state, load_checkpoint
+from xai_trunk import trunk_state, load_checkpoint, set_xai_output
 
 p = argparse.ArgumentParser(description=__doc__.split("    python")[0], formatter_class=argparse.RawDescriptionHelpFormatter)
 p.add_argument("--results-dir", required=True); p.add_argument("--data-root", required=True)
@@ -90,7 +90,7 @@ def subject(sid):
         ck = os.path.join(A.results_dir, f"{sid}_session{ses}_best.pt")
         if not os.path.isfile(ck):
             print(f"[{sid} s{ses}] SKIP no checkpoint"); continue
-        m = model_for(S).to(A.device); m.load_state_dict(trunk_state(load_checkpoint(ck, map_location=A.device)), strict=True); m.eval()
+        m = model_for(S).to(A.device); m.load_state_dict(trunk_state(load_checkpoint(ck, map_location=A.device)), strict=True); set_xai_output(m); m.eval()
         dl = DataLoader(Subset(full, np.flatnonzero(full.session_ids == ses)), batch_size=A.batch_size, shuffle=False)
         if A.adabn:
             adapt_batchnorm_to_target(m, dl, A.device, log_fn=lambda *a, **k: None)

@@ -278,7 +278,7 @@ def main():
         a.deeplift = False
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from tsfnet_model_notebook import TSFNet, NBackDataset, _unpack_batch, adapt_batchnorm_to_target
-    from xai_trunk import trunk_state, load_checkpoint
+    from xai_trunk import trunk_state, load_checkpoint, set_xai_output
     out_dir = a.out_dir or os.path.join(a.results_dir, "xai_sanity_check"); os.makedirs(out_dir, exist_ok=True)
     per, ratios = {}, {}
     ML = method_list(a.deeplift)
@@ -292,7 +292,7 @@ def main():
                 print(f"[{sid} s{ts}] SKIP -- no checkpoint"); continue
             model = TSFNet(num_classes=3, fusion_combination="paper_mean", fnirs_num_segments=nseg, fnirs_temporal_align="egta",
                            efgf_gate_mode="sigmoid", efgf_gate_init=-2.0).to(a.device)
-            model.load_state_dict(trunk_state(load_checkpoint(ck, map_location=a.device)), strict=True); model.eval()
+            model.load_state_dict(trunk_state(load_checkpoint(ck, map_location=a.device)), strict=True); set_xai_output(model); model.eval()
             idx = np.flatnonzero(full.session_ids == ts)
             if a.random_windows:
                 idx = np.random.RandomState(1000 * int(sid[2:]) + ts).permutation(idx)

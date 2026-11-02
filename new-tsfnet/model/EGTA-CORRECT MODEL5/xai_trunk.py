@@ -42,6 +42,23 @@ def trunk_state(state):
     return {k: v for k, v in state.items() if not k.startswith("riem_head.")}
 
 
+_XAI_ANNOUNCED = False
+
+
+def set_xai_output(model):
+    """Make the model return the ROW-NORMALISED y_pred (rows sum to 1), the quantity behind every reported accuracy / ensemble posterior.
+    The raw y_pred of paper_mean fusion sums to (w_eeg + w_fusion + w_fnirs)/3, which is not 1, so explaining it explains a different
+    quantity. Set TSFNET_XAI_RAW=1 in the environment to reproduce the earlier (raw) explanations. Training/eval code never calls this."""
+    global _XAI_ANNOUNCED
+    import os
+    raw = os.environ.get("TSFNET_XAI_RAW", "0") == "1"
+    model.xai_normalise_output = not raw
+    if not _XAI_ANNOUNCED:
+        print(f"  [xai] explaining the {'RAW' if raw else 'ROW-NORMALISED'} y_pred (TSFNET_XAI_RAW=1 selects the raw one)")
+        _XAI_ANNOUNCED = True
+    return model
+
+
 def self_test():
     import torch
     sd = {"a.weight": torch.zeros(1), "riem_head.W": torch.zeros(3, 2), "riem_head.fitted": torch.ones(1)}

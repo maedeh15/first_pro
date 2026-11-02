@@ -129,7 +129,7 @@ def process_batch(model, rmodel, xe, xf, xc, xh, a, rng, want_shap):
 def run_subject(sid, a, rng):
     from torch.utils.data import DataLoader, Subset
     from tsfnet_model_notebook import TSFNet, NBackDataset, _unpack_batch, adapt_batchnorm_to_target
-    from xai_trunk import trunk_state, load_checkpoint
+    from xai_trunk import trunk_state, load_checkpoint, set_xai_output
     full = NBackDataset(os.path.join(a.data_root, sid), sid)
     S = full.fnirs.shape[1] if full.fnirs.ndim == 5 else 21
     acc = {}
@@ -139,7 +139,7 @@ def run_subject(sid, a, rng):
             print(f"[{sid} s{ts}] SKIP no checkpoint"); continue
         model = TSFNet(num_classes=3, fusion_combination="paper_mean", fnirs_num_segments=S, fnirs_temporal_align="egta",
                        efgf_gate_mode="sigmoid", efgf_gate_init=-2.0).to(a.device)
-        model.load_state_dict(trunk_state(load_checkpoint(ck, map_location=a.device)), strict=True); model.eval()
+        model.load_state_dict(trunk_state(load_checkpoint(ck, map_location=a.device)), strict=True); set_xai_output(model); model.eval()
         idx = np.random.RandomState(1000 * int(sid[2:]) + ts).permutation(np.flatnonzero(full.session_ids == ts))   # random windows of the session, not its first ones
         dl = DataLoader(Subset(full, idx), batch_size=a.batch_size, shuffle=False)
         if a.adabn:
