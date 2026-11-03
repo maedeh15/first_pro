@@ -17,7 +17,7 @@ Reference only (from earlier runs, not recomputed here): deep fNIRS head ~0.58.
   python check_riemannian_fnirs.py --data "...\\TSFNET_PAPER_EXACT_nback" --subjects VP001 VP002 ... [--device cuda]
   python check_riemannian_fnirs.py --self-test
 """
-import os, argparse, sys
+import os, argparse, sys, time
 import numpy as np
 from scipy.stats import wilcoxon
 import check_riemannian_eeg as R
@@ -47,23 +47,27 @@ def slope(x):
     t = np.arange(x.shape[-1]) - (x.shape[-1] - 1) / 2; return (x * t).sum(-1) / (t ** 2).sum()
 
 
-def feature_sets(tr, ses):
-    """tr (N,C,K,L) -> dict of (N,d) feature matrices"""
-    N, C, K, L = tr.shape; f = {}
+def feature_sets(tr, ses, joint=True, log=print):
+    """tr (N,C,K,L) -> dict of (N,d) feature matrices (timed, progress printed)"""
+    N, C, K, L = tr.shape; f = {}; t0 = time.time(); tick = lambda m: log(f"    {m}  [{time.time() - t0:5.0f} s]")
     f["simple_global"] = np.concatenate([tr.mean(2).mean(-1), slope(tr.mean(2))], 1)
     f["simple_cells"] = np.concatenate([tr.mean(-1).reshape(N, -1), slope(tr).reshape(N, -1)], 1)
-    f["logvar_cells"] = np.log(tr.var(-1).reshape(N, -1) + 1e-8)
-    f["riem_sep"] = np.hstack([R.domain_features(R.covs(tr[:, c].astype(np.float64), RIDGE_F), ses, "riem") for c in range(C)])
-    f["riem_joint"] = R.domain_features(R.covs(tr.reshape(N, C * K, L).astype(np.float64), RIDGE_F), ses, "riem")
+    f["logvar_cells"] = np.log(tr.var(-1).reshape(N, -1) + 1e-8); tick("simple + logvar features")
+    f["riem_sep"] = np.hstack([R.domain_features(R.covs(tr[:, c].astype(np.float64), RIDGE_F), ses, "riem") for c in range(C)]); tick(f"riem_sep tangent features ({f['riem_sep'].shape[1]} dims)")
+    if joint:
+        f["riem_joint"] = R.domain_features(R.covs(tr.reshape(N, C * K, L).astype(np.float64), RIDGE_F), ses, "riem"); tick(f"riem_joint tangent features ({f['riem_joint'].shape[1]} dims)")
     return f
 
 
-def evaluate(tr, y, ses):
-    return {k: (R.loso(X, y, ses), R.loso(X, y, ses, (1, 2))) for k, X in feature_sets(tr, ses).items()}
+def evaluate(tr, y, ses, joint=True, log=print):
+    out = {}; t0 = time.time()
+    for k, X in feature_sets(tr, ses, joint, log).items():
+        out[k] = (R.loso(X, y, ses), R.loso(X, y, ses, (1, 2))); log(f"    LOSO {k}: {out[k][0]:.3f}  [{time.time() - t0:5.0f} s since features]")
+    return out
 
 
 def decide(rows, keys):
-    s = np.array([r["simple_cells"][0] for r in rows]); best = max(("riem_sep", "riem_joint"), key=lambda k: np.mean([r[k][0] for r in rows]))   # best by mean, reported openly
+    s = np.array([r["simple_cells"][0] for r in rows]); best = max([k for k in ("riem_sep", "riem_joint") if k in rows[0]], key=lambda k: np.mean([r[k][0] for r in rows]))   # best by mean, reported openly
     d = np.array([r[best][0] for r in rows]) - s; p = float(wilcoxon(d).pvalue) if np.any(d != 0) else 1.0
     ok = d.mean() >= 0.02 and p < 0.05
     return best, float(d.mean()), p, ok
@@ -117,17 +121,26 @@ def self_test():
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("  python")[0], formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--data"); ap.add_argument("--self-test", action="store_true"); ap.add_argument("--device", default=None)
+    ap.add_argument("--data"); ap.add_argument("--self-test", action="store_true"); ap.add_argument("--device", default="auto", help="auto = cuda if available, else numpy")
+    ap.add_argument("--stride", type=int, default=1, help="use every k-th window (windows overlap by 90%%, stride 2-3 loses little and is 2-3x faster)")
+    ap.add_argument("--skip-joint", action="store_true", help="drop riem_joint (the slowest; the decision rule then uses riem_sep only)")
     ap.add_argument("--subjects", nargs="+", default=[f"VP{i:03d}" for i in range(1, 27)]); a = ap.parse_args()
     if a.self_test: return self_test()
     if not a.data: sys.exit("need --data")
-    print("eigendecomposition backend:", R.set_eigh_backend(a.device)); rows, ids = [], []
+    dev = a.device
+    if dev == "auto":
+        try:
+            import torch; dev = "cuda" if torch.cuda.is_available() else None
+        except ImportError: dev = None
+    print("eigendecomposition backend:", R.set_eigh_backend(dev)); rows, ids = [], []; T0 = time.time()
     for sid in a.subjects:
         d = os.path.join(a.data, sid)
         if not os.path.exists(os.path.join(d, f"{sid}_fnirs_windows.npy")): continue
-        tr = load_subject(d, sid); y = np.load(os.path.join(d, f"{sid}_labels.npy")); ses = np.load(os.path.join(d, f"{sid}_session_ids.npy"))
-        r = evaluate(tr, y, ses); rows.append(r); ids.append(sid)
-        print(f"{sid}  K={tr.shape[2]} | " + " | ".join(f"{k} {v[0]:.3f}" for k, v in r.items()), flush=True)
+        print(f"[{sid}] loading ...", flush=True); tr = load_subject(d, sid); y = np.load(os.path.join(d, f"{sid}_labels.npy")); ses = np.load(os.path.join(d, f"{sid}_session_ids.npy"))
+        if a.stride > 1: keep = np.arange(0, len(y), a.stride); tr, y, ses = tr[keep], y[keep], ses[keep]
+        print(f"[{sid}] N={len(y)} windows, K={tr.shape[2]} cells per chromophore", flush=True)
+        r = evaluate(tr, y, ses, joint=not a.skip_joint, log=lambda m: print(m, flush=True)); rows.append(r); ids.append(sid)
+        print(f"{sid} done ({len(rows)}/{len(a.subjects)}, {(time.time() - T0) / 60:.1f} min elapsed) | " + " | ".join(f"{k} {v[0]:.3f}" for k, v in r.items()), flush=True)
     if len(rows) < 6: sys.exit(f"{len(rows)} subjects; need >= 6 for the group test")
     report(rows, ids)
 
