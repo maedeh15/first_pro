@@ -156,8 +156,8 @@ def rho_rows(A, B_):
 
 
 def process_batch(model, rmodel, xe, xf, xc, xh, a, rng, want_shap, y=None):
-    sc, p0, c = explain(model, xe, xf, xc, xh, want_shap=want_shap)
-    rs, _, _ = explain(rmodel, xe, xf, xc, xh, cls=c, want_shap=want_shap)
+    sc, p0, c = explain(model, xe, xf, xc, xh, want_shap=want_shap, shap_samples=getattr(a, 'shap_samples', 6), n_bg=getattr(a, 'shap_bg', 6))
+    rs, _, _ = explain(rmodel, xe, xf, xc, xh, cls=c, want_shap=want_shap, shap_samples=getattr(a, 'shap_samples', 6), n_bg=getattr(a, 'shap_bg', 6))
     dele = deletion(model, xe, xf, xc, xh, c, p0, sc, a.k, rng, getattr(a, 'deletion', 'segments'))
     if y is not None and hasattr(a, '_prof'): _accumulate_profiles(a._prof, sc, y.numpy() if hasattr(y, 'numpy') else np.asarray(y))
     rec = {m: {"rand_rho": rho_rows(sc[m], rs[m])} for m in sc if not np.isnan(sc[m]).all()}
@@ -239,6 +239,7 @@ def main():
     p.add_argument("--batch-size", type=int, default=16); p.add_argument("--max-batches", type=int, default=3)
     p.add_argument("--k", type=int, default=3); p.add_argument("--pass-rho", type=float, default=0.3); p.add_argument("--seed", type=int, default=0)
     p.add_argument("--deletion", choices=("segments", "blocks"), default="segments", help="segments = bit-exact default (3 single segments); blocks = contiguous 3-segment interval on the continuous trace")
+    p.add_argument("--shap-samples", type=int, default=6, help="GradientShap samples (default 6 = the setting of all earlier runs; try 50 to test completeness)"); p.add_argument("--shap-bg", type=int, default=6, help="GradientShap baseline windows (default 6)")
     p.add_argument("--no-shap", dest="shap", action="store_false", help="skip GradientShap (needs captum)")
     p.add_argument("--adabn", action="store_true", default=True); p.add_argument("--no-adabn", dest="adabn", action="store_false")
     p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu"); p.add_argument("--self-test", action="store_true")
