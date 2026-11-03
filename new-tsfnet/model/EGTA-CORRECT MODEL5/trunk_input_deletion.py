@@ -32,6 +32,10 @@ def holm(p):
     return adj
 
 
+def _is_oom(e):
+    return "out of memory" in str(e).lower()
+
+
 def run_subject(sid, a):
     import torch
     from torch.utils.data import DataLoader, Subset
@@ -39,27 +43,43 @@ def run_subject(sid, a):
     from xai_trunk import trunk_state, load_checkpoint
     full = NBackDataset(os.path.join(a.data_root, sid), sid); S = full.fnirs.shape[1] if full.fnirs.ndim == 5 else 21
     conds = ["intact"] + list(FNIRS_CONDS) + list(EEG_BANDS); hit = {(c, h): [] for c in conds for h in HEADS}
+
+    def one_session(ts, bs):
+        """returns {(cond, head): [bool...]} for one held-out session at batch size bs; frees the GPU even when it fails"""
+        loc = {(c, h): [] for c in conds for h in HEADS}; m = None
+        try:
+            m = TSFNet(num_classes=3, fusion_combination="paper_mean", fnirs_num_segments=S, fnirs_temporal_align="egta", efgf_gate_mode="sigmoid", efgf_gate_init=-2.0).to(a.device)
+            m.load_state_dict(trunk_state(load_checkpoint(os.path.join(a.results_dir, f"{sid}_session{ts}_best.pt"), map_location=a.device)), strict=True); m.eval()
+            idx = np.flatnonzero(full.session_ids == ts)
+            if a.adabn: adapt_batchnorm_to_target(m, DataLoader(Subset(full, idx), batch_size=bs, shuffle=False), a.device, log_fn=lambda *x, **k: None)
+            with torch.no_grad():
+                for batch in DataLoader(Subset(full, idx[::a.stride]), batch_size=bs, shuffle=False):
+                    xe, xf, y, xc, xh = _unpack_batch(batch); y = y.numpy()
+                    xc = xc.to(a.device) if xc is not None else None; xh = xh.to(a.device) if xh is not None else None
+                    for c in conds:
+                        e, f = xe, xf
+                        if c in FNIRS_CONDS:
+                            f = xf.clone(); f[..., FNIRS_CONDS[c]] = 0.0
+                        elif c in EEG_BANDS:
+                            e = torch.from_numpy(eeg_delete(xe.numpy(), EEG_BANDS[c]))
+                        out = m(e.to(a.device), f.to(a.device), xc, xh)         # y_eeg, y_fusion, y_fnirs, y_pred, aux
+                        for h, k in zip(HEADS, (3, 0, 2)): loc[(c, h)] += list(out[k].argmax(1).cpu().numpy() == y)
+                        del out
+            return loc
+        finally:
+            del m
+            if torch.cuda.is_available(): torch.cuda.empty_cache()
+
     for ts in (1, 2, 3):
-        ck = os.path.join(a.results_dir, f"{sid}_session{ts}_best.pt")
-        if not os.path.isfile(ck): continue
-        m = TSFNet(num_classes=3, fusion_combination="paper_mean", fnirs_num_segments=S, fnirs_temporal_align="egta", efgf_gate_mode="sigmoid", efgf_gate_init=-2.0).to(a.device)
-        m.load_state_dict(trunk_state(load_checkpoint(ck, map_location=a.device)), strict=True); m.eval()
-        idx = np.flatnonzero(full.session_ids == ts)
-        if a.adabn: adapt_batchnorm_to_target(m, DataLoader(Subset(full, idx), batch_size=a.batch_size, shuffle=False), a.device, log_fn=lambda *x, **k: None)
-        dl = DataLoader(Subset(full, idx[::a.stride]), batch_size=a.batch_size, shuffle=False)
-        with torch.no_grad():
-            for batch in dl:
-                xe, xf, y, xc, xh = _unpack_batch(batch); y = y.numpy()
-                xc = xc.to(a.device) if xc is not None else None; xh = xh.to(a.device) if xh is not None else None
-                for c in conds:
-                    e, f = xe, xf
-                    if c in FNIRS_CONDS:
-                        f = xf.clone(); f[..., FNIRS_CONDS[c]] = 0.0
-                    elif c in EEG_BANDS:
-                        e = torch.from_numpy(eeg_delete(xe.numpy(), EEG_BANDS[c]))
-                    out = m(e.to(a.device), f.to(a.device), xc, xh)         # y_eeg, y_fusion, y_fnirs, y_pred, aux
-                    for h, k in zip(HEADS, (3, 0, 2)): hit[(c, h)] += list(out[k].argmax(1).cpu().numpy() == y)
-        del m
+        if not os.path.isfile(os.path.join(a.results_dir, f"{sid}_session{ts}_best.pt")): continue
+        bs = a.batch_size
+        while True:
+            try:
+                loc = one_session(ts, bs); break
+            except (RuntimeError, MemoryError) as e:                           # CUDA out of memory: retry the WHOLE session with half the batch (results are batch-size independent in eval mode)
+                if not _is_oom(e) or bs == 1: raise
+                bs = max(1, bs // 2); print(f"    [{sid} s{ts}] out of GPU memory -> retrying with batch size {bs}", flush=True)
+        for k_, v in loc.items(): hit[k_] += v
     return {c + "|" + h: float(np.mean(v)) for (c, h), v in hit.items() if v}
 
 
@@ -132,7 +152,7 @@ def self_test():
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("  python")[0], formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--results-dir"); ap.add_argument("--data-root"); ap.add_argument("--subjects", default="1-26"); ap.add_argument("--stride", type=int, default=2)
-    ap.add_argument("--batch-size", type=int, default=16); ap.add_argument("--adabn", action="store_true", default=True); ap.add_argument("--no-adabn", dest="adabn", action="store_false")
+    ap.add_argument("--batch-size", type=int, default=8); ap.add_argument("--adabn", action="store_true", default=True); ap.add_argument("--no-adabn", dest="adabn", action="store_false")
     ap.add_argument("--out-dir", default=None); ap.add_argument("--device", default=None); ap.add_argument("--self-test", action="store_true"); a = ap.parse_args()
     if a.self_test: return self_test()
     if not (a.results_dir and a.data_root): sys.exit("need --results-dir and --data-root")
