@@ -76,6 +76,13 @@ def fold_entropy(sid, ses, a):
 fold_entropy.cache = {}
 
 
+def _plain_log(ax):
+    """readable ticks on a log axis: plain numbers at 1-2-3-5 steps instead of a single 10^0 label"""
+    from matplotlib.ticker import FixedLocator, FuncFormatter, NullLocator
+    lo, hi = ax.get_ylim(); t = [v * 10.0 ** e for e in range(-3, 3) for v in (1, 2, 3, 5)]; t = [v for v in t if lo <= v <= hi]
+    ax.yaxis.set_major_locator(FixedLocator(t)); ax.yaxis.set_minor_locator(NullLocator()); ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:g}"))
+
+
 def figure(ck, ent, spectra, S, out_dir):
     import matplotlib.pyplot as plt
     from fig_style import apply, save, C, panel, strip, W2
@@ -91,7 +98,7 @@ def figure(ck, ent, spectra, S, out_dir):
         a.plot(x, sub.values, "o", color=C["blue"], ms=3.5, label="subject mean over folds")
         a.set_ylim(min(0.8, sub.min() - 0.02), 1.012); a.set_xticks(x); a.set_xticklabels([s[2:] for s in sub.index], rotation=90, fontsize=5.5)
         a.set_xlabel("subject (sorted)"); a.set_ylabel("normalised entropy  H / ln S"); a.legend(loc="lower right", frameon=False, fontsize=6)
-        a.set_title(f"EGTA attention: mean {ent.norm_entropy.mean():.3f}, alpha_eff = {alpha_eff(ent.norm_entropy.mean(), S):.0f}")
+        a.set_title(f"EGTA attention entropy: mean {ent.norm_entropy.mean():.3f}", fontsize=8, loc="left", x=0.02)
     else:
         a.text(0.5, 0.5, "run with --data-root\nfor the entropy panel", ha="center", va="center", transform=a.transAxes); a.set_axis_off()
     panel(a, "a")
@@ -99,18 +106,18 @@ def figure(ck, ent, spectra, S, out_dir):
     for i, (col, lab, colr) in enumerate((("egta_q_norm", "egta_q", C["blue"]), ("egta_k_norm", "egta_k (zero-init)", C["red"]))):
         v = ck[col].values; b.boxplot(v, positions=[i], widths=0.5, showfliers=False, medianprops=dict(color="k"), boxprops=dict(color=colr), whiskerprops=dict(color=colr), capprops=dict(color=colr))
         strip(b, i, v, colr, 0.15)
-    b.set_xticks([0, 1]); b.set_xticklabels(["egta_q", "egta_k\n(initialised at 0)"]); b.set_ylabel("Frobenius norm of the weight"); b.set_yscale("log"); b.set_title("EGTA projection norms (each dot: one checkpoint)"); panel(b, "b")
+    b.set_xticks([0, 1]); b.set_xticklabels(["egta_q", "egta_k\n(0 at initialisation)"]); b.set_ylabel("Frobenius norm of the weight"); b.set_yscale("log"); b.set_title("EGTA projection norms", fontsize=8, loc="left", x=0.02); _plain_log(b); panel(b, "b")
     # (c) gates
     for i, (col, lab, colr) in enumerate((("g_fusion", "g_fusion", C["green"]), ("g_fnirs", "g_fnirs", C["orange"]))):
         v = ck[col].values; c.boxplot(v, positions=[i], widths=0.5, showfliers=False, medianprops=dict(color="k"), boxprops=dict(color=colr), whiskerprops=dict(color=colr), capprops=dict(color=colr)); strip(c, i, v, colr, 0.15)
     c.axhline(0.5, color="k", ls="--", lw=0.8); c.text(1.45, 0.5, "initial 0.5", ha="right", va="bottom", fontsize=6); c.set_ylim(0, 1)
-    c.set_xticks([0, 1]); c.set_xticklabels(["CAFE gate\n(fusion)", "CAFE gate\n(fNIRS)"]); c.set_ylabel("sigmoid(gate)"); c.set_title("CAFE gates"); panel(c, "c")
+    c.set_xticks([0, 1]); c.set_xticklabels(["CAFE gate\n(fusion)", "CAFE gate\n(fNIRS)"]); c.set_ylabel("sigmoid(gate)"); c.set_title("CAFE gates (dot: one checkpoint)", fontsize=8, loc="left", x=0.02); panel(c, "c")
     # (d) spectrum
     if spectra:
         M = np.stack([s["spectrum"][:min(len(s["spectrum"]) for s in spectra)] for s in spectra]); x = np.arange(1, M.shape[1] + 1)
         d.fill_between(x, np.percentile(M, 5, 0), np.percentile(M, 95, 0), color=C["blue"], alpha=0.25, lw=0); d.plot(x, np.median(M, 0), color=C["blue"])
         er = np.array([s["effective_rank"] for s in spectra]); d.set_yscale("log"); d.set_xlabel("singular value index"); d.set_ylabel("sigma_i / sigma_1")
-        d.set_title(f"fusion_out_proj spectrum (median, 5-95%); effective rank {np.median(er):.0f} of {M.shape[1]}")
+        d.set_title(f"fusion_out_proj spectrum, eff. rank {np.median(er):.0f}/{M.shape[1]}", fontsize=8, loc="left", x=0.02); d.text(0.98, 0.97, "median, 5-95%", transform=d.transAxes, ha="right", va="top", fontsize=6.5); _plain_log(d)
     panel(d, "d"); fig.tight_layout(); return save(fig, out_dir, "fig_attention_health")
 
 
