@@ -150,6 +150,8 @@ HEMO_CACHE = {}
 
 def report(hemo_per, curves, eeg_per, out_dir):
     HEMO_CACHE.clear(); HEMO_CACHE.update(hemo_per or {}); out = {}
+    if hemo_per and curves:
+        ends = np.array([float(curves[s][0][-1]) for s in curves]); print(f"\nTIME COVERAGE of the stitched traces: last time point min {ends.min():.1f} s, median {np.median(ends):.1f} s, max {ends.max():.1f} s -> the task window actually averaged is 10 s to min(40 s, that end) per subject")
     if hemo_per:
         g = hemo_group(hemo_per); out["hemo"] = g; print(f"\nHAEMODYNAMICS, n = {len(hemo_per)}, global mean, task window; positive = first minus second")
         for k, v in g.items():

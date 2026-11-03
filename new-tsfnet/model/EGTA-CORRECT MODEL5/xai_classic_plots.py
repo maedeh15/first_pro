@@ -73,10 +73,17 @@ def collect_subject(sid, a):
             if bi >= a.max_batches: break
             xe, xf, y, xc, xh = _unpack_batch(batch); xe, xf = xe.to(a.device), xf.to(a.device)
             xc = xc.to(a.device) if xc is not None else None; xh = xh.to(a.device) if xh is not None else None
-            r = explain_spatial(m, xe, xf, xc, xh); r["y"] = y.numpy()
+            r = explain_spatial(m, xe, xf, xc, xh, shap_samples=a.shap_samples); r["y"] = y.numpy()
             for k, v in r.items(): acc.setdefault(k, []).append(v)
         del m
     return {k: np.concatenate(v) for k, v in acc.items()}
+
+
+def completeness(D):
+    """GradientShap should satisfy sum_k phi_k = f(x) - E f(baseline); report how badly the estimator misses it"""
+    d = D["fx"] - D["base"]; sm = D["shap_seg"].sum(1); res = d - sm
+    r = float(np.corrcoef(d, sm)[0, 1]) if len(d) > 2 else float("nan")
+    return f"completeness: median |f(x)-base| {np.median(np.abs(d)):.3f}, median |residual| {np.median(np.abs(res)):.3f}, corr(sum phi, f(x)-base) {r:+.2f}"
 
 
 # ------------------------------------------------------------------ plots
@@ -102,9 +109,9 @@ def plot_gradcam(D, out, sid=""):
             ax[r, 2].fill_between(x, lo, hi, color=CC[c], alpha=0.25, lw=0); ax[r, 2].plot(x, mu, color=CC[c])
             ax[r, 3].imshow(_up(D["cam_map"][m].mean((0, 1))), cmap="viridis", origin="upper"); ax[r, 3].set_xticks([]); ax[r, 3].set_yticks([])
             ax[r, 3].set_title(f"mean, n = {int(m.sum())}", fontsize=7)
-        ax[r, 0].set_ylabel(f"predicted {CLS[c]}\nrelative importance")
+        ax[r, 0].set_ylabel(f"predicted {CLS[c]}\nrelative importance"); ax[r, 0].set_ylim(0, 1.35)
         for j in (0, 2): ax[r, j].set_xlabel("Segment position (1 s steps)")
-    ax[0, 0].set_title("Example window", fontsize=8); ax[0, 1].set_title("Spatial map (mean of segments)", fontsize=7); ax[0, 2].set_title("Class mean, 95% CI", fontsize=8); ax[0, 0].legend(frameon=False, fontsize=6)
+    ax[0, 0].set_title("Example window", fontsize=8); ax[0, 1].set_title("Spatial map", fontsize=8); ax[0, 2].set_title("Class mean, 95% CI", fontsize=8); ax[0, 0].legend(frameon=False, fontsize=6, loc="upper right", ncol=2)
     fs.panel(ax[0, 0], "a"); fs.panel(ax[0, 1], "b"); fs.panel(ax[0, 2], "c"); fs.panel(ax[0, 3], "d")
     fig.suptitle(f"Grad-CAM on fnirs_branch.conv2 {sid} (adapted from Selvaraju et al. 2017; display-normalised per window)", fontsize=8); fig.tight_layout(); return fs.save(fig, out, "fig_gradcam")
 
@@ -131,7 +138,7 @@ def plot_shap_trunk(D, out, sid=""):
     ax[2].set_yticks(ys); ax[2].set_yticklabels([s[0] for s in steps], fontsize=6); ax[2].axvline(base, color="0.5", lw=0.6, ls=":"); ax[2].axvline(fx, color="k", lw=0.6)
     ax[2].set_xlabel(f"P(class): base {base:.3f} -> f(x) {fx:.3f}"); ax[2].set_title("one window", fontsize=8)
     for a, l in zip(ax, "abc"): fs.panel(a, l)
-    fig.suptitle(f"GradientShap on the trunk, segment level {sid} (n = {len(ph)} windows)", fontsize=8); fig.tight_layout(); return fs.save(fig, out, "fig_shap_trunk")
+    fig.suptitle(f"GradientShap on the trunk, segment level {sid} (n = {len(ph)} windows)\n{completeness(D)}", fontsize=7.5); fig.tight_layout(); return fs.save(fig, out, "fig_shap_trunk")
 
 
 def plot_shap_member(path, out):
@@ -144,7 +151,7 @@ def plot_shap_member(path, out):
         if ref: a.axhline(ref, ls="--", color="k", lw=0.6)
     mch = ch.mean(0); im = ax[2].imshow(mch, aspect="auto", cmap="viridis"); ax[2].set_yticks(range(4)); ax[2].set_yticklabels(names, fontsize=6.5); ax[2].set_xlabel("EEG channel index (data order, NOT verified)"); fig.colorbar(im, ax=ax[2], fraction=0.04, pad=0.02).set_label("mean |SHAP|", fontsize=6.5)
     for j, (k, col) in enumerate((("top", fs.C["red"]), ("rand", fs.C["grey"]), ("bottom", fs.C["blue"]))): fs.strip(ax[3], j, Z[k], color=col, width=0.15); fs.mean_ci(ax[3], j, Z[k], color="k")
-    ax[3].set_xticks(range(3)); ax[3].set_xticklabels(["top 5", "random 5", "bottom 5"], fontsize=6.5); ax[3].set_ylabel("accuracy lost deleting channels"); ax[3].axhline(0, color="k", lw=0.5)
+    ax[3].set_xticks(range(3)); ax[3].set_xticklabels(["top", "random", "bottom"], fontsize=6.5); ax[3].set_xlabel("5 channels deleted", fontsize=7); ax[3].set_ylabel("accuracy lost deleting channels"); ax[3].axhline(0, color="k", lw=0.5)
     for a, l in zip(ax, "abcd"): fs.panel(a, l)
     fig.suptitle(f"Exact SHAP of the Riemannian member (n = {n} subjects; linear model, closed form)", fontsize=8); fig.tight_layout(); return fs.save(fig, out, "fig_shap_member")
 
@@ -176,7 +183,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("  python")[0], formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("mode", nargs="?", choices=("collect", "plot")); ap.add_argument("--results-dir"); ap.add_argument("--data-root"); ap.add_argument("--subjects", default="1-3")
     ap.add_argument("--out-dir", default="classic"); ap.add_argument("--subject-id", default=None); ap.add_argument("--member-shap", default=None)
-    ap.add_argument("--batch-size", type=int, default=16); ap.add_argument("--max-batches", type=int, default=3); ap.add_argument("--device", default=None); ap.add_argument("--self-test", action="store_true"); a = ap.parse_args()
+    ap.add_argument("--batch-size", type=int, default=16); ap.add_argument("--max-batches", type=int, default=3); ap.add_argument("--shap-samples", type=int, default=6, help="GradientShap samples per input; completeness improves with more (try 50)"); ap.add_argument("--device", default=None); ap.add_argument("--self-test", action="store_true"); a = ap.parse_args()
     if a.self_test: return self_test()
     fs.apply(); os.makedirs(a.out_dir, exist_ok=True)
     if a.mode == "collect":
@@ -184,7 +191,7 @@ def main():
         import torch; a.device = a.device or ("cuda" if torch.cuda.is_available() else "cpu"); lo, hi = a.subjects.split("-") if "-" in a.subjects else (a.subjects, a.subjects)
         for i in range(int(lo), int(hi) + 1):
             sid = f"VP{i:03d}"
-            try: D = collect_subject(sid, a); np.savez(os.path.join(a.out_dir, f"classic_{sid}.npz"), **D); print(f"[{sid}] {len(D['y'])} windows saved", flush=True)
+            try: D = collect_subject(sid, a); np.savez(os.path.join(a.out_dir, f"classic_{sid}.npz"), **D); print(f"[{sid}] {len(D['y'])} windows saved; GradientShap " + completeness(D), flush=True)
             except Exception as e: print(f"[{sid}] SKIP -- {type(e).__name__}: {e}")
     elif a.mode == "plot":
         sid = a.subject_id or sorted(os.path.basename(p)[8:13] for p in glob.glob(os.path.join(a.out_dir, "classic_*.npz")))[0]
