@@ -26,6 +26,29 @@ STEP, SEG = 10, 30
 RIDGE_F = 1e-2
 
 
+def _sandwich(Mi, C):
+    """Mi C Mi for every window; matmul is O(d^3) per window, the 3-operand np.einsum used in check_riemannian_eeg.py is O(d^4) (28 -> 56 cells = 16x slower)"""
+    return np.matmul(np.matmul(Mi, C), Mi)
+
+
+def fast_whiten(C, M):
+    return _sandwich(R._eigfun(M, lambda w: w ** -0.5), C)
+
+
+def fast_karcher_mean(C, iters=30, tol=1e-9):
+    """same iteration as check_riemannian_eeg.karcher_mean, with matmul instead of einsum (identical result up to rounding)"""
+    M = C.mean(0)
+    for _ in range(iters):
+        Mh = R._eigfun(M, np.sqrt); Mi = R._eigfun(M, lambda w: w ** -0.5)
+        S = R._eigfun(_sandwich(Mi, C), np.log).mean(0)
+        M = Mh @ R._eigfun(S, np.exp, clamp=False) @ Mh
+        if np.linalg.norm(S) < tol: break
+    return M
+
+
+R.whiten, R.karcher_mean = fast_whiten, fast_karcher_mean            # domain_features() resolves both through the module globals
+
+
 def rebuild_pooled(win, mask=None):
     """win (n,S,H,W,30,C) -> (n,C,K,L): continuous trace, 2x2-pooled cells, cells outside the signal mask dropped"""
     n, S, H, W, T, C = win.shape; L = (S - 1) * STEP + T
@@ -104,6 +127,12 @@ def self_test():
     rng = np.random.RandomState(0)
     win = rng.randn(2, 21, 8, 8, 30, 2).astype(np.float32); win[:, :, :2, :, :, :] = 0
     a, m = rebuild_pooled(win); assert a.shape == (2, 2, int(m.sum()), 230) and m.sum() < 16, (a.shape, m.sum())
+    A = rng.randn(20, 6, 40); C0 = np.einsum("nct,ndt->ncd", A, A) / 40; M0 = C0.mean(0)
+    ref_w = np.einsum("ij,njk,kl->nil", *(lambda Mi: (Mi, C0, Mi))(R._eigfun(M0, lambda w: w ** -0.5))); assert np.allclose(fast_whiten(C0, M0), ref_w, atol=1e-9)
+    Mi = lambda M: R._eigfun(M, lambda w: w ** -0.5); Mk = C0.mean(0)
+    for _ in range(30):
+        Mh = R._eigfun(Mk, np.sqrt); Sx = R._eigfun(np.einsum("ij,njk,kl->nil", Mi(Mk), C0, Mi(Mk)), np.log).mean(0); Mk = Mh @ R._eigfun(Sx, np.exp, clamp=False) @ Mh
+    assert np.allclose(fast_karcher_mean(C0), Mk, atol=1e-8); print("[0] matmul whiten and Frechet mean equal the einsum reference")
     print("[1] rebuild + 2x2 pooling + empty-cell mask:", a.shape)
     assert abs(slope(np.arange(230.0)[None]) [0] - 1.0) < 1e-9; print("[2] slope exact")
     res = {}
