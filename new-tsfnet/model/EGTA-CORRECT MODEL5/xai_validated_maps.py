@@ -70,8 +70,12 @@ def explain(model, xe, xf, xc, xh, cls=None, n_bg=6, shap_samples=6, want_shap=T
             def forward(s, x, e, k, q): return s.m(e, x, k, q)[3]
         nb = min(n_bg, B)
         bg = xf[torch.randperm(B, device=xf.device)[:nb]].detach()
-        at = GradientShap(_F(model)).attribute(xf.detach(), baselines=bg, n_samples=shap_samples, stdevs=0.05, target=c,
-                                               additional_forward_args=(xe, xc, xh))
+        # captum expands the batch to B x n_samples copies of the WHOLE input (EEG included): 50 samples at batch 16 needed > 20 GB. Samples are drawn independently,
+        # so averaging independent chunks of at most CHUNK samples is the same estimator with the memory of the proven 6-sample setting.
+        CHUNK = 6; parts, left = [], shap_samples
+        while left > 0:
+            n_ = min(CHUNK, left); parts.append((n_, GradientShap(_F(model)).attribute(xf.detach(), baselines=bg, n_samples=n_, stdevs=0.05, target=c, additional_forward_args=(xe, xc, xh)).detach())); left -= n_
+        at = sum(n_ * a_ for n_, a_ in parts) / shap_samples
         out["gradient_shap"] = per_segment_mean(at.detach()).cpu().numpy()
     else:
         out["gradient_shap"] = np.full((B, S), np.nan)

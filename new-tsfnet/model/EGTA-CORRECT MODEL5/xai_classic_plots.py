@@ -48,7 +48,10 @@ def explain_spatial(model, xe, xf, xc, xh, n_bg=6, shap_samples=6):
         def __init__(s, m): super().__init__(); s.m = m
         def forward(s, x, e, k, q): return s.m(e, x, k, q)[3]
     bg = xf[torch.randperm(B, device=xf.device)[:min(n_bg, B)]].detach()
-    at = GradientShap(_F(model)).attribute(xf.detach(), baselines=bg, n_samples=shap_samples, stdevs=0.05, target=c, additional_forward_args=(xe, xc, xh))
+    CHUNK = 6; parts, left = [], shap_samples                                   # chunked: captum copies the whole input (EEG too) n_samples times
+    while left > 0:
+        n_ = min(CHUNK, left); parts.append((n_, GradientShap(_F(model)).attribute(xf.detach(), baselines=bg, n_samples=n_, stdevs=0.05, target=c, additional_forward_args=(xe, xc, xh)).detach())); left -= n_
+    at = sum(n_ * a_ for n_, a_ in parts) / shap_samples
     shap_seg = at.detach().sum(dim=tuple(range(2, at.dim()))).cpu().numpy()
     with torch.no_grad():                                                      # E[f(baseline)]: P(target) with the window's own EEG and each baseline fNIRS window
         base = torch.stack([pc(model(xe, bg[j:j + 1].expand_as(xf), xc, xh)[3], c) for j in range(len(bg))]).mean(0).cpu().numpy()
