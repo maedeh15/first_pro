@@ -119,10 +119,10 @@ def figures(hemo, eeg, curves, out_dir):
     import fig_style as fs; fs.apply(); import matplotlib.pyplot as plt; res = []
     if hemo:
         fig, ax = plt.subplots(1, 3, figsize=(fs.W2, 2.7), gridspec_kw={"width_ratios": [2, 2, 1.6]}); cc = {0: fs.C["blue"], 1: fs.C["orange"], 2: fs.C["red"]}
-        ids = list(curves)
+        ids = list(curves); Tc = min(len(curves[s][0]) for s in ids)                                  # subjects differ in how many windows (time points) they have: common length
         for ci, a in enumerate(ax[:2]):
             for c in CLS:
-                A = np.array([curves[s][1][c][ci] for s in ids if c in curves[s][1]]); t = curves[ids[0]][0][:A.shape[1]]
+                A = np.array([curves[s][1][c][ci][:Tc] for s in ids if c in curves[s][1]]); t = curves[ids[0]][0][:Tc]
                 sub = slice(None, None, 10); lo, hi = np.array([fs.boot_ci(A[:, j], n=500) for j in range(0, A.shape[1], 10)]).T
                 a.fill_between(t[sub], lo, hi, color=cc[c], alpha=0.2, lw=0); a.plot(t[sub], A.mean(0)[sub], color=cc[c], label=CLS[c])
             a.axvline(0, color="k", lw=0.5); a.set_xlabel("Time from block onset (s)"); a.set_ylabel(("HbO", "HbR")[ci] + " (global mean, a.u.)"); a.set_title(("HbO", "HbR")[ci], fontsize=8)
@@ -166,8 +166,8 @@ def report(hemo_per, curves, eeg_per, out_dir):
 
 
 # ---------------------------------------------------------------- self-test
-def _fake_subject(d, sid, rng, amp):
-    R, S, H, L = 8, 21, 4, (21 - 1) * STEP + SEG; os.makedirs(d, exist_ok=True); fw, y, ses, tid, eeg = [], [], [], [], []
+def _fake_subject(d, sid, rng, amp, R=8):
+    S, H, L = 21, 4, 21, 4, (21 - 1) * STEP + SEG; os.makedirs(d, exist_ok=True); fw, y, ses, tid, eeg = [], [], [], [], []
     t_all = lambda r: T0 + r + np.arange(L) / FS_F
     for s in (1, 2):
         for k, c in enumerate([0, 1, 2, 0, 1, 2]):
@@ -189,7 +189,7 @@ def self_test():
     a, b = rng.randn(200) + 2, rng.randn(200); assert auc(a, b) > 0.85 and abs(auc(b, b.copy()) - .5) < .01; assert np.allclose(holm([.01, .04, .03]), [.03, .06, .06]); print("[2] AUC and Holm")
     d = tempfile.mkdtemp(); hp, ep, cv = {}, {}, {}
     for i in range(10):
-        sid = f"VP{i:03d}"; _fake_subject(os.path.join(d, sid), sid, rng, amp=[0.0, 1.0 + .1 * rng.randn(), 0.5 + .1 * rng.randn()])
+        sid = f"VP{i:03d}"; _fake_subject(os.path.join(d, sid), sid, rng, amp=[0.0, 1.0 + .1 * rng.randn(), 0.5 + .1 * rng.randn()], R=8 if i % 2 else 7)   # unequal lengths across subjects, as in the real data
         tt, mc, me = hemo_subject(os.path.join(d, sid), sid, task=(5, 20)); hp[sid] = me; cv[sid] = (tt, mc); ep[sid] = eeg_subject(os.path.join(d, sid), sid)
     g = hemo_group(hp); assert g["HbO:2back-0back"]["mean_diff"] > 0.5 and g["HbO:3back-2back"]["mean_diff"] < 0 and g["inverted_U_supported"], g
     assert g["HbR:2back-0back"]["mean_diff"] < 0; print("[3] injected inverted-U in HbO recovered, HbR opposite")
