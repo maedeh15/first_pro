@@ -167,7 +167,7 @@ def report(hemo_per, curves, eeg_per, out_dir):
 
 # ---------------------------------------------------------------- self-test
 def _fake_subject(d, sid, rng, amp, R=8):
-    S, H, L = 21, 4, 21, 4, (21 - 1) * STEP + SEG; os.makedirs(d, exist_ok=True); fw, y, ses, tid, eeg = [], [], [], [], []
+    S, H, L = 21, 4, (21 - 1) * STEP + SEG; os.makedirs(d, exist_ok=True); fw, y, ses, tid, eeg = [], [], [], [], []
     t_all = lambda r: T0 + r + np.arange(L) / FS_F
     for s in (1, 2):
         for k, c in enumerate([0, 1, 2, 0, 1, 2]):
