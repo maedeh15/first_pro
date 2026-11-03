@@ -161,7 +161,7 @@ _arg_parser.add_argument("--per-session-norm", type=str, default="on", choices=[
                                "per-session/per-segment re-normalization layer and no transductive "
                                "use of the held-out session's unlabeled inputs. 'off' writes to a "
                                "SEPARATE output folder.")
-_arg_parser.add_argument("--fnirs-bandpass", type=str, default="off", choices=["on", "off", "hp001", "lp02", "lp05", "lp001"],
+_arg_parser.add_argument("--fnirs-bandpass", type=str, default="off", choices=["on", "off", "hp001", "lp01", "lp02", "lp05", "lp001"],
                           help="priority-ablation5 toggle (isolated variable): 'off' (default) = "
                                "prior behavior bit-for-bit, ENABLE_FNIRS_BANDPASS=False (the "
                                "project's current accepted baseline, per the MSTFDN large-"
@@ -284,7 +284,8 @@ if _FNIRS_BANDPASS_CLI == "on":
     OUTPUT_PATH = OUTPUT_PATH + "_fnirsBP"
 elif _FNIRS_BANDPASS_CLI != "off":
     # fNIRS filter-component decomposition (extra modes, 'on'/'off' unchanged bit-for-bit): which part of the 0.01-0.1 Hz band-pass matters?
-    #   hp001 = high-pass 0.01 Hz only (drift removed, everything faster kept)      lp02 / lp05 = low-pass 0.2 / 0.5 Hz only (no drift removal)
+    #   hp001 = high-pass 0.01 Hz only (drift removed, everything faster kept)      lp01 = low-pass 0.1 Hz only (no drift removal)  <- with hp001 these two
+    #   are the two HALVES of the 0.01-0.1 Hz band-pass ('on'); lp02 / lp05 = low-pass 0.2 / 0.5 Hz only (no drift removal)
     #   lp001 = low-pass 0.01 Hz only (the SLOW-BAND-ONLY control for time-in-session trends)
     OUTPUT_PATH = OUTPUT_PATH + "_fnirs" + _FNIRS_BANDPASS_CLI.upper()
 
@@ -749,7 +750,7 @@ def fnirs_filter(data, fs, mode):
     """mode 'on' -> the unchanged 0.01-0.1 Hz band-pass above; the other modes are single-sided Butterworth filters of the same design order, zero-phase (filtfilt)"""
     if mode == "on":
         return fnirs_bandpass(data, fs)
-    spec = {"hp001": ("highpass", 0.01), "lp02": ("lowpass", 0.2), "lp05": ("lowpass", 0.5), "lp001": ("lowpass", 0.01)}[mode]
+    spec = {"hp001": ("highpass", 0.01), "lp01": ("lowpass", 0.1), "lp02": ("lowpass", 0.2), "lp05": ("lowpass", 0.5), "lp001": ("lowpass", 0.01)}[mode]   # lp001 = 0.01 Hz (slow-band-only control), NOT 0.1
     b, a = butter(FNIRS_BP_ORDER, spec[1] / (0.5 * fs), btype=spec[0])
     out = np.zeros_like(data)
     for ch in range(data.shape[1]):
