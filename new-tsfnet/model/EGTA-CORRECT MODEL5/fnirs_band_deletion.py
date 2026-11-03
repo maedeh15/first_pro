@@ -50,6 +50,10 @@ def self_test():
     assert pk(sp(y), 1.2) < 0.1 * pk(sp(tr), 1.2) and pk(sp(y), 0.3) > 0.6 * pk(sp(tr), 0.3), "the cardiac tone must go, the 0.3 Hz tone must stay"
     z = to_trace(delete_band(x, BANDS["sham 3.5-4.5"])); assert pk(sp(z), 1.2) > 0.7 * pk(sp(tr), 1.2) and pk(sp(z), 4.0) < 0.3 * pk(sp(tr), 4.0)
     print("[1] segment/trace round trip exact; the cardiac band removes the 1.2 Hz tone and keeps 0.3 Hz; the sham band removes only the 4 Hz tone")
+    import tempfile
+    rng2 = np.random.RandomState(1); per = {f"VP{i:03d}": {"intact": 0.6 + .05 * rng2.randn(), **{k: 0.58 + .05 * rng2.randn() for k in BANDS}} for i in range(1, 15)}
+    d = tempfile.mkdtemp(); save_outputs(per, d); assert os.path.isfile(os.path.join(d, "fig_band_deletion.png")) and os.path.isfile(os.path.join(d, "band_deletion_per_subject.csv"))
+    print("[2] per-subject CSV and figure written")
     print("SELFTEST PASSED")
 
 
@@ -80,11 +84,32 @@ def run_subject(sid, a):
     return {k: float(np.mean(v)) for k, v in hit.items() if v}
 
 
+def save_outputs(per, out_dir):
+    """per-subject CSV + thesis figure: (a) loss by band with sham, per-subject dots, mean, 95% CI; (b) intact accuracy vs loss of the <0.1 Hz band."""
+    import csv, json
+    os.makedirs(out_dir, exist_ok=True); import fig_style as fs; fs.apply(); import matplotlib.pyplot as plt
+    ids = list(per); names = list(BANDS)
+    with open(os.path.join(out_dir, "band_deletion_per_subject.csv"), "w", newline="") as f:
+        w = csv.writer(f); w.writerow(["subject", "intact"] + names)
+        for s_ in ids: w.writerow([s_, per[s_]["intact"]] + [per[s_][k] for k in names])
+    loss = {k: np.array([per[s_]["intact"] - per[s_][k] for s_ in ids]) for k in names}
+    fig, ax = plt.subplots(1, 2, figsize=(fs.W2, 3.0), gridspec_kw={"width_ratios": [1.6, 1]})
+    for i, k in enumerate(names):
+        col = fs.C["grey"] if "sham" in k else fs.C["blue"]
+        fs.strip(ax[0], i, loss[k] * 100, color=col); fs.mean_ci(ax[0], i, loss[k] * 100, color="k")
+    ax[0].axhline(0, color="k", lw=0.6); ax[0].set_xticks(range(len(names))); ax[0].set_xticklabels([k.replace(" ", "\n", 1) for k in names], fontsize=6.5)
+    ax[0].set_ylabel("Accuracy loss after deleting band (pp)"); ax[0].set_title(f"n = {len(ids)} subjects, test-time deletion", fontsize=8); fs.panel(ax[0], "a")
+    k0 = "below 0.1"; ia = np.array([per[s_]["intact"] for s_ in ids]) * 100
+    ax[1].scatter(ia, loss[k0] * 100, s=14, color=fs.C["blue"]); ax[1].axhline(0, color="k", lw=0.6)
+    ax[1].set_xlabel("Intact accuracy (%)"); ax[1].set_ylabel("Loss, band < 0.1 Hz (pp)"); fs.panel(ax[1], "b")
+    fig.tight_layout(); print("figure:", fs.save(fig, out_dir, "fig_band_deletion"))
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("  python")[0], formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--results-dir"); ap.add_argument("--data-root"); ap.add_argument("--subjects", default="1-26"); ap.add_argument("--stride", type=int, default=2)
     ap.add_argument("--batch-size", type=int, default=16); ap.add_argument("--adabn", action="store_true", default=True); ap.add_argument("--no-adabn", dest="adabn", action="store_false")
-    ap.add_argument("--device", default=None); ap.add_argument("--self-test", action="store_true"); a = ap.parse_args()
+    ap.add_argument("--out-dir", default=None); ap.add_argument("--device", default=None); ap.add_argument("--self-test", action="store_true"); a = ap.parse_args()
     if a.self_test: return self_test()
     if not (a.results_dir and a.data_root): sys.exit("need --results-dir and --data-root")
     import torch; a.device = a.device or ("cuda" if torch.cuda.is_available() else "cpu")
@@ -103,6 +128,7 @@ def main():
         d = intact - np.array([per[s][k] for s in ids]); pw = wilcoxon(d).pvalue if np.any(d != 0) else 1.0
         ds = d + sham; ps = wilcoxon(ds).pvalue if (k != "sham 3.5-4.5" and np.any(ds != 0)) else float("nan")
         print(f"  {k:22s} {d.mean():+10.4f} {int((d > 0).sum()):>9d}/{len(d):<5d} {pw:11.3g} {ds.mean():+16.4f} {ps:8.3g}")
+    if a.out_dir: save_outputs(per, a.out_dir)
     print("  loss = intact minus deleted accuracy (positive = the model used that band). Two-sided Wilcoxon, exploratory, uncorrected. The sham row calibrates the method.")
 
 

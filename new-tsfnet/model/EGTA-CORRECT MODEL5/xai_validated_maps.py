@@ -84,14 +84,44 @@ def explain(model, xe, xf, xc, xh, cls=None, n_bg=6, shap_samples=6, want_shap=T
     return out, p0.detach(), c
 
 
-def deletion(model, xe, xf, xc, xh, c, p0, scores, k, rng):
-    """mean drop of P(c) when top/random/bottom-k segments are replaced by the batch-mean segment; per method, per window"""
+STEP_, SEG_ = 10, 30
+
+
+def _trace(x):
+    B, S, H, W, T, C = x.shape; L = (S - 1) * STEP_ + T
+    tr = x.new_zeros((B, H, W, L, C))
+    for k in range(S): tr[:, :, :, k * STEP_:k * STEP_ + T, :] = x[:, k]
+    return tr
+
+
+def _segments(tr, S, T=SEG_):
+    return torch.stack([tr[:, :, :, k * STEP_:k * STEP_ + T, :] for k in range(S)], 1)
+
+
+def block_sets(sc, k, rng):
+    """contiguous k-segment intervals: start of the highest-scoring, lowest-scoring and a random interval, per window"""
+    B, S = sc.shape; cs = np.stack([sc[:, i:i + k].sum(1) for i in range(S - k + 1)], 1)
+    return {"top": cs.argmax(1), "bottom": cs.argmin(1), "random": rng.randint(0, S - k + 1, B)}
+
+
+def deletion(model, xe, xf, xc, xh, c, p0, scores, k, rng, mode="segments"):
+    """mean drop of P(c) when top/random/bottom-k segments are replaced by the batch-mean segment; per method, per window.
+    mode='blocks': the contiguous k-segment interval is replaced on the continuous 23 s trace (removes the overlap-leak of neighbours)."""
     B, S = scores["attention"].shape
     rep = xf.mean(dim=0, keepdim=True).expand_as(xf)
+    if mode == "blocks":
+        tr, trm = _trace(xf), _trace(rep)
     res = {}
     with torch.no_grad():
         for m, sc in scores.items():
             if np.isnan(sc).all():
+                continue
+            if mode == "blocks":
+                for nm, st in block_sets(sc, k, rng).items():
+                    mask = torch.zeros(B, 1, 1, tr.shape[3], 1, dtype=torch.bool, device=xf.device)
+                    for b in range(B): mask[b, 0, 0, int(st[b]) * STEP_:int(st[b]) * STEP_ + (k - 1) * STEP_ + SEG_, 0] = True
+                    xa = _segments(torch.where(mask, trm, tr), S)
+                    res.setdefault(m, {})[nm] = (p0 - pc(model(xe, xa, xc, xh)[3], c)).cpu().numpy()
                 continue
             order = np.argsort(-sc, axis=1)
             sets = {"top": order[:, :k], "bottom": order[:, -k:], "random": np.stack([rng.choice(S, k, replace=False) for _ in range(B)])}
@@ -101,6 +131,18 @@ def deletion(model, xe, xf, xc, xh, c, p0, scores, k, rng):
                 xa = torch.where(mask.view(B, S, 1, 1, 1, 1), rep, xf)
                 res.setdefault(m, {})[nm] = (p0 - pc(model(xe, xa, xc, xh)[3], c)).cpu().numpy()
     return res
+
+
+PROFILES = {}
+
+
+def _accumulate_profiles(store, sc, y):
+    """per true class: sum of within-window z-scored importance per segment (profile over the 21 segment positions) and window count"""
+    for m, v in sc.items():
+        if np.isnan(v).all(): continue
+        z = (v - v.mean(1, keepdims=True)) / (v.std(1, keepdims=True) + 1e-12)
+        for cl in np.unique(y):
+            e = store.setdefault(m, {}).setdefault(int(cl), [np.zeros(v.shape[1]), 0]); e[0] += z[y == cl].sum(0); e[1] += int((y == cl).sum())
 
 
 def rho_rows(A, B_):
@@ -113,10 +155,11 @@ def rho_rows(A, B_):
     return r
 
 
-def process_batch(model, rmodel, xe, xf, xc, xh, a, rng, want_shap):
+def process_batch(model, rmodel, xe, xf, xc, xh, a, rng, want_shap, y=None):
     sc, p0, c = explain(model, xe, xf, xc, xh, want_shap=want_shap)
     rs, _, _ = explain(rmodel, xe, xf, xc, xh, cls=c, want_shap=want_shap)
-    dele = deletion(model, xe, xf, xc, xh, c, p0, sc, a.k, rng)
+    dele = deletion(model, xe, xf, xc, xh, c, p0, sc, a.k, rng, getattr(a, 'deletion', 'segments'))
+    if y is not None and hasattr(a, '_prof'): _accumulate_profiles(a._prof, sc, y.numpy() if hasattr(y, 'numpy') else np.asarray(y))
     rec = {m: {"rand_rho": rho_rows(sc[m], rs[m])} for m in sc if not np.isnan(sc[m]).all()}
     for m in rec:
         if m != "occlusion":
@@ -132,7 +175,7 @@ def run_subject(sid, a, rng):
     from xai_trunk import trunk_state, load_checkpoint, set_xai_output
     full = NBackDataset(os.path.join(a.data_root, sid), sid)
     S = full.fnirs.shape[1] if full.fnirs.ndim == 5 else 21
-    acc = {}
+    acc = {}; a._prof = {}
     for ts in (1, 2, 3):
         ck = os.path.join(a.results_dir, f"{sid}_session{ts}_best.pt")
         if not os.path.isfile(ck):
@@ -153,11 +196,12 @@ def run_subject(sid, a, rng):
             xe, xf, y, xc, xh = _unpack_batch(batch)
             xe, xf = xe.to(a.device), xf.to(a.device)
             xc = xc.to(a.device) if xc is not None else None; xh = xh.to(a.device) if xh is not None else None
-            rec = process_batch(model, rmodel, xe, xf, xc, xh, a, rng, a.shap)
+            rec = process_batch(model, rmodel, xe, xf, xc, xh, a, rng, a.shap, y)
             for m, d in rec.items():
                 for k_, v in d.items():
                     acc.setdefault(m, {}).setdefault(k_, []).extend(v)
         del model, rmodel
+    PROFILES[sid] = {m: {str(cl): (e[0] / max(e[1], 1)).tolist() for cl, e in d.items()} for m, d in a._prof.items()}
     return {m: {k_: float(np.mean(v)) if len(v) else float("nan") for k_, v in d.items()} for m, d in acc.items()}
 
 
@@ -194,6 +238,7 @@ def main():
     p.add_argument("--results-dir"); p.add_argument("--data-root"); p.add_argument("--subjects", default="1-26"); p.add_argument("--out-dir", default=None)
     p.add_argument("--batch-size", type=int, default=16); p.add_argument("--max-batches", type=int, default=3)
     p.add_argument("--k", type=int, default=3); p.add_argument("--pass-rho", type=float, default=0.3); p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--deletion", choices=("segments", "blocks"), default="segments", help="segments = bit-exact default (3 single segments); blocks = contiguous 3-segment interval on the continuous trace")
     p.add_argument("--no-shap", dest="shap", action="store_false", help="skip GradientShap (needs captum)")
     p.add_argument("--adabn", action="store_true", default=True); p.add_argument("--no-adabn", dest="adabn", action="store_false")
     p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu"); p.add_argument("--self-test", action="store_true")
@@ -222,6 +267,7 @@ def main():
         sys.exit(f"ERROR: {len(per)} usable subjects; group tests need >= 6 (per-subject lines above are valid).")
     res = summarise(per, a.pass_rho)
     json.dump({"per_subject": per, "group": res, "config": vars(a)}, open(os.path.join(out_dir, "validated_maps_summary.json"), "w"), indent=2, default=float)
+    json.dump(PROFILES, open(os.path.join(out_dir, "segment_profiles_by_class.json"), "w"))
     with open(os.path.join(out_dir, "validated_maps_group.csv"), "w", newline="") as f:
         w = csv.writer(f); keys = list(next(iter(res.values())))
         w.writerow(["method"] + keys)
@@ -264,7 +310,19 @@ def self_test():
     rec2 = {m: {k_: float(np.mean(v)) if len(v) else float("nan") for k_, v in d.items()} for m, d in rec.items()}
     per = {f"VP{i:03d}": rec2 for i in range(6)}
     res = summarise(per, 0.3, verbose=False); assert set(res) >= {"occlusion", "attention"}
-    print("[3] group summary runs\nSELFTEST PASSED")
+    # block mode: interval replaced on the continuous trace; the mean-replacement of ALL windows must give identical input to identity when xf equals its batch mean
+    xc0 = _segments(torch.randn(2, 16, 16, 230, 2), 21)                      # overlap-consistent segments built from one trace
+    assert torch.allclose(_segments(_trace(xc0), 21), xc0, atol=1e-6), "trace round trip"
+    sc0 = {"attention": np.random.RandomState(1).rand(6, 21)}; c0 = torch.zeros(6, dtype=torch.long)
+    with torch.no_grad(): p00 = pc(model(xe, xf, None, None)[3], c0)
+    d_b = deletion(model, xe, xf, None, None, c0, p00, sc0, 3, np.random.RandomState(0), "blocks")
+    assert set(d_b["attention"]) == {"top", "bottom", "random"} and np.isfinite(d_b["attention"]["top"]).all()
+    st = block_sets(sc0["attention"], 3, np.random.RandomState(0))
+    assert all(abs(sc0["attention"][b, st["top"][b]:st["top"][b] + 3].sum() - max(sc0["attention"][b, i:i + 3].sum() for i in range(19))) < 1e-12 for b in range(6))
+    print("[3] block deletion: trace round trip exact, top interval is the true best contiguous triple")
+    a2 = argparse.Namespace(k=3, deletion="blocks", _prof={}); rec3 = process_batch(model, rm.eval(), xe, xf, None, None, a2, rng, want, torch.tensor([0, 1, 2, 0, 1, 2]))
+    assert len(a2._prof["attention"]) == 3 and a2._prof["attention"][0][0].shape == (21,)
+    print("[4] class profiles accumulate\nSELFTEST PASSED")
 
 
 if __name__ == "__main__":

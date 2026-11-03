@@ -45,6 +45,24 @@ def load_kernels(results_dir, subjects):
     return ks
 
 
+def figure(trained, rng, out_dir, n_null=200):
+    """gain vs frequency (log x), trained kernels (median, IQR) against random-init null (median, 5-95%); inset-free, thesis-ready"""
+    import fig_style as fs; fs.apply(); import matplotlib.pyplot as plt
+    os.makedirs(out_dir, exist_ok=True); shp = trained[0].shape; fan = int(np.prod(shp[1:]))
+    f, g = gain(temporal_kernels(np.concatenate(trained, 0))); m = (f > 0) & (f <= 5)
+    gn = np.concatenate([gain(temporal_kernels(rng.randn(*shp) / np.sqrt(fan)))[1] for _ in range(n_null)], 0)
+    ref = lambda G: G[:, np.argmin(np.abs(f - 1.0))][:, None] + 1e-12
+    fig, ax = plt.subplots(1, 2, figsize=(fs.W2, 2.8))
+    for G, col, lab in ((gn / ref(gn), fs.C["grey"], "random-init null"), (g / ref(g), fs.C["blue"], "trained")):
+        lo, md, hi = np.percentile(G[:, m], [25, 50, 75], axis=0); ax[0].fill_between(f[m], lo, hi, color=col, alpha=0.2, lw=0); ax[0].plot(f[m], md, color=col, label=lab)
+    ax[0].set_xscale("log"); ax[0].set_yscale("log"); ax[0].set_xlabel("Frequency (Hz)"); ax[0].set_ylabel("Gain relative to 1 Hz (median, IQR)"); ax[0].legend(frameon=False); fs.panel(ax[0], "a")
+    at = lambda G, x: G[:, np.argmin(np.abs(f - x))]
+    r_tr = np.log10((at(g, 0.1) + 1e-12) / (at(g, 1.0) + 1e-12)); r_nl = np.log10((at(gn, 0.1) + 1e-12) / (at(gn, 1.0) + 1e-12)); bins = np.linspace(-1.5, 1.5, 31)
+    ax[1].hist(r_nl, bins, color=fs.C["grey"], alpha=0.6, density=True, label="null"); ax[1].hist(r_tr, bins, color=fs.C["blue"], alpha=0.6, density=True, label="trained")
+    ax[1].axvline(0, color="k", lw=0.6); ax[1].set_xlabel("log10 [gain(0.1 Hz) / gain(1 Hz)]"); ax[1].set_ylabel("Density"); ax[1].legend(frameon=False); fs.panel(ax[1], "b")
+    fig.tight_layout(); print("figure:", fs.save(fig, out_dir, "fig_kernel_response"))
+
+
 def report(trained, rng, n_null=300):
     shp = trained[0].shape; fan = int(np.prod(shp[1:]))
     K = temporal_kernels(np.concatenate(trained, 0)); dt = describe(K)
@@ -67,18 +85,19 @@ def self_test():
     d = describe(temporal_kernels(lp)); assert d["lowpass"] > 0.95 and d["rel"][2] > 1.0, d
     hp = lp * (-1.0) ** np.arange(T); d2 = describe(temporal_kernels(hp)); assert d2["lowpass"] < 0.2, d2
     print("[1] a moving-average kernel is classified low-pass, an alternating-sign kernel is not")
-    report([lp], rng, 50); print("[2] report runs\nSELFTEST PASSED")
+    report([lp], rng, 50); import tempfile; figure([lp], rng, tempfile.mkdtemp(), 20); print("[2] report and figure run\nSELFTEST PASSED")
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("  python")[0], formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--results-dir"); ap.add_argument("--subjects", default="1-26"); ap.add_argument("--self-test", action="store_true"); a = ap.parse_args()
+    ap.add_argument("--results-dir"); ap.add_argument("--subjects", default="1-26"); ap.add_argument("--out-dir", default=None); ap.add_argument("--self-test", action="store_true"); a = ap.parse_args()
     if a.self_test: return self_test()
     if not a.results_dir: sys.exit("need --results-dir")
     lo, hi = (a.subjects.split("-") + [a.subjects])[:2] if "-" in a.subjects else (a.subjects, a.subjects)
     ks = load_kernels(a.results_dir, [f"VP{i:03d}" for i in range(int(lo), int(hi) + 1)])
     if not ks: sys.exit("no checkpoints found")
     report(ks, np.random.RandomState(0))
+    if a.out_dir: figure(ks, np.random.RandomState(1), a.out_dir)
 
 
 if __name__ == "__main__":
