@@ -89,6 +89,8 @@ def fig_stability(path, folds, out):
     ax[0].bar(range(len(d)), d["icc_2_1"], color=col); ax[0].set_xticks(range(len(d))); ax[0].set_xticklabels([s[2:] for s in d["subject"]], rotation=90, fontsize=5.5)
     for y in (0.5, 0.75, 0.9): ax[0].axhline(y, ls=":", color="k", lw=0.5)
     ax[0].set_ylabel("ICC(2,1) of attention across seeds"); ax[0].set_xlabel("Subject")
+    from matplotlib.patches import Patch
+    ax[0].legend(handles=[Patch(color=fs.C["red"], label="poor < 0.5"), Patch(color=fs.C["orange"], label="moderate 0.5-0.75"), Patch(color=fs.C["sky"], label="good 0.75-0.9"), Patch(color=fs.C["green"], label="excellent > 0.9")], frameon=False, fontsize=6, loc="upper left", title="Koo and Li", title_fontsize=6)
     ax[1].scatter(d["icc_2_1"], d["mean_pairwise_rho"], s=14, color=fs.C["blue"]); ax[1].set_xlabel("ICC(2,1)"); ax[1].set_ylabel("Mean pairwise rho")
     if OK(folds):
         fo = pd.read_csv(folds); sc = next(c for c in fo.columns if c.lower() in ("subject", "subject_id", "sid"))
