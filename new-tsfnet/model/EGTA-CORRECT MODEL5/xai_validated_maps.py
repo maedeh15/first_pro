@@ -266,8 +266,9 @@ def main():
     if len(per) < 6:
         sys.exit(f"ERROR: {len(per)} usable subjects; group tests need >= 6 (per-subject lines above are valid).")
     res = summarise(per, a.pass_rho)
-    json.dump({"per_subject": per, "group": res, "config": vars(a)}, open(os.path.join(out_dir, "validated_maps_summary.json"), "w"), indent=2, default=float)
+    cfg = {k: v for k, v in vars(a).items() if not k.startswith("_")}                 # a._prof holds numpy arrays: never serialise it
     json.dump(PROFILES, open(os.path.join(out_dir, "segment_profiles_by_class.json"), "w"))
+    json.dump({"per_subject": per, "group": res, "config": cfg}, open(os.path.join(out_dir, "validated_maps_summary.json"), "w"), indent=2, default=float)
     with open(os.path.join(out_dir, "validated_maps_group.csv"), "w", newline="") as f:
         w = csv.writer(f); keys = list(next(iter(res.values())))
         w.writerow(["method"] + keys)
@@ -322,7 +323,8 @@ def self_test():
     print("[3] block deletion: trace round trip exact, top interval is the true best contiguous triple")
     a2 = argparse.Namespace(k=3, deletion="blocks", _prof={}); rec3 = process_batch(model, rm.eval(), xe, xf, None, None, a2, rng, want, torch.tensor([0, 1, 2, 0, 1, 2]))
     assert len(a2._prof["attention"]) == 3 and a2._prof["attention"][0][0].shape == (21,)
-    print("[4] class profiles accumulate\nSELFTEST PASSED")
+    import tempfile; cfg = {k: v for k, v in vars(a2).items() if not k.startswith("_")}; json.dumps({"config": cfg, "p": {m: {str(c): (e[0] / max(e[1], 1)).tolist() for c, e in d.items()} for m, d in a2._prof.items()}}, default=float)
+    print("[4] class profiles accumulate and the summary serialises\nSELFTEST PASSED")
 
 
 if __name__ == "__main__":
