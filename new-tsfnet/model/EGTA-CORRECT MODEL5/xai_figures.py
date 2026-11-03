@@ -70,8 +70,13 @@ def fig_gradient(path, out):
 def fig_consensus(path, out):
     import pandas as pd, matplotlib.pyplot as plt
     d = pd.read_csv(path); cols = [c for c in d.columns if c.endswith("_mean_rho")]
-    nice = lambda c: c[:-9].replace("integrated_gradients", "IG").replace("input_gradient", "gradient").replace("_", " vs ", 1).replace("attention", "EGTA attention", 1) if False else c[:-9]
-    names = [c[:-9].replace("_", " / ") for c in cols]; fig, ax = plt.subplots(figsize=(fs.W1 * 1.5, 2.2))
+    KNOWN = {"attention": "EGTA attention", "input_gradient": "Input gradient", "integrated_gradients": "Integrated gradients", "grad_x_input": "Gradient x input", "grad_cam": "Grad-CAM", "gradient_shap": "GradientShap", "occlusion": "Occlusion"}
+    def pair_label(c):
+        core = c[:-len("_mean_rho")]
+        for a in sorted(KNOWN, key=len, reverse=True):
+            if core.startswith(a + "_") and core[len(a) + 1:] in KNOWN: return f"{KNOWN[a]} vs {KNOWN[core[len(a) + 1:]].lower() if False else KNOWN[core[len(a) + 1:]]}"
+        return core.replace("_", " ")
+    names = [pair_label(c) for c in cols]; fig, ax = plt.subplots(figsize=(fs.W1 * 1.7, 2.2))
     _rows(ax, names, [d[c] for c in cols], [fs.C["purple"]] * len(cols), xlabel="Per-subject mean Spearman rho between methods"); ax.axvline(0, color="k", lw=0.6)
     ax.set_title(f"Agreement between explanation methods (n = {len(d)})", fontsize=8); fig.tight_layout(); return fs.save(fig, out, "fig_consensus")
 
