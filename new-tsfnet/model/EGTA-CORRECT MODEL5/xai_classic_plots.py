@@ -114,7 +114,7 @@ def plot_gradcam(D, out, sid=""):
             ax[r, 3].set_title(f"mean, n = {int(m.sum())}", fontsize=7)
         ax[r, 0].set_ylabel(f"predicted {CLS[c]}\nrelative importance"); ax[r, 0].set_ylim(0, 1.35)
         for j in (0, 2): ax[r, j].set_xlabel("Segment position (1 s steps)")
-    ax[0, 0].set_title("Example window", fontsize=8); ax[0, 1].set_title("Spatial map", fontsize=8); ax[0, 2].set_title("Class mean, 95% CI", fontsize=8); ax[0, 0].legend(frameon=False, fontsize=6, loc="upper right", ncol=2)
+    ax[0, 0].set_title("Example window", fontsize=8); ax[0, 1].set_title("Spatial map", fontsize=8); ax[0, 2].set_title("Class mean, 95% CI", fontsize=8); ax[0, 0].legend(frameon=False, fontsize=5.5, loc="upper center", ncol=2, handlelength=1.2, columnspacing=0.8, borderaxespad=0.1)
     fs.panel(ax[0, 0], "a"); fs.panel(ax[0, 1], "b"); fs.panel(ax[0, 2], "c"); fs.panel(ax[0, 3], "d")
     fig.suptitle(f"Grad-CAM on fnirs_branch.conv2 {sid} (adapted from Selvaraju et al. 2017; display-normalised per window)", fontsize=8); fig.tight_layout(); return fs.save(fig, out, "fig_gradcam")
 
