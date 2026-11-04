@@ -8,6 +8,12 @@ PRE-STATED PREDICTIONS (written before looking at the output; direction is recor
            band power: theta (4-8 Hz) up with load, alpha (8-13 Hz) down with load, theta/alpha log-ratio up with load.  Effect = pairwise AUC (0v2, 0v3, 2v3)
            per subject (windows pooled over sessions after per-session z-scoring), AUC != 0.5 tested over subjects.  Extra: |AUC-0.5| of the ratio vs of alpha alone
            (does the ratio add anything over its parts?).
+[H-region] (needs --channel-names = channels.txt of check_channel_order.py, order CONFIRMED there; run with --regional-only) EEG, REGIONAL band power, same AUC/Holm machinery, pre-stated:
+           frontal theta UP with load (AUC > 0.5 for 0v2, 0v3), parietal alpha DOWN with load (AUC < 0.5).  Regions (fixed in this file BEFORE any result, 10-05 names of the 28 channels):
+           frontal = Fp1, AFF5h, AFz, F1, Fp2, AFF6h, F2 ; parietal = P7, P3, Pz, POz, P4, P8.  Holm over these 2 features x 3 pairs = 6 tests.
+           Exploratory controls (reported, not part of the Holm family): parietal theta and frontal alpha, and the SPECIFICITY contrasts frontal-theta minus parietal-theta and
+           parietal-alpha minus frontal-alpha (is the effect regional, or just the global effect seen at every site?).  Positions are standard 10-05 (not subject-specific); band power is of the
+           channel-averaged PSD of the region; per-session z-scored; windows overlap, AUC is per subject.
 Windows overlap strongly (1 s step); AUC is computed per subject so the group test is not inflated by that. fNIRS window rank within a trial gives its time
 (offset = -2 s + rank x 1 s); rejected windows would shift this slightly (state it).
   python claims_signal_tests.py --data-root "..." --subjects 1-26 --out-dir "...\\claims_signal"
@@ -114,6 +120,75 @@ def eeg_group(per):
     return out
 
 
+# ---------------------------------------------------------------- regional EEG
+FRONTAL = ["Fp1", "AFF5h", "AFz", "F1", "Fp2", "AFF6h", "F2"]
+PARIETAL = ["P7", "P3", "Pz", "POz", "P4", "P8"]
+REG_FEATS = ("frontal_theta", "frontal_alpha", "parietal_theta", "parietal_alpha")
+PRESTATED = (("frontal_theta", "up"), ("parietal_alpha", "down"))
+
+
+def region_groups(names):
+    miss = [n for n in FRONTAL + PARIETAL if n not in names]
+    if miss: raise SystemExit(f"channel names missing from the channel list: {miss}; the list must be the 28 names of check_channel_order.py in data order")
+    return {"frontal": [names.index(n) for n in FRONTAL], "parietal": [names.index(n) for n in PARIETAL]}
+
+
+def region_band_logs(x, groups):
+    """x (n,28,2000) -> {feature: (n,)} log band power of the region-averaged PSD"""
+    f, p = welch(x, fs=FS_E, nperseg=400, noverlap=200, axis=-1); out = {}
+    for reg, idx in groups.items():
+        pr = p[:, idx, :].mean(axis=1)
+        for b in ("theta", "alpha"):
+            lo, hi = BANDS[b]; out[f"{reg}_{b}"] = np.log(pr[:, (f >= lo) & (f < hi)].sum(1) + 1e-30)
+    return out
+
+
+def regional_subject(sd, sid, groups, chunk=64):
+    x = np.load(os.path.join(sd, f"{sid}_eeg_channel_windows.npy"), mmap_mode="r"); y = np.load(os.path.join(sd, f"{sid}_labels.npy")); ses = np.load(os.path.join(sd, f"{sid}_session_ids.npy")); F = {}
+    for i in range(0, len(y), chunk):
+        for k, v in region_band_logs(np.asarray(x[i:i + chunk], dtype=np.float64), groups).items(): F.setdefault(k, []).append(v)
+    F = {k: np.concatenate(v) for k, v in F.items()}
+    for k in F:
+        for s_ in np.unique(ses): m = ses == s_; F[k][m] = (F[k][m] - F[k][m].mean()) / (F[k][m].std() + 1e-12)
+    return {k: {p: auc(F[k][y == b], F[k][y == a]) for p, (a, b) in PAIRS.items() if (y == a).any() and (y == b).any()} for k in F}
+
+
+def regional_group(per):
+    ids = list(per); out = {}; rows = []
+    for k, _ in PRESTATED:
+        for p in PAIRS:
+            v = np.array([per[s][k][p] for s in ids]); rows.append((k, p, float(v.mean()), int((v > 0.5).sum()), wil(v - 0.5)))
+    ph = holm([r[4] for r in rows])
+    for r, q in zip(rows, ph): out[f"{r[0]}:{r[1]}"] = dict(family="pre-stated", mean_auc=r[2], subjects_above_half=r[3], n=len(ids), p=r[4], p_holm=float(q))
+    for k in ("parietal_theta", "frontal_alpha"):
+        for p in PAIRS:
+            v = np.array([per[s][k][p] for s in ids]); out[f"{k}:{p}"] = dict(family="exploratory control", mean_auc=float(v.mean()), subjects_above_half=int((v > 0.5).sum()), n=len(ids), p=wil(v - 0.5))
+    for p in PAIRS:
+        d1 = np.array([per[s]["frontal_theta"][p] - per[s]["parietal_theta"][p] for s in ids]); d2 = np.array([per[s]["parietal_alpha"][p] - per[s]["frontal_alpha"][p] for s in ids])
+        out[f"specificity_theta(frontal-parietal):{p}"] = dict(mean=float(d1.mean()), p=wil(d1)); out[f"specificity_alpha(parietal-frontal):{p}"] = dict(mean=float(d2.mean()), p=wil(d2))
+    return out
+
+
+def regional_report(per, out_dir=None):
+    g = regional_group(per); print(f"\nEEG REGIONAL BAND POWER, n = {len(per)}; AUC = P(second class of the pair higher). Pre-stated: frontal theta > 0.5 (up), parietal alpha < 0.5 (down)")
+    for k, v in g.items():
+        if "mean_auc" in v: print(f"  {k:24s} AUC {v['mean_auc']:.3f}  >0.5 in {v['subjects_above_half']}/{v['n']}  p {v['p']:.3g}" + (f"  Holm {v['p_holm']:.3g}" if "p_holm" in v else "  (exploratory)"))
+        else: print(f"  {k:46s} mean {v['mean']:+.4f}  p {v['p']:.3g}")
+    print("  reading: a pre-stated effect counts only if it has the predicted direction and Holm < 0.05; 'specificity' rows say whether the region differs from the other region (paired Wilcoxon, exploratory; expected sign: theta(frontal-parietal) POSITIVE, alpha(parietal-frontal) NEGATIVE).")
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True); json.dump({"eeg_regional": g}, open(os.path.join(out_dir, "claims_signal_regional.json"), "w"), indent=2)
+        import fig_style as fs; fs.apply(); import matplotlib.pyplot as plt
+        ids = list(per); lab = {"frontal_theta": "frontal\ntheta", "frontal_alpha": "frontal\nalpha", "parietal_theta": "parietal\ntheta", "parietal_alpha": "parietal\nalpha"}
+        col = {"frontal_theta": fs.C["red"], "parietal_alpha": fs.C["blue"], "frontal_alpha": fs.C["grey"], "parietal_theta": fs.C["grey"]}
+        fig, ax = plt.subplots(1, 3, figsize=(fs.W2, 2.7), sharey=True)
+        for a_, p in zip(ax, PAIRS):
+            for j, k in enumerate(REG_FEATS):
+                v = np.array([per[s][k][p] for s in ids]); fs.strip(a_, j, v, color=col[k], width=0.15); fs.mean_ci(a_, j, v, color="k")
+            a_.axhline(0.5, ls="--", color="k", lw=0.6); a_.set_xticks(range(4)); a_.set_xticklabels([lab[k] for k in REG_FEATS], fontsize=6.3); a_.set_title(p, fontsize=8)
+        ax[0].set_ylabel("AUC (second class of the pair higher)"); [fs.panel(a_, l) for a_, l in zip(ax, "abc")]
+        fig.suptitle(f"Regional EEG band power as load marker (n = {len(ids)} subjects; coloured = pre-stated)", fontsize=8); fig.tight_layout(); print("figure:", fs.save(fig, out_dir, "fig_eeg_regional"))
+
+
 # ---------------------------------------------------------------- figures
 def figures(hemo, eeg, curves, out_dir):
     import fig_style as fs; fs.apply(); import matplotlib.pyplot as plt; res = []
@@ -196,16 +271,42 @@ def self_test():
     g = hemo_group(hp); assert g["HbO:2back-0back"]["mean_diff"] > 0.5 and g["HbO:3back-2back"]["mean_diff"] < 0 and g["inverted_U_supported"], g
     assert g["HbR:2back-0back"]["mean_diff"] < 0; print("[3] injected inverted-U in HbO recovered, HbR opposite")
     e = eeg_group(ep); assert e["theta:0v3"]["mean_auc"] > 0.9 and e["alpha:0v3"]["mean_auc"] < 0.1 and e["theta/alpha:0v3"]["p_holm"] < 0.05; print("[4] injected theta-up / alpha-down recovered")
-    report(hp, cv, ep, tempfile.mkdtemp()); print("[5] report and figures written\nSELFTEST PASSED")
+    report(hp, cv, ep, tempfile.mkdtemp()); print("[5] report and figures written")
+    names = ["Fp1", "AFF5h", "AFz", "F1", "FC5", "FC1", "T7", "C3", "Cz", "CP5", "CP1", "P7", "P3", "Pz", "POz", "O1", "Fp2", "AFF6h", "F2", "FC2", "FC6", "C4", "T8", "CP2", "CP6", "P4", "P8", "O2"]
+    gr = region_groups(names); fr, pa = gr["frontal"], gr["parietal"]; rp = {}
+    for i in range(10):
+        sid = f"VQ{i:03d}"; sd = os.path.join(d, sid); os.makedirs(sd, exist_ok=True); y, ses, eeg = [], [], []; tt = np.arange(2000) / FS_E
+        for s_ in (1, 2):
+            for c in [0, 1, 2] * 4:
+                th = np.zeros(28); th[fr] = [0.0, 1.0, 1.6][c]; th += 0.3; al = np.zeros(28); al[pa] = [1.6, 1.0, 0.0][c]; al += 0.3
+                eeg.append((th[:, None] * np.sin(2 * np.pi * 6 * tt)[None] + al[:, None] * np.sin(2 * np.pi * 10 * tt + 1)[None] + 0.3 * rng.randn(28, 2000)).astype(np.float32)); y.append(c); ses.append(s_)
+        np.save(os.path.join(sd, f"{sid}_eeg_channel_windows.npy"), np.stack(eeg)); np.save(os.path.join(sd, f"{sid}_labels.npy"), np.array(y)); np.save(os.path.join(sd, f"{sid}_session_ids.npy"), np.array(ses))
+        rp[sid] = regional_subject(sd, sid, gr)
+    g = regional_group(rp); assert g["frontal_theta:0v3"]["mean_auc"] > 0.9 and g["parietal_alpha:0v3"]["mean_auc"] < 0.1 and g["frontal_theta:0v3"]["p_holm"] < 0.05, g
+    assert abs(g["parietal_theta:0v3"]["mean_auc"] - 0.5) < 0.2 and g["specificity_theta(frontal-parietal):0v3"]["mean"] > 0.2, g
+    print("[6] regional test recovers an injected frontal-theta rise and parietal-alpha fall, with controls near 0.5 and positive specificity")
+    regional_report(rp, tempfile.mkdtemp()); print("[7] regional report and figure written\nSELFTEST PASSED")
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("  python")[0], formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--data-root"); ap.add_argument("--subjects", default="1-26"); ap.add_argument("--out-dir", default=None); ap.add_argument("--task-start", type=float, default=10); ap.add_argument("--task-end", type=float, default=40)
-    ap.add_argument("--skip", choices=("none", "hemo", "eeg"), default="none"); ap.add_argument("--self-test", action="store_true"); a = ap.parse_args()
+    ap.add_argument("--skip", choices=("none", "hemo", "eeg"), default="none"); ap.add_argument("--channel-names", default=None, help="channels.txt (28 names, data order, confirmed by check_channel_order.py)"); ap.add_argument("--regional-only", action="store_true", help="only the regional EEG test (needs --channel-names)"); ap.add_argument("--self-test", action="store_true"); a = ap.parse_args()
     if a.self_test: return self_test()
     if not a.data_root: sys.exit("need --data-root")
     lo, hi = a.subjects.split("-") if "-" in a.subjects else (a.subjects, a.subjects); hp, ep, cv = {}, {}, {}
+    if a.regional_only or a.channel_names:
+        if not a.channel_names: sys.exit("--regional-only needs --channel-names")
+        names = [t.strip() for t in open(a.channel_names, encoding="utf-8").read().replace(",", "\n").split("\n") if t.strip()]
+        if len(names) != 28: sys.exit(f"--channel-names has {len(names)} names, expected 28")
+        gr = region_groups(names); rp = {}
+        for i in range(int(lo), int(hi) + 1):
+            sid = f"VP{i:03d}"
+            try: rp[sid] = regional_subject(os.path.join(a.data_root, sid), sid, gr); print(f"[{sid}] regional done", flush=True)
+            except Exception as e: print(f"[{sid}] SKIP -- {type(e).__name__}: {e}")
+        if len(rp) < 6: sys.exit("fewer than 6 subjects")
+        regional_report(rp, a.out_dir)
+        if a.regional_only: return
     for i in range(int(lo), int(hi) + 1):
         sid = f"VP{i:03d}"; sd = os.path.join(a.data_root, sid)
         try:
