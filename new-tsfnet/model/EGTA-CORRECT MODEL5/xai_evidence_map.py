@@ -9,16 +9,17 @@ import fig_style as fs
 # verdict codes: ok = supported / validated, part = partial / weak / mixed, no = rejected / invalid, na = not tested
 COL = {"ok": "#009E73", "part": "#E69F00", "no": "#D55E00", "na": "#BBBBBB"}
 QS = ["Q1  Is the explanation trustworthy?", "Q2  What does the model use?", "Q3  Do literature claims hold?"]
-ROWS = ["fNIRS branch, segment level\n(Grad-CAM, occlusion)", "fNIRS branch, gradient methods\nand GradientShap", "fNIRS head, linear variant\n(exact segment evidence, seed 999)", "EGTA attention", "CAFE gates",
+ROWS = ["fNIRS branch, segment level\n(Grad-CAM, occlusion)", "fNIRS branch, gradient methods\nand GradientShap", "fNIRS head, linear variant\n(exact segment evidence, seed 999)", "EGTA attention", "CAFE gates", "EFGF scalars (gamma, alpha)",
         "Deep EEG branch", "Linear Riemannian member", "Time axis (segment profile)"]
 CELLS = [
-    [("ok", "passes V1 + V2\nrho 0.30 with occlusion"), ("ok", "both chromophores;\ncontent < 0.1 Hz"), ("no", "HbO rise with load,\ninverted U: not supported")],
+    [("ok", "passes V1 + V2\nrho 0.30 with occlusion"), ("ok", "both chromophores;\ncontent < 0.1 Hz"), ("no", "HbO rises with load: reversed;\ninverted U: not supported")],
     [("part", "weak (rho 0.04-0.09);\ncompleteness violated"), ("na", "not analysed"), ("na", "-")],
     [("ok", "exact additivity; rho 0.49 with\nocclusion; top-3 deletion 26/26"), ("part", "late segments weigh more;\nfusion path matters in 7 subjects"), ("na", "stability over seeds\nnot tested")],
     [("no", "near-uniform\n(entropy 0.983)"), ("na", "-"), ("na", "-")],
     [("no", "stay near 0.5"), ("na", "-"), ("na", "-")],
-    [("na", "not explained directly\n(head accuracy ~0.48)"), ("ok", "alpha band used"), ("part", "alpha down: yes;\ntheta up: no")],
-    [("part", "exact SHAP; channel ranking\ncausal only for coefficients"), ("ok", "inter-channel covariance,\nalpha / theta"), ("part", "frontal theta: yes;\nparietal alpha: no")],
+    [("na", "not tested\n(script ready)"), ("na", "-"), ("na", "-")],
+    [("na", "not explained directly\n(head accuracy ~0.48)"), ("ok", "alpha band used"), ("part", "alpha down: yes (global);\nfrontal theta: 0v2 only")],
+    [("part", "exact SHAP; channel ranking\ncausal only for coefficients"), ("ok", "inter-channel covariance,\nalpha / theta"), ("part", "SHAP: frontal theta yes,\nparietal alpha no (sign ambiguity)")],
     [("part", "exploratory;\nsegment-4 spike (0-back)"), ("part", "late segments weigh more;\nnot class-specific"), ("na", "-")],
 ]
 
